@@ -275,6 +275,47 @@ Refs from `snapshot` are saved to `/tmp/tauri-connector-refs.json` and persist a
 | `TAURI_CONNECTOR_HOST` | `127.0.0.1` | Plugin host |
 | `TAURI_CONNECTOR_PORT` | `9555` | Plugin port |
 
+## Claude Code Skill (Recommended)
+
+The easiest way to use tauri-connector with Claude Code is to install the included skill. It teaches Claude how to use all CLI commands, MCP tools, and common workflows automatically.
+
+### Install the Skill
+
+```bash
+# Copy to your Claude Code skills directory
+cp -r skill/SKILL.md ~/.claude/skills/tauri-connector/SKILL.md
+```
+
+Or create the directory first if it doesn't exist:
+
+```bash
+mkdir -p ~/.claude/skills/tauri-connector
+cp skill/SKILL.md ~/.claude/skills/tauri-connector/SKILL.md
+```
+
+### What the Skill Provides
+
+Once installed, Claude Code will automatically use tauri-connector when you ask it to:
+
+- "Test the login flow in the tool app"
+- "Click the Add New button"
+- "What's on the current page?"
+- "Fill in the search box with 'aspirin'"
+- "Check the console logs for errors"
+- "Take a DOM snapshot"
+
+The skill covers:
+
+- **CLI workflow**: `snapshot` -> ref-based interactions (`click @e5`, `fill @e3 "text"`)
+- **WebSocket API**: Direct connection for scripts and automation
+- **MCP server**: Tool definitions for AI agent integration
+- **Common workflows**: Form filling, navigation testing, debugging
+- **Troubleshooting**: Connection issues, stale refs, port conflicts
+
+### Sharing the Skill
+
+The skill file is included in the repo at `skill/SKILL.md`. Others can install it by cloning the repo and copying the file to their `~/.claude/skills/tauri-connector/` directory.
+
 ## MCP Server Setup
 
 ### Install
@@ -382,6 +423,8 @@ tauri-connector/
 |       |-- index.ts           # Command dispatcher + handlers
 |       |-- client.ts          # WebSocket client
 |       '-- snapshot.ts        # Ref system + DOM snapshot builder
+|-- skill/                     # Claude Code skill
+|   '-- SKILL.md               # Auto-triggers on Tauri app interaction
 |-- LICENSE
 '-- README.md
 ```
