@@ -51,7 +51,7 @@ In your `src-tauri/Cargo.toml`:
 
 ```toml
 [dependencies]
-tauri-plugin-connector = { git = "https://github.com/peilinwu/tauri-connector", branch = "main" }
+tauri-plugin-connector = { git = "https://github.com/dickwu/tauri-connector", branch = "main" }
 ```
 
 Or for local development:
@@ -375,7 +375,7 @@ The bridge JS also auto-pushes DOM on page load and significant mutations when `
 
 ```diff
 - tauri-plugin-mcp-bridge = "0.10"
-+ tauri-plugin-connector = { git = "https://github.com/peilinwu/tauri-connector" }
++ tauri-plugin-connector = { git = "https://github.com/dickwu/tauri-connector" }
 ```
 
 2. Update plugin registration:
