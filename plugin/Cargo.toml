@@ -2,8 +2,13 @@
 name = "tauri-plugin-connector"
 version = "0.1.0"
 edition = "2024"
-description = "MCP-compatible Tauri plugin with reliable JS execution via WebSocket bridge"
+description = "MCP-compatible Tauri v2 plugin with reliable JS execution via WebSocket bridge - fixes __TAURI__ not available bug"
 license = "MIT"
+repository = "https://github.com/dickwu/tauri-connector"
+homepage = "https://github.com/dickwu/tauri-connector"
+keywords = ["tauri", "mcp", "plugin", "webview", "automation"]
+categories = ["development-tools", "gui"]
+readme = "../README.md"
 links = "tauri-plugin-connector"
 
 [lib]
