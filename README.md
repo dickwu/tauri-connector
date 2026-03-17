@@ -357,24 +357,6 @@ The bridge JS also auto-pushes DOM on page load and significant mutations when `
 
 Alt+Shift+Click any element in the app to capture its metadata. Retrieve via `webview_get_pointed_element` MCP tool or `get pointed` CLI command.
 
-## Migrating from tauri-plugin-mcp-bridge
-
-```diff
-# Cargo.toml
-- tauri-plugin-mcp-bridge = "0.10"
-+ tauri-plugin-connector = "0.1"
-
-# lib.rs
-- builder = builder.plugin(tauri_plugin_mcp_bridge::init());
-+ builder = builder.plugin(tauri_plugin_connector::init());
-
-# capabilities/default.json
-- "mcp-bridge:default"
-+ "connector:default"
-```
-
-Update MCP server config to point to port `9555`.
-
 ## Project Structure
 
 ```
