@@ -30,3 +30,5 @@ uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 thiserror = "2"
+axum = "0.8"
+tokio-stream = "0.1"
