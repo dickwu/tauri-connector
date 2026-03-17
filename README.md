@@ -79,7 +79,9 @@ The plugin auto-pushes DOM snapshots from the frontend via Tauri's native IPC (`
 
 ## Quick Start
 
-### 1. Add the Tauri Plugin
+> **Using Claude Code?** Install the skill for automated setup — see [Claude Code Skill](#claude-code-skill-recommended) below. The skill teaches Claude how to set up and use tauri-connector automatically.
+
+### 1. Add the plugin
 
 ```toml
 # src-tauri/Cargo.toml
@@ -87,62 +89,37 @@ The plugin auto-pushes DOM snapshots from the frontend via Tauri's native IPC (`
 tauri-plugin-connector = "0.1"
 ```
 
-Or from git:
-
-```toml
-tauri-plugin-connector = { git = "https://github.com/dickwu/tauri-connector" }
-```
-
-### 2. Register the Plugin
+### 2. Register it (debug-only)
 
 ```rust
-// src-tauri/src/lib.rs
+// src-tauri/src/lib.rs — place BEFORE .invoke_handler()
 #[cfg(debug_assertions)]
 {
     builder = builder.plugin(tauri_plugin_connector::init());
 }
 ```
 
-The plugin only runs in debug builds -- it won't affect production.
-
-### 3. Add Permissions
+### 3. Add permission
 
 ```json
-// src-tauri/capabilities/default.json
-{
-  "permissions": [
-    "connector:default"
-  ]
-}
+// src-tauri/capabilities/default.json — add to permissions array
+"connector:default"
 ```
 
 ### 4. Set `withGlobalTauri` (recommended)
 
 ```json
 // src-tauri/tauri.conf.json
-{
-  "app": {
-    "withGlobalTauri": true
-  }
-}
+{ "app": { "withGlobalTauri": true } }
 ```
 
-This enables the auto-push DOM feature. The core JS execution works without it.
-
-### 5. Run Your App
+### 5. Run
 
 ```bash
 bun run tauri dev
 ```
 
-You should see:
-
-```
-[connector][bridge] Internal bridge on port 9300
-[connector] Plugin initialized for 'Your App' (com.your.app) on 0.0.0.0:9555
-[connector][server] Listening on 0.0.0.0:9555
-[connector][bridge] Webview client connected from 127.0.0.1:xxxxx
-```
+Look for: `[connector] Plugin initialized ... on 0.0.0.0:9555`
 
 ## CLI Usage
 
@@ -277,44 +254,30 @@ Refs from `snapshot` are saved to `/tmp/tauri-connector-refs.json` and persist a
 
 ## Claude Code Skill (Recommended)
 
-The easiest way to use tauri-connector with Claude Code is to install the included skill. It teaches Claude how to use all CLI commands, MCP tools, and common workflows automatically.
+Install the included skill to let Claude Code automatically set up and use tauri-connector. The skill includes step-by-step setup automation, all CLI commands, MCP tools, and common workflows.
 
-### Install the Skill
-
-```bash
-# Copy to your Claude Code skills directory
-cp -r skill/SKILL.md ~/.claude/skills/tauri-connector/SKILL.md
-```
-
-Or create the directory first if it doesn't exist:
+### Install
 
 ```bash
 mkdir -p ~/.claude/skills/tauri-connector
 cp skill/SKILL.md ~/.claude/skills/tauri-connector/SKILL.md
 ```
 
-### What the Skill Provides
+### What It Does
 
-Once installed, Claude Code will automatically use tauri-connector when you ask it to:
+Once installed, Claude will automatically:
 
-- "Test the login flow in the tool app"
-- "Click the Add New button"
+- **Set up the plugin** in any Tauri project when asked ("set up tauri-connector", "add connector to this app")
+- **Use the CLI** for DOM snapshots and element interactions
+- **Debug issues** using console logs, app state, and JS execution
+- **Automate testing** with snapshot -> click/fill/verify workflows
+
+Just say things like:
+- "Set up tauri-connector in this project"
 - "What's on the current page?"
-- "Fill in the search box with 'aspirin'"
-- "Check the console logs for errors"
-- "Take a DOM snapshot"
-
-The skill covers:
-
-- **CLI workflow**: `snapshot` -> ref-based interactions (`click @e5`, `fill @e3 "text"`)
-- **WebSocket API**: Direct connection for scripts and automation
-- **MCP server**: Tool definitions for AI agent integration
-- **Common workflows**: Form filling, navigation testing, debugging
-- **Troubleshooting**: Connection issues, stale refs, port conflicts
-
-### Sharing the Skill
-
-The skill file is included in the repo at `skill/SKILL.md`. Others can install it by cloning the repo and copying the file to their `~/.claude/skills/tauri-connector/` directory.
+- "Click the Add New button"
+- "Fill the search box with 'aspirin'"
+- "Check console logs for errors"
 
 ## MCP Server Setup
 

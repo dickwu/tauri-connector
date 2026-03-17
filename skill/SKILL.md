@@ -1,14 +1,15 @@
 ---
 name: tauri-connector
-description: "Interact with Tauri v2 desktop apps via tauri-connector. Use this skill when the user wants to: test Tauri UI, automate webview interactions, take DOM snapshots, click/hover/fill elements, inspect app state, read console logs, execute JS in webviews, or debug Tauri desktop apps. Also use when the user mentions admin/, front/, or tool/ desktop apps, or asks about DOM inspection, element interaction, or app testing. Provides both MCP tools and CLI with ref-based element addressing."
+description: "Interact with Tauri v2 desktop apps via tauri-connector. Use this skill when the user wants to: test Tauri UI, automate webview interactions, take DOM snapshots, click/hover/fill elements, inspect app state, read console logs, execute JS in webviews, debug Tauri desktop apps, or SET UP tauri-connector in a project. Also use when the user mentions admin/, front/, or tool/ desktop apps, or asks about DOM inspection, element interaction, or app testing. Provides automated setup, MCP tools, and CLI with ref-based element addressing."
 ---
 
-# Tauri Connector — Interact with Tauri Desktop Apps
+# Tauri Connector
 
-This skill enables deep inspection and interaction with Tauri v2 desktop applications using `tauri-connector`. It fixes the `__TAURI__ not available` bug in `tauri-plugin-mcp-bridge` by using an internal WebSocket bridge for JS execution.
+Deep inspection and interaction with Tauri v2 desktop apps. Fixes the `__TAURI__ not available` bug by using an internal WebSocket bridge instead of Tauri's IPC layer.
 
 ## When to Use
 
+- Setting up tauri-connector in a Tauri project
 - Testing UI flows in Tauri desktop apps
 - Automating webview interactions (click, hover, fill, type, scroll)
 - Taking DOM snapshots for understanding page structure
@@ -16,46 +17,97 @@ This skill enables deep inspection and interaction with Tauri v2 desktop applica
 - Executing JavaScript in the webview context
 - Inspecting app metadata, window state, IPC commands
 - Debugging desktop app behavior
-- Any time the user mentions interacting with a running Tauri app
 
-## Prerequisites
+## Automated Setup
 
-The Tauri app must have `tauri-plugin-connector` installed and be running in dev mode:
+When the user asks to set up tauri-connector in a Tauri project, follow these steps automatically. Detect the project by looking for `src-tauri/` directory and `tauri.conf.json`.
+
+### Step 1: Add Cargo dependency
+
+Check `src-tauri/Cargo.toml`. If `tauri-plugin-connector` is not present, add it:
 
 ```toml
-# src-tauri/Cargo.toml
 [dependencies]
 tauri-plugin-connector = "0.1"
 ```
 
+### Step 2: Register the plugin
+
+Check `src-tauri/src/lib.rs` or `src-tauri/src/main.rs` for the `tauri::Builder` chain. Add the plugin registration wrapped in `#[cfg(debug_assertions)]` so it only runs in dev builds:
+
 ```rust
-// src-tauri/src/lib.rs
 #[cfg(debug_assertions)]
 {
     builder = builder.plugin(tauri_plugin_connector::init());
 }
 ```
 
+Place this BEFORE the `.invoke_handler()` call and AFTER the initial builder creation.
+
+### Step 3: Add permissions
+
+Check `src-tauri/capabilities/default.json` (or the main capabilities file). Add `"connector:default"` to the `permissions` array:
+
 ```json
-// src-tauri/capabilities/default.json
-{ "permissions": ["connector:default"] }
+{
+  "permissions": [
+    "connector:default"
+  ]
+}
 ```
 
-When running, you should see:
+### Step 4: Verify `withGlobalTauri`
+
+Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` section. If missing, add it — this enables the auto-push DOM feature:
+
+```json
+{
+  "app": {
+    "withGlobalTauri": true
+  }
+}
 ```
-[connector] Plugin initialized for 'App Name' on 0.0.0.0:9555
-[connector][bridge] Webview client connected
+
+### Step 5: Verify
+
+Run the app with `bun run tauri dev` (or `cargo tauri dev`). Look for these log lines:
+
+```
+[connector][bridge] Internal bridge on port 9300
+[connector] Plugin initialized for 'App Name' (com.app.id) on 0.0.0.0:9555
+[connector][server] Listening on 0.0.0.0:9555
+[connector][bridge] Webview client connected from 127.0.0.1:xxxxx
 ```
 
-## Method 1: CLI (Recommended for Interactive Use)
+### Custom Configuration
 
-The CLI provides ref-based element addressing inspired by agent-browser. Located at `~/opensource/tauri-connector/cli/`.
+For localhost-only access or custom ports:
 
-### Workflow: Snapshot → Interact
+```rust
+use tauri_plugin_connector::ConnectorBuilder;
+
+#[cfg(debug_assertions)]
+{
+    builder = builder.plugin(
+        ConnectorBuilder::new()
+            .bind_address("127.0.0.1")  // default: 0.0.0.0
+            .port_range(9600, 9700)     // default: 9555-9655
+            .build()
+    );
+}
+```
+
+## CLI Usage
+
+The CLI is at `~/opensource/tauri-connector/cli/`. Run commands with:
 
 ```bash
 CLI="npx tsx ~/opensource/tauri-connector/cli/src/index.ts"
+```
 
+### Workflow: Snapshot then Interact
+
+```bash
 # 1. Take snapshot to get ref IDs
 $CLI snapshot -i
 
@@ -67,23 +119,23 @@ $CLI snapshot -i
 # 2. Interact using refs
 $CLI click @e5            # Click "Add New"
 $CLI fill @e3 "query"     # Fill search box
-$CLI get text @e7         # Get heading text → "Dashboard"
+$CLI get text @e7         # Get heading text
 $CLI press Enter          # Press key
 $CLI hover @e2            # Hover element
 ```
 
-### All CLI Commands
+### Snapshot Options
 
-#### Snapshot
 ```bash
 $CLI snapshot              # Full DOM tree with refs
 $CLI snapshot -i           # Interactive elements only (best for LLM)
 $CLI snapshot -c           # Compact mode
 $CLI snapshot -i -c        # Interactive + compact (most concise)
-$CLI snapshot -s ".content" # Scope to selector
+$CLI snapshot -s ".content" # Scope to CSS selector
 ```
 
-#### Element Interactions
+### Element Interactions
+
 ```bash
 $CLI click @e5             # Click
 $CLI dblclick @e3          # Double-click
@@ -97,7 +149,8 @@ $CLI select @e7 "Option"   # Select dropdown option
 $CLI scrollintoview @e10   # Scroll element into view
 ```
 
-#### Keyboard & Scroll
+### Keyboard and Scroll
+
 ```bash
 $CLI press Enter           # Press key
 $CLI press Tab
@@ -105,7 +158,8 @@ $CLI scroll down 500       # Scroll page
 $CLI scroll up 300
 ```
 
-#### Get Information
+### Get Information
+
 ```bash
 $CLI get title             # Page title
 $CLI get url               # Current URL
@@ -117,7 +171,8 @@ $CLI get box @e5           # Bounding box
 $CLI get count ".item"     # Element count
 ```
 
-#### Wait & Debug
+### Wait and Debug
+
 ```bash
 $CLI wait ".loaded"        # Wait for element
 $CLI wait --text "Success" # Wait for text
@@ -125,23 +180,21 @@ $CLI logs                  # Console logs
 $CLI logs -n 50 -f "error" # Filtered logs
 $CLI state                 # App metadata
 $CLI windows               # Window list
-$CLI eval "document.title" # Run JS
 ```
 
 ### Ref Format
 
 Three formats accepted: `@e1`, `ref=e1`, or `e1`. Refs persist across CLI invocations in `/tmp/tauri-connector-refs.json`. Run `snapshot` again to refresh after DOM changes.
 
-## Method 2: WebSocket (For Scripts & Automation)
+## WebSocket API
 
-Connect directly to the plugin's WebSocket on port 9555:
+Connect directly to the plugin on port 9555 for automation:
 
 ```python
 import asyncio, websockets, json
 
 async def test():
     async with websockets.connect('ws://127.0.0.1:9555') as ws:
-        # Execute JS
         await ws.send(json.dumps({
             'id': '1', 'type': 'execute_js',
             'script': '(() => document.title)()',
@@ -149,14 +202,10 @@ async def test():
         }))
         print(await ws.recv())
 
-        # Get backend state
-        await ws.send(json.dumps({'id': '2', 'type': 'backend_state'}))
-        print(await ws.recv())
-
 asyncio.run(test())
 ```
 
-### WebSocket Command Types
+### Command Types
 
 ```
 ping, execute_js, screenshot, dom_snapshot, get_cached_dom,
@@ -166,16 +215,16 @@ ipc_execute_command, ipc_monitor, ipc_get_captured,
 ipc_emit_event, console_logs, select_element, get_pointed_element
 ```
 
-## Method 3: MCP Server (For Claude Code Integration)
+## MCP Server
 
-Configure in Claude Code settings:
+Configure in Claude Code settings for direct MCP tool access:
 
 ```json
 {
   "mcpServers": {
     "tauri-connector": {
       "command": "npx",
-      "args": ["tsx", "/Users/gwddeveloper/opensource/tauri-connector/server/src/index.ts"],
+      "args": ["tsx", "~/opensource/tauri-connector/server/src/index.ts"],
       "env": {
         "TAURI_CONNECTOR_HOST": "127.0.0.1",
         "TAURI_CONNECTOR_PORT": "9555"
@@ -185,11 +234,10 @@ Configure in Claude Code settings:
 }
 ```
 
-Then use MCP tools directly: `driver_session`, `webview_execute_js`, `webview_dom_snapshot`, `manage_window`, etc.
-
 ## Common Workflows
 
 ### Understand Current Page
+
 ```bash
 $CLI snapshot -i -c          # Get interactive elements
 $CLI get title               # Page title
@@ -198,6 +246,7 @@ $CLI logs -n 10              # Recent console output
 ```
 
 ### Fill a Form
+
 ```bash
 $CLI snapshot -i             # Find form fields
 $CLI fill @e3 "John"        # Fill name
@@ -207,6 +256,7 @@ $CLI wait --text "Success"  # Wait for confirmation
 ```
 
 ### Navigate and Test
+
 ```bash
 $CLI snapshot -i             # See current page
 $CLI click @e12              # Click nav item
@@ -215,27 +265,27 @@ $CLI get text @e5            # Verify content
 ```
 
 ### Debug an Issue
+
 ```bash
 $CLI logs -f "error"         # Check for errors
 $CLI state                   # App version/environment
-$CLI eval "localStorage.getItem('token')"  # Check state
 $CLI snapshot -s ".error-panel"  # Scope to error area
 ```
 
 ## Troubleshooting
 
 ### Connection Refused
-The Tauri app isn't running or the plugin isn't loaded. Start with `bun run tauri dev` and check for `[connector]` logs.
+App isn't running or plugin isn't loaded. Run `bun run tauri dev` and check for `[connector]` logs.
 
 ### Refs Not Working
 Refs expire after DOM changes. Run `snapshot` again to refresh.
 
 ### Port Conflict
-Set custom port: `TAURI_CONNECTOR_PORT=9600` or use `ConnectorBuilder::new().port_range(9600, 9700)` in Rust.
+Set `TAURI_CONNECTOR_PORT=9600` or use `ConnectorBuilder::new().port_range(9600, 9700)`.
 
-## Source Code
+## Source
 
-- Plugin: `~/opensource/tauri-connector/plugin/` (Rust, published on crates.io)
-- MCP Server: `~/opensource/tauri-connector/server/` (TypeScript)
-- CLI: `~/opensource/tauri-connector/cli/` (TypeScript)
+- Plugin: `~/opensource/tauri-connector/plugin/` (crates.io: `tauri-plugin-connector`)
+- MCP Server: `~/opensource/tauri-connector/server/`
+- CLI: `~/opensource/tauri-connector/cli/`
 - GitHub: https://github.com/dickwu/tauri-connector
