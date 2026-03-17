@@ -1,0 +1,17 @@
+# Rust
+plugin/target/
+
+# Node
+server/node_modules/
+server/dist/
+
+# OS
+.DS_Store
+
+# Lock files (keep Cargo.lock for the plugin, ignore bun/npm)
+server/bun.lockb
+
+# IDE
+.idea/
+.vscode/
+*.swp

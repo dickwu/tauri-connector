@@ -1,0 +1,25 @@
+{
+  "name": "tauri-connector-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for tauri-plugin-connector",
+  "type": "module",
+  "bin": {
+    "tauri-connector-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}
