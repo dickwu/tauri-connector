@@ -2,8 +2,9 @@
 plugin/target/
 
 # Node
-server/node_modules/
+**/node_modules/
 server/dist/
+cli/dist/
 
 # OS
 .DS_Store
