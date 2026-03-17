@@ -1,10 +1,13 @@
 # tauri-connector
 
-A Tauri v2 plugin + MCP server for deep inspection and interaction with Tauri desktop applications. Drop-in replacement for `tauri-plugin-mcp-bridge` that **fixes the `__TAURI__ not available` bug** on macOS.
+[![Crates.io](https://img.shields.io/crates/v/tauri-plugin-connector.svg)](https://crates.io/crates/tauri-plugin-connector)
+[![License](https://img.shields.io/crates/l/tauri-plugin-connector.svg)](LICENSE)
+
+A Tauri v2 plugin + MCP server + CLI for deep inspection and interaction with Tauri desktop applications. Drop-in replacement for `tauri-plugin-mcp-bridge` that **fixes the `__TAURI__ not available` bug** on macOS.
 
 ## The Problem
 
-`tauri-plugin-mcp-bridge` injects JavaScript into the webview that relies on `window.__TAURI__` to send execution results back to Rust. On macOS with WKWebView, the injected scripts run in an isolated content world where `window.__TAURI__` doesn't exist — causing all JS-based tools (execute_js, dom_snapshot, console logs) to time out.
+`tauri-plugin-mcp-bridge` injects JavaScript into the webview that relies on `window.__TAURI__` to send execution results back to Rust. On macOS with WKWebView, the injected scripts run in an isolated content world where `window.__TAURI__` doesn't exist -- causing all JS-based tools (execute_js, dom_snapshot, console logs) to time out.
 
 ## The Fix
 
@@ -16,12 +19,20 @@ Frontend JS (app context)
   |-- invoke('plugin:connector|push_logs') -> Rust state (cached logs)
   '-- WebSocket ws://127.0.0.1:9300 --------> Bridge (JS execution)
 
-MCP Server (stdio)
-  '-- WebSocket ws://host:9555 -------------> Plugin server
+MCP Server (stdio)                    CLI
+  '-- WebSocket ws://host:9555 -----> Plugin server <----- WebSocket
        |-- handlers (window, IPC, backend)
        |-- bridge.execute_js() -> WebSocket -> JS result
        '-- state.get_dom() -> cached DOM (instant)
 ```
+
+## Components
+
+| Component | Description |
+|---|---|
+| `plugin/` | Rust Tauri v2 plugin (`tauri-plugin-connector` on crates.io) |
+| `server/` | TypeScript MCP server for Claude Code / AI agents |
+| `cli/` | Command-line interface with ref-based element addressing |
 
 ## Features
 
@@ -39,6 +50,29 @@ MCP Server (stdio)
 | IPC | `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured`, `ipc_emit_event` |
 | Logs | `read_logs` |
 
+### CLI with Ref-Based Element Addressing
+
+Inspired by [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser). Take a DOM snapshot with stable ref IDs, then interact with elements using those refs:
+
+```bash
+# Take snapshot -- assigns ref IDs to interactive elements
+$ tauri-connector snapshot -i
+- button "Add New" [ref=e113]
+- heading "Task Centre" [level=1, ref=e103]
+- switch [checked=false, ref=e104]
+- textbox "Search..." [ref=e16]
+- menuitem [ref=e8]
+  - img "user" [ref=e10]
+
+# Interact using refs (persist across CLI invocations)
+$ tauri-connector click @e113         # Click "Add New"
+$ tauri-connector fill @e16 "aspirin" # Fill search box
+$ tauri-connector hover @e8           # Hover menu item
+$ tauri-connector get text @e103      # Get "Task Centre"
+$ tauri-connector press Enter         # Press key
+$ tauri-connector logs -n 5           # Last 5 console logs
+```
+
 ### Enhanced DOM Access
 
 The plugin auto-pushes DOM snapshots from the frontend via Tauri's native IPC (`invoke()`), which works in the app's own JS context. The `get_cached_dom` tool returns this pre-cached, LLM-friendly snapshot instantly.
@@ -47,38 +81,34 @@ The plugin auto-pushes DOM snapshots from the frontend via Tauri's native IPC (`
 
 ### 1. Add the Tauri Plugin
 
-In your `src-tauri/Cargo.toml`:
-
 ```toml
+# src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = { git = "https://github.com/dickwu/tauri-connector", branch = "main" }
+tauri-plugin-connector = "0.1"
 ```
 
-Or for local development:
+Or from git:
 
 ```toml
-[dependencies]
-tauri-plugin-connector = { path = "/path/to/tauri-connector/plugin" }
+tauri-plugin-connector = { git = "https://github.com/dickwu/tauri-connector" }
 ```
 
 ### 2. Register the Plugin
 
-In `src-tauri/src/lib.rs` or `src-tauri/src/main.rs`:
-
 ```rust
+// src-tauri/src/lib.rs
 #[cfg(debug_assertions)]
 {
     builder = builder.plugin(tauri_plugin_connector::init());
 }
 ```
 
-The plugin only runs in debug builds — it won't affect production.
+The plugin only runs in debug builds -- it won't affect production.
 
 ### 3. Add Permissions
 
-In `src-tauri/capabilities/default.json`:
-
 ```json
+// src-tauri/capabilities/default.json
 {
   "permissions": [
     "connector:default"
@@ -88,9 +118,8 @@ In `src-tauri/capabilities/default.json`:
 
 ### 4. Set `withGlobalTauri` (recommended)
 
-In `src-tauri/tauri.conf.json`:
-
 ```json
+// src-tauri/tauri.conf.json
 {
   "app": {
     "withGlobalTauri": true
@@ -100,17 +129,163 @@ In `src-tauri/tauri.conf.json`:
 
 This enables the auto-push DOM feature. The core JS execution works without it.
 
-### 5. Install the MCP Server
+### 5. Run Your App
+
+```bash
+bun run tauri dev
+```
+
+You should see:
+
+```
+[connector][bridge] Internal bridge on port 9300
+[connector] Plugin initialized for 'Your App' (com.your.app) on 0.0.0.0:9555
+[connector][server] Listening on 0.0.0.0:9555
+[connector][bridge] Webview client connected from 127.0.0.1:xxxxx
+```
+
+## CLI Usage
+
+### Install
+
+```bash
+cd cli
+bun install  # or npm install
+```
+
+### Commands
+
+```bash
+# Run via tsx (development)
+npx tsx src/index.ts <command>
+
+# Or build and run
+bun run build
+node dist/index.js <command>
+```
+
+### Snapshot
+
+```bash
+snapshot                        # Full DOM tree with refs
+snapshot -i                     # Interactive elements only
+snapshot -c                     # Compact (strip wrappers)
+snapshot -i -c                  # Interactive + compact (best for LLM)
+snapshot -d 3                   # Max depth 3
+snapshot -s ".main-content"     # Scope to selector
+```
+
+Output format (similar to agent-browser):
+
+```
+- role "accessible-name" [attr1, attr2, ref=eN]
+```
+
+Example:
+
+```
+- navigation
+  - link "Home" [ref=e1]
+  - link "Products" [ref=e2]
+- main
+  - heading "Dashboard" [level=1, ref=e3]
+  - textbox "Search" [required, ref=e4]: current value
+  - button "Submit" [ref=e5]
+  - switch [checked=false, ref=e6]
+```
+
+### Interactions
+
+All commands accept `@eN` refs or CSS selectors:
+
+```bash
+click @e5                       # Click element
+click "#submit-btn"             # Click by CSS selector
+dblclick @e3                    # Double-click
+hover @e2                       # Hover
+focus @e4                       # Focus
+fill @e4 "hello@example.com"    # Clear + fill input
+type @e4 "search query"         # Type character by character
+check @e6                       # Check checkbox
+uncheck @e6                     # Uncheck checkbox
+select @e7 "Option A" "Option B" # Select option(s)
+scrollintoview @e10             # Scroll element into view
+```
+
+### Keyboard
+
+```bash
+press Enter                     # Press key
+press Tab
+press Escape
+```
+
+### Scroll
+
+```bash
+scroll down 500                 # Scroll page down 500px
+scroll up 300                   # Scroll page up
+scroll left 200                 # Scroll horizontally
+scroll down 300 --selector @e5  # Scroll within element
+```
+
+### Getters
+
+```bash
+get title                       # Page title
+get url                         # Current URL
+get text @e3                    # Text content
+get html @e3                    # Inner HTML
+get value @e4                   # Input value
+get attr @e1 href               # Attribute value
+get box @e5                     # Bounding box {x, y, width, height}
+get styles @e5                  # All computed styles
+get count ".list-item"          # Element count by selector
+```
+
+### Wait
+
+```bash
+wait ".loading-complete"        # Wait for element
+wait 2000                       # Wait for duration (ms)
+wait --text "Success"           # Wait for text to appear
+wait --timeout 10000 ".slow"    # Custom timeout
+```
+
+### Other
+
+```bash
+eval "document.title"           # Run arbitrary JS
+logs                            # Console logs (last 20)
+logs -n 50                      # Last 50 logs
+logs -f "error"                 # Filter logs
+state                           # App metadata (name, version, Tauri version)
+windows                         # List all windows
+help                            # Full help
+```
+
+### Ref Persistence
+
+Refs from `snapshot` are saved to `/tmp/tauri-connector-refs.json` and persist across CLI invocations. Run `snapshot` again to refresh refs after DOM changes.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `TAURI_CONNECTOR_HOST` | `127.0.0.1` | Plugin host |
+| `TAURI_CONNECTOR_PORT` | `9555` | Plugin port |
+
+## MCP Server Setup
+
+### Install
 
 ```bash
 cd server
-bun install   # or npm install
-bun run build # or npx tsc
+bun install
+bun run build
 ```
 
-### 6. Configure Claude Code
-
-Add to your Claude Code MCP settings (`.claude/settings.json` or similar):
+### Configure Claude Code
 
 ```json
 {
@@ -127,7 +302,7 @@ Add to your Claude Code MCP settings (`.claude/settings.json` or similar):
 }
 ```
 
-Or use `bun` / `tsx` for development:
+Or with `tsx` for development:
 
 ```json
 {
@@ -140,28 +315,9 @@ Or use `bun` / `tsx` for development:
 }
 ```
 
-### 7. Run Your Tauri App
-
-```bash
-bun run tauri dev
-# or
-cargo tauri dev
-```
-
-You should see in the console:
-
-```
-[connector][bridge] Internal bridge on port 9300
-[connector] Plugin initialized for 'Your App' (com.your.app) on 0.0.0.0:9555
-[connector][server] Listening on 0.0.0.0:9555
-[connector][bridge] Webview client connected from 127.0.0.1:xxxxx
-```
-
-## Configuration
+## Plugin Configuration
 
 ### Custom Bind Address
-
-By default, the plugin listens on `0.0.0.0` (all interfaces). For localhost-only:
 
 ```rust
 use tauri_plugin_connector::ConnectorBuilder;
@@ -170,253 +326,81 @@ use tauri_plugin_connector::ConnectorBuilder;
 {
     builder = builder.plugin(
         ConnectorBuilder::new()
-            .bind_address("127.0.0.1")
+            .bind_address("127.0.0.1")  // localhost only (default: 0.0.0.0)
+            .port_range(8000, 8100)     // custom port range (default: 9555-9655)
             .build()
     );
 }
 ```
 
-### Custom Port Range
-
-```rust
-ConnectorBuilder::new()
-    .port_range(8000, 8100)
-    .build()
-```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `TAURI_CONNECTOR_HOST` | `127.0.0.1` | MCP server connects to this host |
-| `TAURI_CONNECTOR_PORT` | `9555` | MCP server connects to this port |
-
-## Tool Reference
-
-### `driver_session`
-
-Start, stop, or check the connection to a Tauri app.
-
-```json
-{ "action": "start", "host": "127.0.0.1", "port": 9555 }
-```
-
-### `webview_execute_js`
-
-Execute JavaScript in the webview. Use IIFE syntax for return values.
-
-```json
-{ "script": "(() => { return document.title; })()" }
-```
-
-Supports `async`/`await`:
-
-```json
-{ "script": "(async () => { return await fetch('/api').then(r => r.json()); })()" }
-```
-
-### `webview_dom_snapshot`
-
-Get a structured DOM snapshot. Two types available:
-
-- `accessibility` -- roles, names, ARIA states (good for understanding UI semantics)
-- `structure` -- tag names, IDs, CSS classes (good for CSS selectors)
-
-```json
-{ "type": "accessibility" }
-{ "type": "structure", "selector": ".main-content" }
-```
-
-### `get_cached_dom`
-
-Get the DOM snapshot that was auto-pushed from the frontend via Tauri IPC. Faster than `webview_dom_snapshot` since it reads cached data without JS execution.
-
-Returns: `html`, `text_content`, `accessibility_tree`, `structure_tree`, `timestamp`.
-
-```json
-{ "windowId": "main" }
-```
-
-### `webview_find_element`
-
-Find elements by CSS selector, XPath, or text content.
-
-```json
-{ "selector": ".ant-btn-primary", "strategy": "css" }
-{ "selector": "//button[@type='submit']", "strategy": "xpath" }
-{ "selector": "Save Changes", "strategy": "text" }
-```
-
-Returns element metadata: tag, id, className, text, bounding rect, visibility.
-
-### `webview_get_styles`
-
-Get computed CSS styles for an element.
-
-```json
-{ "selector": ".header", "properties": ["background-color", "font-size", "padding"] }
-```
-
-Omit `properties` to get all computed styles.
-
-### `webview_interact`
-
-Perform UI interactions.
-
-```json
-{ "action": "click", "selector": "#submit-btn" }
-{ "action": "scroll", "selector": ".content", "direction": "down", "distance": 300 }
-{ "action": "hover", "selector": ".menu-item" }
-{ "action": "focus", "selector": "input[name='email']" }
-{ "action": "click", "x": 100, "y": 200 }
-```
-
-Actions: `click`, `double-click`, `focus`, `scroll`, `hover`.
-
-### `webview_keyboard`
-
-Type text or press keys.
-
-```json
-{ "action": "type", "text": "hello@example.com" }
-{ "action": "press", "key": "Enter" }
-{ "action": "press", "key": "a", "modifiers": ["ctrl"] }
-```
-
-### `webview_wait_for`
-
-Wait for an element or text to appear.
-
-```json
-{ "selector": ".loading-complete", "timeout": 10000 }
-{ "text": "Successfully saved", "timeout": 5000 }
-```
-
-### `webview_get_pointed_element`
-
-Get metadata for the element the user Alt+Shift+Clicked. The bridge JS registers a global listener that captures element info on Alt+Shift+Click.
-
-### `manage_window`
-
-List, inspect, or resize windows.
-
-```json
-{ "action": "list" }
-{ "action": "info", "windowId": "main" }
-{ "action": "resize", "windowId": "main", "width": 1280, "height": 720 }
-```
-
-### `ipc_get_backend_state`
-
-Get app metadata: name, identifier, version, Tauri version, OS, architecture, window list.
-
-### `ipc_execute_command`
-
-Execute any Tauri IPC command (same as calling `invoke()` from the frontend).
-
-```json
-{ "command": "get_all_accounts", "args": {} }
-```
-
-### `ipc_monitor` / `ipc_get_captured`
-
-Start monitoring IPC traffic, then retrieve captured events.
-
-```json
-{ "action": "start" }
-{ "filter": "account", "limit": 50 }
-```
-
-### `ipc_emit_event`
-
-Emit a custom Tauri event for testing.
-
-```json
-{ "eventName": "deep-link-received", "payload": "myapp://test" }
-```
-
-### `read_logs`
-
-Read captured console logs (log, warn, error, info, debug).
-
-```json
-{ "lines": 20, "filter": "error" }
-```
-
 ## Frontend Integration (Optional)
 
-For enhanced DOM access, your frontend can proactively push DOM snapshots to the plugin:
+Push DOM snapshots from your frontend for instant LLM access:
 
 ```typescript
 import { invoke } from '@tauri-apps/api/core';
 
-// Push current DOM state for LLM consumption
-async function pushDom() {
-  await invoke('plugin:connector|push_dom', {
-    payload: {
-      windowId: 'main',
-      html: document.body.innerHTML,
-      textContent: document.body.innerText,
-      accessibilityTree: '', // your custom tree builder
-      structureTree: '',     // your custom tree builder
-    }
-  });
-}
-
-// Push on route changes
-window.addEventListener('popstate', () => setTimeout(pushDom, 1000));
+await invoke('plugin:connector|push_dom', {
+  payload: {
+    windowId: 'main',
+    html: document.body.innerHTML,
+    textContent: document.body.innerText,
+    accessibilityTree: '',
+    structureTree: '',
+  }
+});
 ```
 
 The bridge JS also auto-pushes DOM on page load and significant mutations when `window.__TAURI_INTERNALS__` is available.
 
+### Alt+Shift+Click Element Picker
+
+Alt+Shift+Click any element in the app to capture its metadata. Retrieve via `webview_get_pointed_element` MCP tool or `get pointed` CLI command.
+
 ## Migrating from tauri-plugin-mcp-bridge
 
-1. Replace the Cargo dependency:
-
 ```diff
+# Cargo.toml
 - tauri-plugin-mcp-bridge = "0.10"
-+ tauri-plugin-connector = { git = "https://github.com/dickwu/tauri-connector" }
-```
++ tauri-plugin-connector = "0.1"
 
-2. Update plugin registration:
-
-```diff
+# lib.rs
 - builder = builder.plugin(tauri_plugin_mcp_bridge::init());
 + builder = builder.plugin(tauri_plugin_connector::init());
-```
 
-3. Update capabilities:
-
-```diff
+# capabilities/default.json
 - "mcp-bridge:default"
 + "connector:default"
 ```
 
-4. Update your MCP server config to use `tauri-connector-mcp` instead of `mcp-server-tauri`, pointing to port `9555`.
+Update MCP server config to point to port `9555`.
 
 ## Project Structure
 
 ```
 tauri-connector/
-|-- plugin/                    # Rust Tauri v2 plugin
+|-- plugin/                    # Rust Tauri v2 plugin (crates.io)
 |   |-- Cargo.toml
 |   |-- build.rs
-|   |-- src/
-|   |   |-- lib.rs             # Plugin entry + Tauri IPC commands
-|   |   |-- bridge.rs          # Internal WebSocket bridge (the fix)
-|   |   |-- server.rs          # External WebSocket server
-|   |   |-- handlers.rs        # All command handlers
-|   |   |-- protocol.rs        # Message types
-|   |   '-- state.rs           # Shared state (DOM cache, logs, IPC)
-|   |-- js/bridge.js           # Placeholder (real JS injected at runtime)
-|   '-- permissions/
-|       '-- default.toml
+|   '-- src/
+|       |-- lib.rs             # Plugin entry + Tauri IPC commands
+|       |-- bridge.rs          # Internal WebSocket bridge (the fix)
+|       |-- server.rs          # External WebSocket server
+|       |-- handlers.rs        # All 18 command handlers
+|       |-- protocol.rs        # Message types
+|       '-- state.rs           # Shared state (DOM cache, logs, IPC)
 |-- server/                    # TypeScript MCP server
 |   |-- package.json
-|   |-- tsconfig.json
 |   '-- src/
-|       |-- index.ts           # MCP tool definitions
+|       |-- index.ts           # 18 MCP tool definitions
 |       '-- client.ts          # WebSocket client
+|-- cli/                       # CLI with ref-based addressing
+|   |-- package.json
+|   '-- src/
+|       |-- index.ts           # Command dispatcher + handlers
+|       |-- client.ts          # WebSocket client
+|       '-- snapshot.ts        # Ref system + DOM snapshot builder
+|-- LICENSE
 '-- README.md
 ```
 
@@ -424,26 +408,25 @@ tauri-connector/
 
 ### Internal WebSocket Bridge
 
-1. On plugin setup, an internal WebSocket server starts on `127.0.0.1:9300-9400`
-2. A JavaScript bridge client is injected into the webview via `WebviewWindow`
-3. The bridge connects to the internal WebSocket — this runs in the page's main JS context, not an isolated content world
-4. When the MCP server requests JS execution, the plugin sends the script through the internal WebSocket
-5. The bridge evaluates the script and sends results back through the same WebSocket
-6. No dependency on `window.__TAURI__` for result delivery
+1. Plugin starts an internal WebSocket on `127.0.0.1:9300-9400`
+2. Bridge JS is injected into the webview via `WebviewWindow`
+3. The bridge connects to the internal WebSocket from the page's main JS context
+4. JS execution requests flow through this WebSocket channel
+5. Results return through the same channel -- no `window.__TAURI__` needed
 
 ### Console Log Capture
 
-The bridge intercepts `console.log/warn/error/info/debug` calls, storing them in a ring buffer. Logs are accessible via the `read_logs` tool or pushed to Rust via `invoke()`.
+The bridge intercepts `console.log/warn/error/info/debug`, storing entries in a ring buffer (500 max). Accessible via `read_logs` or auto-pushed to Rust via `invoke()`.
 
-### Element Picker
+### Ref System
 
-Alt+Shift+Click on any element captures its metadata (tag, id, classes, attributes, bounding rect). Retrieved via `webview_get_pointed_element`.
+The CLI's `snapshot` command assigns sequential ref IDs (`e1`, `e2`, ...) to interactive and content elements based on their ARIA roles. Three ref formats are accepted: `@e1`, `ref=e1`, or `e1`. Refs are persisted to disk and used across subsequent CLI invocations until the next `snapshot` refreshes them.
 
 ## Requirements
 
 - Tauri v2.x
 - Rust 2024 edition
-- Node.js 18+ (for MCP server)
+- Node.js 18+ / Bun (for MCP server and CLI)
 
 ## License
 
