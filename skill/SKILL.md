@@ -1,11 +1,11 @@
 ---
 name: tauri-connector
-description: "Interact with Tauri v2 desktop apps via tauri-connector. Use this skill when the user wants to: test Tauri UI, automate webview interactions, take DOM snapshots, click/hover/fill elements, inspect app state, read console logs, execute JS in webviews, debug Tauri desktop apps, or SET UP tauri-connector in a project. Also use when the user mentions admin/, front/, or tool/ desktop apps, or asks about DOM inspection, element interaction, or app testing. Provides automated setup, MCP tools, and CLI with ref-based element addressing."
+description: "Interact with Tauri v2 desktop apps via tauri-connector. Use this skill when the user wants to: test Tauri UI, automate webview interactions, take DOM snapshots, click/hover/fill elements, inspect app state, read console logs, execute JS in webviews, debug Tauri desktop apps, or SET UP tauri-connector in a project. Also use when the user mentions admin/, front/, or tool/ desktop apps, or asks about DOM inspection, element interaction, or app testing. Provides automated setup, embedded MCP server, Rust CLI with ref-based element addressing."
 ---
 
 # Tauri Connector
 
-Deep inspection and interaction with Tauri v2 desktop apps. Fixes the `__TAURI__ not available` bug by using an internal WebSocket bridge instead of Tauri's IPC layer.
+Deep inspection and interaction with Tauri v2 desktop apps. Fixes the `__TAURI__ not available` bug by using an internal WebSocket bridge instead of Tauri's IPC layer. The **MCP server runs inside the plugin** -- starts automatically when the Tauri app runs.
 
 ## When to Use
 
@@ -58,7 +58,7 @@ Check `src-tauri/capabilities/default.json` (or the main capabilities file). Add
 
 ### Step 4: Verify `withGlobalTauri`
 
-Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` section. If missing, add it — this enables the auto-push DOM feature:
+Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` section. If missing, add it -- this enables the auto-push DOM feature:
 
 ```json
 {
@@ -68,20 +68,36 @@ Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` 
 }
 ```
 
-### Step 5: Verify
+### Step 5: Configure Claude Code
+
+Add to `.mcp.json` in the project root:
+
+```json
+{
+  "mcpServers": {
+    "tauri-connector": {
+      "url": "http://127.0.0.1:9556/sse"
+    }
+  }
+}
+```
+
+The MCP server is embedded in the plugin -- no separate command or install needed.
+
+### Step 6: Verify
 
 Run the app with `bun run tauri dev` (or `cargo tauri dev`). Look for these log lines:
 
 ```
 [connector][bridge] Internal bridge on port 9300
-[connector] Plugin initialized for 'App Name' (com.app.id) on 0.0.0.0:9555
-[connector][server] Listening on 0.0.0.0:9555
-[connector][bridge] Webview client connected from 127.0.0.1:xxxxx
+[connector][mcp] SSE server listening on 0.0.0.0:9556
+[connector][mcp] MCP ready for 'App Name' -- url: http://0.0.0.0:9556/sse
+[connector] Plugin ready for 'App Name' (com.app.id) -- WS on 0.0.0.0:9555
 ```
 
 ### Custom Configuration
 
-For localhost-only access or custom ports:
+For localhost-only access, custom ports, or disabling the embedded MCP:
 
 ```rust
 use tauri_plugin_connector::ConnectorBuilder;
@@ -90,8 +106,9 @@ use tauri_plugin_connector::ConnectorBuilder;
 {
     builder = builder.plugin(
         ConnectorBuilder::new()
-            .bind_address("127.0.0.1")  // default: 0.0.0.0
-            .port_range(9600, 9700)     // default: 9555-9655
+            .bind_address("127.0.0.1")   // default: 0.0.0.0
+            .port_range(9600, 9700)      // WS port range (default: 9555-9655)
+            .mcp_port_range(9700, 9800)  // MCP port range (default: 9556-9656)
             .build()
     );
 }
@@ -99,96 +116,161 @@ use tauri_plugin_connector::ConnectorBuilder;
 
 ## CLI Usage
 
-The CLI is at `~/opensource/tauri-connector/cli/`. Run commands with:
+The CLI is a Rust binary. Build it from the tauri-connector repo:
 
 ```bash
-CLI="npx tsx ~/opensource/tauri-connector/cli/src/index.ts"
+cargo build -p connector-cli --release
+# Binary at target/release/tauri-connector
+```
+
+Or run directly during development:
+
+```bash
+cargo run -p connector-cli -- <command>
+```
+
+Set an alias for convenience:
+
+```bash
+alias tc="~/opensource/tauri-connector/target/release/tauri-connector"
 ```
 
 ### Workflow: Snapshot then Interact
 
 ```bash
-# 1. Take snapshot to get ref IDs
-$CLI snapshot -i
+tc snapshot -i
 
 # Output:
 # - button "Add New" [ref=e5]
 # - textbox "Search" [ref=e3]
 # - heading "Dashboard" [level=1, ref=e7]
 
-# 2. Interact using refs
-$CLI click @e5            # Click "Add New"
-$CLI fill @e3 "query"     # Fill search box
-$CLI get text @e7         # Get heading text
-$CLI press Enter          # Press key
-$CLI hover @e2            # Hover element
+tc click @e5            # Click "Add New"
+tc fill @e3 "query"     # Fill search box
+tc get text @e7         # Get heading text
+tc press Enter          # Press key
+tc hover @e2            # Hover element
 ```
 
 ### Snapshot Options
 
 ```bash
-$CLI snapshot              # Full DOM tree with refs
-$CLI snapshot -i           # Interactive elements only (best for LLM)
-$CLI snapshot -c           # Compact mode
-$CLI snapshot -i -c        # Interactive + compact (most concise)
-$CLI snapshot -s ".content" # Scope to CSS selector
+tc snapshot              # Full DOM tree with refs
+tc snapshot -i           # Interactive elements only (best for LLM)
+tc snapshot -c           # Compact mode
+tc snapshot -i -c        # Interactive + compact (most concise)
+tc snapshot -s ".content" # Scope to CSS selector
 ```
 
 ### Element Interactions
 
 ```bash
-$CLI click @e5             # Click
-$CLI dblclick @e3          # Double-click
-$CLI hover @e2             # Hover
-$CLI focus @e4             # Focus
-$CLI fill @e4 "text"       # Clear and fill input
-$CLI type @e4 "text"       # Type character by character
-$CLI check @e6             # Check checkbox
-$CLI uncheck @e6           # Uncheck
-$CLI select @e7 "Option"   # Select dropdown option
-$CLI scrollintoview @e10   # Scroll element into view
+tc click @e5             # Click
+tc dblclick @e3          # Double-click
+tc hover @e2             # Hover
+tc focus @e4             # Focus
+tc fill @e4 "text"       # Clear and fill input
+tc type @e4 "text"       # Type character by character
+tc check @e6             # Check checkbox
+tc uncheck @e6           # Uncheck
+tc select @e7 "Option"   # Select dropdown option
+tc scrollintoview @e10   # Scroll element into view
 ```
 
 ### Keyboard and Scroll
 
 ```bash
-$CLI press Enter           # Press key
-$CLI press Tab
-$CLI scroll down 500       # Scroll page
-$CLI scroll up 300
+tc press Enter           # Press key
+tc press Tab
+tc scroll down 500       # Scroll page
+tc scroll up 300
 ```
 
 ### Get Information
 
 ```bash
-$CLI get title             # Page title
-$CLI get url               # Current URL
-$CLI get text @e3          # Element text content
-$CLI get html @e3          # Inner HTML
-$CLI get value @e4         # Input value
-$CLI get attr @e1 href     # Attribute
-$CLI get box @e5           # Bounding box
-$CLI get count ".item"     # Element count
+tc get title             # Page title
+tc get url               # Current URL
+tc get text @e3          # Element text content
+tc get html @e3          # Inner HTML
+tc get value @e4         # Input value
+tc get attr @e1 href     # Attribute
+tc get box @e5           # Bounding box
+tc get count ".item"     # Element count
 ```
 
 ### Wait and Debug
 
 ```bash
-$CLI wait ".loaded"        # Wait for element
-$CLI wait --text "Success" # Wait for text
-$CLI logs                  # Console logs
-$CLI logs -n 50 -f "error" # Filtered logs
-$CLI state                 # App metadata
-$CLI windows               # Window list
+tc wait ".loaded"        # Wait for element
+tc wait --text "Success" # Wait for text
+tc logs                  # Console logs
+tc logs -n 50 -f "error" # Filtered logs
+tc state                 # App metadata
+tc windows               # Window list
 ```
 
 ### Ref Format
 
 Three formats accepted: `@e1`, `ref=e1`, or `e1`. Refs persist across CLI invocations in `/tmp/tauri-connector-refs.json`. Run `snapshot` again to refresh after DOM changes.
 
+## MCP Server
+
+### Embedded (Default -- Recommended)
+
+The MCP server runs inside the plugin. No setup beyond adding the URL to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "tauri-connector": {
+      "url": "http://127.0.0.1:9556/sse"
+    }
+  }
+}
+```
+
+Start the Tauri app and the MCP server is live. Tool calls go directly to the plugin handlers -- zero overhead.
+
+### Standalone (Alternative)
+
+If you can't modify the Tauri app, use the standalone Rust MCP binary:
+
+```bash
+cargo build -p connector-mcp-server --release
+```
+
+```json
+{
+  "mcpServers": {
+    "tauri-connector": {
+      "command": "tauri-connector-mcp",
+      "env": {
+        "TAURI_CONNECTOR_HOST": "127.0.0.1",
+        "TAURI_CONNECTOR_PORT": "9555"
+      }
+    }
+  }
+}
+```
+
+### 20 MCP Tools
+
+| Category | Tools |
+|---|---|
+| JavaScript | `webview_execute_js` |
+| DOM | `webview_dom_snapshot`, `get_cached_dom` |
+| Elements | `webview_find_element`, `webview_get_styles`, `webview_get_pointed_element`, `webview_select_element` |
+| Interaction | `webview_interact`, `webview_keyboard`, `webview_wait_for` |
+| Screenshot | `webview_screenshot` |
+| Windows | `manage_window` |
+| IPC | `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured`, `ipc_emit_event` |
+| Logs | `read_logs` |
+| Setup | `get_setup_instructions`, `list_devices` |
+
 ## WebSocket API
 
-Connect directly to the plugin on port 9555 for automation:
+Connect directly to the plugin WS on port 9555 for custom automation:
 
 ```python
 import asyncio, websockets, json
@@ -205,71 +287,42 @@ async def test():
 asyncio.run(test())
 ```
 
-### Command Types
-
-```
-ping, execute_js, screenshot, dom_snapshot, get_cached_dom,
-find_element, get_styles, interact, keyboard, wait_for,
-window_list, window_info, window_resize, backend_state,
-ipc_execute_command, ipc_monitor, ipc_get_captured,
-ipc_emit_event, console_logs, select_element, get_pointed_element
-```
-
-## MCP Server
-
-Configure in Claude Code settings for direct MCP tool access:
-
-```json
-{
-  "mcpServers": {
-    "tauri-connector": {
-      "command": "npx",
-      "args": ["tsx", "~/opensource/tauri-connector/server/src/index.ts"],
-      "env": {
-        "TAURI_CONNECTOR_HOST": "127.0.0.1",
-        "TAURI_CONNECTOR_PORT": "9555"
-      }
-    }
-  }
-}
-```
-
 ## Common Workflows
 
 ### Understand Current Page
 
 ```bash
-$CLI snapshot -i -c          # Get interactive elements
-$CLI get title               # Page title
-$CLI get url                 # Current URL
-$CLI logs -n 10              # Recent console output
+tc snapshot -i -c          # Get interactive elements
+tc get title               # Page title
+tc get url                 # Current URL
+tc logs -n 10              # Recent console output
 ```
 
 ### Fill a Form
 
 ```bash
-$CLI snapshot -i             # Find form fields
-$CLI fill @e3 "John"        # Fill name
-$CLI fill @e4 "john@ex.com" # Fill email
-$CLI click @e7              # Click submit
-$CLI wait --text "Success"  # Wait for confirmation
+tc snapshot -i             # Find form fields
+tc fill @e3 "John"        # Fill name
+tc fill @e4 "john@ex.com" # Fill email
+tc click @e7              # Click submit
+tc wait --text "Success"  # Wait for confirmation
 ```
 
 ### Navigate and Test
 
 ```bash
-$CLI snapshot -i             # See current page
-$CLI click @e12              # Click nav item
-$CLI snapshot -i             # See new page
-$CLI get text @e5            # Verify content
+tc snapshot -i             # See current page
+tc click @e12              # Click nav item
+tc snapshot -i             # See new page
+tc get text @e5            # Verify content
 ```
 
 ### Debug an Issue
 
 ```bash
-$CLI logs -f "error"         # Check for errors
-$CLI state                   # App version/environment
-$CLI snapshot -s ".error-panel"  # Scope to error area
+tc logs -f "error"         # Check for errors
+tc state                   # App version/environment
+tc snapshot -s ".error-panel"  # Scope to error area
 ```
 
 ## Troubleshooting
@@ -281,11 +334,12 @@ App isn't running or plugin isn't loaded. Run `bun run tauri dev` and check for 
 Refs expire after DOM changes. Run `snapshot` again to refresh.
 
 ### Port Conflict
-Set `TAURI_CONNECTOR_PORT=9600` or use `ConnectorBuilder::new().port_range(9600, 9700)`.
+Use `ConnectorBuilder::new().port_range(9600, 9700).mcp_port_range(9700, 9800)`.
 
 ## Source
 
-- Plugin: `~/opensource/tauri-connector/plugin/` (crates.io: `tauri-plugin-connector`)
-- MCP Server: `~/opensource/tauri-connector/server/`
-- CLI: `~/opensource/tauri-connector/cli/`
+- Plugin + Embedded MCP: `~/opensource/tauri-connector/plugin/`
+- Rust CLI: `~/opensource/tauri-connector/crates/cli/`
+- Standalone MCP: `~/opensource/tauri-connector/crates/mcp-server/`
+- Shared Client: `~/opensource/tauri-connector/crates/client/`
 - GitHub: https://github.com/dickwu/tauri-connector
