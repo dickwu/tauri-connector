@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p connector-cli -p connector-mcp-server -p connector-client
+      - run: cargo test -p connector-cli -p connector-mcp-server -p connector-client
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            suffix: ""
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            suffix: ""
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            suffix: ""
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            suffix: ""
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            suffix: ".exe"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross (Linux ARM64)
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (native)
+        if: "!matrix.cross"
+        run: |
+          cargo build --release -p connector-cli --target ${{ matrix.target }}
+          cargo build --release -p connector-mcp-server --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: |
+          cross build --release -p connector-cli --target ${{ matrix.target }}
+          cross build --release -p connector-mcp-server --target ${{ matrix.target }}
+
+      - name: Rename binaries
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/tauri-connector${{ matrix.suffix }}" \
+             "dist/tauri-connector-${{ matrix.target }}${{ matrix.suffix }}"
+          cp "target/${{ matrix.target }}/release/tauri-connector-mcp${{ matrix.suffix }}" \
+             "dist/tauri-connector-mcp-${{ matrix.target }}${{ matrix.suffix }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: dist/*
+          retention-days: 7
