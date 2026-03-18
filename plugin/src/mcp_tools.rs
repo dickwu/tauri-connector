@@ -406,17 +406,15 @@ const SETUP_INSTRUCTIONS: &str = r#"## tauri-plugin-connector Setup
 In your Tauri app's `src-tauri/Cargo.toml`:
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.1"
+tauri-plugin-connector = "0.2"
 ```
 
-### 2. Register the plugin
-In `src-tauri/src/lib.rs`:
+### 2. Register the plugin (debug-only)
+In `src-tauri/src/lib.rs`, add before `.invoke_handler()`:
 ```rust
-fn main() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_connector::init())
-        .run(tauri::generate_context!())
-        .expect("error running app");
+#[cfg(debug_assertions)]
+{
+    builder = builder.plugin(tauri_plugin_connector::init());
 }
 ```
 
@@ -426,7 +424,13 @@ In `src-tauri/capabilities/default.json`:
 { "permissions": ["connector:default"] }
 ```
 
-### 4. Configure Claude Code
+### 4. Set withGlobalTauri (required)
+In `src-tauri/tauri.conf.json`:
+```json
+{ "app": { "withGlobalTauri": true } }
+```
+
+### 5. Configure Claude Code
 In `.mcp.json`:
 ```json
 {
