@@ -17,3 +17,8 @@ server/bun.lockb
 .idea/
 .vscode/
 *.swp
+
+# Claude tooling
+.claude-flow/
+.claude/
+.swarm/
