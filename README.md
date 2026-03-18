@@ -319,6 +319,7 @@ Install the included skill to let Claude Code automatically set up and use tauri
 ```bash
 mkdir -p ~/.claude/skills/tauri-connector
 cp skill/SKILL.md ~/.claude/skills/tauri-connector/SKILL.md
+cp skill/SETUP.md ~/.claude/skills/tauri-connector/SETUP.md
 ```
 
 ### What It Does
