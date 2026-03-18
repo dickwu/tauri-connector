@@ -537,6 +537,7 @@ The CLI's `snapshot` command assigns sequential ref IDs (`e1`, `e2`, ...) to int
 
 - Tauri v2.x
 - Rust 2024 edition
+- [Bun](https://bun.sh/) (for skill scripts / WebSocket API examples)
 - `@zumer/snapdom` in frontend (optional, for screenshot fallback when xcap is unavailable)
 
 ## License
