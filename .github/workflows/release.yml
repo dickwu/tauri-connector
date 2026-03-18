@@ -188,7 +188,7 @@ jobs:
 
       - name: Push formula to homebrew-tap
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
           VERSION="${TAG_NAME#v}"
