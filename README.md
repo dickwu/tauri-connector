@@ -320,6 +320,7 @@ Install the included skill to let Claude Code automatically set up and use tauri
 mkdir -p ~/.claude/skills/tauri-connector
 cp skill/SKILL.md ~/.claude/skills/tauri-connector/SKILL.md
 cp skill/SETUP.md ~/.claude/skills/tauri-connector/SETUP.md
+cp skill/RELEASE.md ~/.claude/skills/tauri-connector/RELEASE.md
 ```
 
 ### What It Does
@@ -330,6 +331,7 @@ Once installed, Claude will automatically:
 - **Use the CLI** for DOM snapshots and element interactions
 - **Debug issues** using console logs, app state, and JS execution
 - **Automate testing** with snapshot -> click/fill/verify workflows
+- **Release** with version bumps, cargo publish, and GitHub releases
 
 ## MCP Server
 
@@ -450,6 +452,7 @@ tauri-connector/
 |-- skill/                      # Claude Code skill + bun scripts
 |   |-- SKILL.md                # Usage guide (loaded by Claude Code)
 |   |-- SETUP.md                # Setup instructions
+|   |-- RELEASE.md              # Release workflow (version bump, publish, gh release)
 |   '-- scripts/                # Bun scripts for WS interaction
 |       |-- connector.ts        # Shared helper (auto-discovers ports via PID file)
 |       |-- state.ts, eval.ts, screenshot.ts, snapshot.ts
