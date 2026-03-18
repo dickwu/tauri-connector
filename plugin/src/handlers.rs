@@ -262,12 +262,36 @@ pub async fn interact(
             }
         }
         "hover" => {
-            "el.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true})); el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));".to_string()
+            // Full hover sequence: pointer events + mouse events + CSS :hover workaround.
+            // Fires the same event sequence as a real cursor move (Playwright/CDP approach).
+            r#"
+            const rect = el.getBoundingClientRect();
+            const cx = rect.x + rect.width / 2;
+            const cy = rect.y + rect.height / 2;
+            const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+            el.dispatchEvent(new PointerEvent('pointerover', opts));
+            el.dispatchEvent(new PointerEvent('pointerenter', { ...opts, bubbles: false }));
+            el.dispatchEvent(new MouseEvent('mouseover', opts));
+            el.dispatchEvent(new MouseEvent('mouseenter', { ...opts, bubbles: false }));
+            el.dispatchEvent(new PointerEvent('pointermove', opts));
+            el.dispatchEvent(new MouseEvent('mousemove', opts));
+            "#.to_string()
+        }
+        "hover-off" => {
+            // Reverse hover: fire pointer/mouse leave events to dismiss dropdowns/tooltips.
+            r#"
+            const rect = el.getBoundingClientRect();
+            const opts = { bubbles: true, cancelable: true, view: window, clientX: 0, clientY: 0 };
+            el.dispatchEvent(new PointerEvent('pointerout', opts));
+            el.dispatchEvent(new PointerEvent('pointerleave', { ...opts, bubbles: false }));
+            el.dispatchEvent(new MouseEvent('mouseout', opts));
+            el.dispatchEvent(new MouseEvent('mouseleave', { ...opts, bubbles: false }));
+            "#.to_string()
         }
         _ => {
             return Response::error(
                 id.to_string(),
-                format!("Unknown action: {action}. Use: click, double-click, focus, scroll, hover"),
+                format!("Unknown action: {action}. Use: click, double-click, focus, scroll, hover, hover-off"),
             );
         }
     };

@@ -90,11 +90,11 @@ pub fn tool_definitions() -> Value {
                 })
             ),
             tool_def("webview_interact",
-                "Perform gestures: click, double-click, focus, scroll, hover on elements",
+                "Perform gestures on elements. hover fires full pointer+mouse event sequence; hover-off fires leave events to dismiss dropdowns/tooltips",
                 json!({
                     "type": "object",
                     "properties": {
-                        "action": { "type": "string", "enum": ["click", "double-click", "dblclick", "focus", "scroll", "hover"] },
+                        "action": { "type": "string", "enum": ["click", "double-click", "dblclick", "focus", "scroll", "hover", "hover-off"] },
                         "selector": { "type": "string" },
                         "strategy": { "type": "string", "enum": ["css", "xpath", "text"] },
                         "x": { "type": "number" },

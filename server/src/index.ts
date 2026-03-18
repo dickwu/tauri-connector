@@ -155,9 +155,9 @@ function createServer() {
 
   server.tool(
     'webview_interact',
-    'Perform gestures: click, double-click, focus, scroll, hover on elements',
+    'Perform gestures on elements. hover fires full pointer+mouse event sequence; hover-off fires leave events to dismiss dropdowns/tooltips',
     {
-      action: z.enum(['click', 'double-click', 'dblclick', 'focus', 'scroll', 'hover']),
+      action: z.enum(['click', 'double-click', 'dblclick', 'focus', 'scroll', 'hover', 'hover-off']),
       selector: z.string().optional(),
       strategy: z.enum(['css', 'xpath', 'text']).optional(),
       x: z.number().optional(),

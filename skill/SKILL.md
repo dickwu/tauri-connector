@@ -46,6 +46,9 @@ bun run $SCRIPTS/find.ts "button"                      # Find elements by CSS
 bun run $SCRIPTS/find.ts "Submit" text                 # Find by text content
 bun run $SCRIPTS/click.ts "button.submit"              # Click element
 bun run $SCRIPTS/click.ts "Add New" text               # Click by text
+bun run $SCRIPTS/hover.ts ".menu-trigger"              # Hover (show dropdown/tooltip)
+bun run $SCRIPTS/hover.ts ".menu-trigger" --off        # Hover-off (dismiss)
+bun run $SCRIPTS/hover.ts "Settings" text              # Hover by text content
 bun run $SCRIPTS/fill.ts "input.search" "query"        # Focus + type into input
 bun run $SCRIPTS/logs.ts 50                            # Last 50 console logs
 bun run $SCRIPTS/logs.ts 20 error                      # Filtered logs
@@ -93,7 +96,7 @@ All commands use `{ id, type, ...params }` with snake_case types:
 | `screenshot` | `format` (png/jpeg/webp), `quality`, `max_width`, `window_id` |
 | `dom_snapshot` | `snapshot_type`, `selector`, `window_id` |
 | `find_element` | `selector`, `strategy`, `window_id` |
-| `interact` | `action`, `selector`, `strategy`, `x`, `y`, `window_id` |
+| `interact` | `action` (click/double-click/focus/scroll/hover/hover-off), `selector`, `strategy`, `x`, `y`, `window_id` |
 | `keyboard` | `action`, `text`, `key`, `modifiers`, `window_id` |
 | `wait_for` | `selector`, `strategy`, `text`, `timeout`, `window_id` |
 | `backend_state` | -- |
@@ -138,12 +141,41 @@ bun run $SCRIPTS/click.ts "button[type=submit]"
 bun run $SCRIPTS/wait.ts "Success" --text
 ```
 
+### Hover to Reveal, Then Click
+
+```bash
+# 1. Hover to trigger dropdown/tooltip/submenu
+bun run $SCRIPTS/hover.ts ".menu-trigger"
+# 2. Wait for revealed element to appear
+bun run $SCRIPTS/wait.ts ".dropdown-menu"
+# 3. Click the revealed item
+bun run $SCRIPTS/click.ts ".dropdown-item"
+# 4. (Optional) Dismiss by hovering off
+bun run $SCRIPTS/hover.ts ".menu-trigger" --off
+```
+
+Hover fires the full pointer+mouse event sequence (pointerover, pointerenter, mouseover, mouseenter, pointermove, mousemove) with proper coordinates. Works with Ant Design, MUI, Headless UI, Radix, and any framework using JS event listeners.
+
 ### Debug
 
 ```bash
 bun run $SCRIPTS/logs.ts 50 error
 bun run $SCRIPTS/state.ts
 bun run $SCRIPTS/eval.ts "document.querySelector('.error')?.textContent"
+```
+
+## Screenshot
+
+The `webview_screenshot` tool uses a two-tier approach:
+
+1. **xcap** (primary): Native cross-platform window capture via the `xcap` crate. Captures actual rendered pixels on Windows, macOS, and Linux.
+2. **snapdom** (fallback): If xcap fails, falls back to `@zumer/snapdom` in the frontend. Requires the package to be installed (see SETUP.md Step 5).
+
+Supported formats: `png` (default), `jpeg`, `webp`. Use `max_width` to resize for smaller payloads.
+
+```bash
+bun run $SCRIPTS/screenshot.ts /tmp/shot.png 1280          # PNG, max 1280px wide
+bun run $SCRIPTS/screenshot.ts /tmp/shot.webp 800           # WebP, max 800px wide
 ```
 
 ## Troubleshooting
