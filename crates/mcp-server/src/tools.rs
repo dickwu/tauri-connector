@@ -542,7 +542,7 @@ In your Tauri app's `src-tauri/Cargo.toml`:
 
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.1"
+tauri-plugin-connector = "0.4"
 ```
 
 ### 2. Register the plugin

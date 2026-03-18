@@ -114,7 +114,7 @@ The plugin auto-pushes DOM snapshots from the frontend via Tauri's native IPC (`
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.3"
+tauri-plugin-connector = "0.4"
 ```
 
 ### 2. Register it (debug-only)
