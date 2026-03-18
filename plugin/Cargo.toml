@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-connector"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 description = "MCP-compatible Tauri v2 plugin with xcap cross-platform screenshot, snapdom fallback, dual-path JS execution, and embedded MCP server"
 license = "MIT"
