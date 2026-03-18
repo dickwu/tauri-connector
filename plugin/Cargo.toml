@@ -1,8 +1,8 @@
 [package]
 name = "tauri-plugin-connector"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "MCP-compatible Tauri v2 plugin with reliable JS execution via WebSocket bridge - fixes __TAURI__ not available bug"
+description = "MCP-compatible Tauri v2 plugin with screenshot support, dual-path JS execution (WS bridge + eval fallback), and embedded MCP server"
 license = "MIT"
 repository = "https://github.com/dickwu/tauri-connector"
 homepage = "https://github.com/dickwu/tauri-connector"
@@ -24,7 +24,7 @@ tauri-plugin = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.28"
+tokio-tungstenite = "0.29"
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
