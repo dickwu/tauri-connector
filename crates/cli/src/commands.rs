@@ -445,3 +445,197 @@ pub async fn windows(client: &ConnectorClient) -> Result<(), String> {
     println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
     Ok(())
 }
+
+/// Take a screenshot and save to file.
+pub async fn screenshot(
+    client: &ConnectorClient,
+    output: &str,
+    format: &str,
+    quality: u8,
+    max_width: Option<u32>,
+) -> Result<(), String> {
+    let mut cmd = json!({
+        "type": "screenshot",
+        "format": format,
+        "quality": quality,
+        "window_id": "main",
+    });
+    if let Some(w) = max_width {
+        cmd["max_width"] = json!(w);
+    }
+    let result = client.send_with_timeout(cmd, 60_000).await?;
+
+    let base64_data = result
+        .get("base64")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "No base64 data in screenshot response".to_string())?;
+
+    let bytes = b64_decode(base64_data)?;
+    std::fs::write(output, &bytes).map_err(|e| format!("Failed to write {output}: {e}"))?;
+
+    let width = result.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+    let height = result.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+    let size_kb = bytes.len() / 1024;
+    eprintln!("Saved {output} ({width}x{height}, {size_kb}KB)");
+    Ok(())
+}
+
+/// Get cached DOM snapshot pushed from frontend.
+pub async fn cached_dom(client: &ConnectorClient, window_id: &str) -> Result<(), String> {
+    let result = client
+        .send(json!({ "type": "get_cached_dom", "window_id": window_id }))
+        .await?;
+    match &result {
+        Value::String(s) => println!("{s}"),
+        _ => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+    }
+    Ok(())
+}
+
+/// Find elements by CSS selector, XPath, or text.
+pub async fn find(
+    client: &ConnectorClient,
+    selector: &str,
+    strategy: &str,
+) -> Result<(), String> {
+    let result = client
+        .send(json!({
+            "type": "find_element",
+            "selector": selector,
+            "strategy": strategy,
+            "window_id": "main",
+        }))
+        .await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Get element metadata from Alt+Shift+Click picker.
+pub async fn pointed(client: &ConnectorClient) -> Result<(), String> {
+    let result = client
+        .send(json!({ "type": "get_pointed_element" }))
+        .await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Resize a window.
+pub async fn resize(
+    client: &ConnectorClient,
+    window_id: &str,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    let result = client
+        .send(json!({
+            "type": "window_resize",
+            "window_id": window_id,
+            "width": width,
+            "height": height,
+        }))
+        .await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Run a Tauri IPC command.
+pub async fn ipc_exec(
+    client: &ConnectorClient,
+    command: &str,
+    args_json: Option<&str>,
+) -> Result<(), String> {
+    let args: Option<Value> = args_json
+        .map(|s| serde_json::from_str(s).map_err(|e| format!("Invalid JSON args: {e}")))
+        .transpose()?;
+
+    let mut cmd = json!({
+        "type": "ipc_execute_command",
+        "command": command,
+    });
+    if let Some(a) = args {
+        cmd["args"] = a;
+    }
+    let result = client.send_with_timeout(cmd, 30_000).await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Start or stop IPC monitoring.
+pub async fn ipc_monitor(client: &ConnectorClient, action: &str) -> Result<(), String> {
+    let result = client
+        .send(json!({ "type": "ipc_monitor", "action": action }))
+        .await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Get captured IPC traffic.
+pub async fn ipc_captured(
+    client: &ConnectorClient,
+    filter: Option<&str>,
+    limit: usize,
+) -> Result<(), String> {
+    let mut cmd = json!({
+        "type": "ipc_get_captured",
+        "limit": limit,
+    });
+    if let Some(f) = filter {
+        cmd["filter"] = json!(f);
+    }
+    let result = client.send(cmd).await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Emit a custom Tauri event.
+pub async fn ipc_emit(
+    client: &ConnectorClient,
+    event_name: &str,
+    payload_json: Option<&str>,
+) -> Result<(), String> {
+    let payload: Option<Value> = payload_json
+        .map(|s| serde_json::from_str(s).map_err(|e| format!("Invalid JSON payload: {e}")))
+        .transpose()?;
+
+    let mut cmd = json!({
+        "type": "ipc_emit_event",
+        "event_name": event_name,
+    });
+    if let Some(p) = payload {
+        cmd["payload"] = p;
+    }
+    let result = client.send(cmd).await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lookup = [255u8; 256];
+    for (i, &c) in TABLE.iter().enumerate() {
+        lookup[c as usize] = i as u8;
+    }
+
+    let input = input.as_bytes();
+    let mut output = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits: u32 = 0;
+
+    for &byte in input {
+        if byte == b'=' || byte == b'\n' || byte == b'\r' || byte == b' ' {
+            continue;
+        }
+        let val = lookup[byte as usize];
+        if val == 255 {
+            return Err(format!("Invalid base64 character: {}", byte as char));
+        }
+        buf = (buf << 6) | val as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            output.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Ok(output)
+}

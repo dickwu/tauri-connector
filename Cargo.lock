@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "connector-cli"
-version = "0.1.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "connector-client",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "connector-mcp-server"
-version = "0.1.0"
+version = "0.3.1"
 dependencies = [
  "connector-client",
  "serde",

@@ -153,12 +153,90 @@ enum Commands {
         #[arg(short, long)]
         filter: Option<String>,
     },
+    /// Take a screenshot and save to file
+    Screenshot {
+        /// Output file path (e.g. /tmp/shot.png)
+        output: String,
+        /// Image format: png, jpeg, webp
+        #[arg(short, long, default_value = "png")]
+        format: String,
+        /// JPEG/WebP quality (0-100)
+        #[arg(short, long, default_value_t = 80)]
+        quality: u8,
+        /// Max width in pixels (resize if larger)
+        #[arg(short, long)]
+        max_width: Option<u32>,
+    },
+    /// Get cached DOM snapshot (pushed from frontend)
+    Dom {
+        /// Window ID
+        #[arg(long, default_value = "main")]
+        window_id: String,
+    },
+    /// Find elements by CSS selector, XPath, or text
+    Find {
+        /// Selector or text to search for
+        selector: String,
+        /// Search strategy: css, xpath, text
+        #[arg(short, long, default_value = "css")]
+        strategy: String,
+    },
+    /// Get element metadata from Alt+Shift+Click picker
+    Pointed,
+    /// Resize a window
+    Resize {
+        /// Width in pixels
+        width: u32,
+        /// Height in pixels
+        height: u32,
+        /// Window ID
+        #[arg(long, default_value = "main")]
+        window_id: String,
+    },
+    /// Execute a Tauri IPC command via invoke()
+    Ipc {
+        #[command(subcommand)]
+        action: IpcCommands,
+    },
+    /// Emit a custom Tauri event
+    Emit {
+        /// Event name
+        event: String,
+        /// JSON payload
+        #[arg(short, long)]
+        payload: Option<String>,
+    },
     /// App backend state
     State,
     /// List windows
     Windows,
     /// Show detailed help with examples
     Examples,
+}
+
+#[derive(Subcommand)]
+enum IpcCommands {
+    /// Execute a Tauri IPC command
+    Exec {
+        /// Command name (e.g. "greet")
+        command: String,
+        /// JSON args (e.g. '{"name":"world"}')
+        #[arg(short, long)]
+        args: Option<String>,
+    },
+    /// Start IPC monitoring
+    Monitor,
+    /// Stop IPC monitoring
+    Unmonitor,
+    /// Get captured IPC traffic
+    Captured {
+        /// Filter by command name
+        #[arg(short, long)]
+        filter: Option<String>,
+        /// Max entries to return
+        #[arg(short, long, default_value_t = 100)]
+        limit: usize,
+    },
 }
 
 #[tokio::main]
@@ -249,6 +327,36 @@ async fn main() {
         Commands::Logs { lines, filter } => {
             commands::logs(&client, lines, filter.as_deref()).await
         }
+        Commands::Screenshot {
+            output,
+            format,
+            quality,
+            max_width,
+        } => commands::screenshot(&client, &output, &format, quality, max_width).await,
+        Commands::Dom { window_id } => commands::cached_dom(&client, &window_id).await,
+        Commands::Find {
+            selector,
+            strategy,
+        } => commands::find(&client, &selector, &strategy).await,
+        Commands::Pointed => commands::pointed(&client).await,
+        Commands::Resize {
+            width,
+            height,
+            window_id,
+        } => commands::resize(&client, &window_id, width, height).await,
+        Commands::Ipc { action } => match action {
+            IpcCommands::Exec { command, args } => {
+                commands::ipc_exec(&client, &command, args.as_deref()).await
+            }
+            IpcCommands::Monitor => commands::ipc_monitor(&client, "start").await,
+            IpcCommands::Unmonitor => commands::ipc_monitor(&client, "stop").await,
+            IpcCommands::Captured { filter, limit } => {
+                commands::ipc_captured(&client, filter.as_deref(), limit).await
+            }
+        },
+        Commands::Emit { event, payload } => {
+            commands::ipc_emit(&client, &event, payload.as_deref()).await
+        }
         Commands::State => commands::state(&client).await,
         Commands::Windows => commands::windows(&client).await,
         Commands::Examples => unreachable!(),
@@ -314,20 +422,42 @@ WAIT:
   wait --timeout <ms>                Wait for duration
   wait --text "Success"              Wait for text
 
+SCREENSHOT:
+  screenshot <path> [-f png|jpeg|webp] [-q 80] [-m 1280]
+
+DOM:
+  dom                                Cached DOM (pushed from frontend)
+
+FIND:
+  find <selector> [-s css|xpath|text] Find elements
+
+WINDOW:
+  windows                            List windows
+  resize <width> <height>            Resize window
+  pointed                            Alt+Shift+Click element info
+
+IPC:
+  ipc exec <command> [-a '{{"k":"v"}}'] Execute Tauri IPC command
+  ipc monitor                         Start IPC monitoring
+  ipc unmonitor                       Stop IPC monitoring
+  ipc captured [-f filter] [-l 100]   Get captured IPC traffic
+  emit <event> [-p '{{"k":"v"}}']       Emit custom Tauri event
+
 OTHER:
   eval <js-expression>               Execute JavaScript
   logs [-n 20] [-f "filter"]         Console logs
   state                              App metadata
-  windows                            List windows
   help                               This help
 
 EXAMPLES:
-  tauri-connector snapshot
   tauri-connector snapshot -i -c
   tauri-connector click @e7
   tauri-connector fill @e5 "user@example.com"
-  tauri-connector get text @e4
-  tauri-connector press Enter
+  tauri-connector screenshot /tmp/shot.png -m 1280
+  tauri-connector find "Submit" -s text
+  tauri-connector ipc exec greet -a '{{"name":"world"}}'
+  tauri-connector emit my-event -p '{{"foo":42}}'
+  tauri-connector resize 1024 768
   tauri-connector eval "document.title"
 "##
     );

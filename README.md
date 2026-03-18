@@ -304,8 +304,17 @@ tauri-connector click @e5            # Click by ref
 tauri-connector fill @e3 "query"     # Fill input
 tauri-connector get text @e7         # Get text
 tauri-connector press Enter          # Press key
+tauri-connector screenshot /tmp/s.png -m 1280  # Screenshot
+tauri-connector find "Submit" -s text          # Find elements
+tauri-connector dom                  # Cached DOM from frontend
 tauri-connector logs -n 10           # Console logs
 tauri-connector state                # App metadata
+tauri-connector resize 1024 768      # Resize window
+tauri-connector ipc exec greet -a '{"name":"world"}'  # IPC command
+tauri-connector ipc monitor          # Start IPC monitoring
+tauri-connector ipc captured -f greet              # Get captured IPC
+tauri-connector emit my-event -p '{"foo":42}'      # Emit event
+tauri-connector pointed              # Alt+Shift+Click element info
 ```
 
 Environment: `TAURI_CONNECTOR_HOST` (default `127.0.0.1`), `TAURI_CONNECTOR_PORT` (default `9555`).
@@ -320,7 +329,6 @@ Install the included skill to let Claude Code automatically set up and use tauri
 mkdir -p ~/.claude/skills/tauri-connector
 cp skill/SKILL.md ~/.claude/skills/tauri-connector/SKILL.md
 cp skill/SETUP.md ~/.claude/skills/tauri-connector/SETUP.md
-cp skill/RELEASE.md ~/.claude/skills/tauri-connector/RELEASE.md
 ```
 
 ### What It Does
@@ -331,7 +339,8 @@ Once installed, Claude will automatically:
 - **Use the CLI** for DOM snapshots and element interactions
 - **Debug issues** using console logs, app state, and JS execution
 - **Automate testing** with snapshot -> click/fill/verify workflows
-- **Release** with version bumps, cargo publish, and GitHub releases
+
+> **For contributors:** `skill/RELEASE.md` is a project-only skill for the release workflow (version bumps, cargo publish, GitHub releases). It is not installed globally — it works automatically when Claude Code is used inside this repo.
 
 ## MCP Server
 
