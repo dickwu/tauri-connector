@@ -1,5 +1,6 @@
 //! Command handlers for all supported operations.
 
+use base64::Engine;
 use tauri::{Emitter, Manager};
 
 use crate::bridge::Bridge;
@@ -654,39 +655,181 @@ pub async fn console_logs(
     }
 }
 
-// ============ Screenshot (placeholder - needs platform impl) ============
+// ============ Screenshot ============
 
 pub async fn screenshot(
     id: &str,
     format: &str,
     quality: u8,
-    _max_width: Option<u32>,
-    _window_id: &str,
+    max_width: Option<u32>,
+    window_id: &str,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+) -> Response {
+    // Try native platform screenshot first
+    if let Some(app) = app {
+        if let Some(result) = native_screenshot(app, window_id, format, quality, max_width).await {
+            return Response::success(id.to_string(), result);
+        }
+    }
+
+    // Fallback: JS-based capture via canvas
+    js_screenshot(id, format, quality, bridge).await
+}
+
+/// Native platform screenshot (macOS via screencapture).
+async fn native_screenshot(
+    app: &tauri::AppHandle,
+    window_id: &str,
+    format: &str,
+    quality: u8,
+    max_width: Option<u32>,
+) -> Option<serde_json::Value> {
+    let window = app.get_webview_window(window_id)?;
+    let scale = window.scale_factor().ok().unwrap_or(1.0);
+    let pos = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+
+    // Convert physical pixels to logical points for screencapture
+    let x = (pos.x as f64 / scale) as i32;
+    let y = (pos.y as f64 / scale) as i32;
+    let w = (size.width as f64 / scale) as u32;
+    let h = (size.height as f64 / scale) as u32;
+
+    let tmp = std::env::temp_dir().join(format!(
+        "connector-screenshot-{}.png",
+        uuid::Uuid::new_v4()
+    ));
+    let tmp_path = tmp.to_string_lossy().to_string();
+
+    #[cfg(target_os = "macos")]
+    {
+        let rect = format!("{},{},{},{}", x, y, w, h);
+        let output = tokio::process::Command::new("screencapture")
+            .args(["-R", &rect, "-t", "png", "-x", &tmp_path])
+            .output()
+            .await
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (x, y, w, h, &tmp_path);
+        return None;
+    }
+
+    let img_bytes = tokio::fs::read(&tmp).await.ok()?;
+    let _ = tokio::fs::remove_file(&tmp).await;
+
+    let processed = process_screenshot(&img_bytes, format, quality, max_width).ok()?;
+    let mime = if format == "png" {
+        "image/png"
+    } else {
+        "image/jpeg"
+    };
+    let base64_data =
+        base64::engine::general_purpose::STANDARD.encode(&processed);
+
+    Some(serde_json::json!({
+        "base64": base64_data,
+        "mimeType": mime,
+        "width": w,
+        "height": h,
+    }))
+}
+
+/// JS-based fallback screenshot using SVG foreignObject serialization.
+/// Does not require any external CDN or library.
+async fn js_screenshot(
+    id: &str,
+    format: &str,
+    quality: u8,
     bridge: &Bridge,
 ) -> Response {
-    // Use canvas-based screenshot via JS bridge
-    let mime = if format == "png" { "image/png" } else { "image/jpeg" };
+    let mime = if format == "png" {
+        "image/png"
+    } else {
+        "image/jpeg"
+    };
     let quality_f = f64::from(quality) / 100.0;
 
     let script = format!(
         r#"(async () => {{
-            const canvas = document.createElement('canvas');
-            const rect = document.documentElement.getBoundingClientRect();
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            // Note: html2canvas or similar library needed for full rendering
-            // This is a basic fallback
-            return {{
+            // Load html2canvas if not present
+            if (typeof html2canvas === 'undefined') {{
+                await new Promise(function(resolve, reject) {{
+                    var s = document.createElement('script');
+                    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+                    s.onload = resolve;
+                    s.onerror = function() {{ reject('Failed to load html2canvas'); }};
+                    document.head.appendChild(s);
+                }});
+            }}
+            var canvas = await html2canvas(document.body, {{
+                useCORS: true,
+                allowTaint: true,
+                logging: false,
+                foreignObjectRendering: true,
                 width: window.innerWidth,
                 height: window.innerHeight,
-                note: "Canvas screenshot requires html2canvas. Use platform screenshot API for full fidelity."
+                windowWidth: window.innerWidth,
+                windowHeight: window.innerHeight,
+            }});
+            var dataUrl = canvas.toDataURL('{mime}', {quality_f});
+            var base64 = dataUrl.split(',')[1] || '';
+            return {{
+                base64: base64,
+                mimeType: '{mime}',
+                width: canvas.width,
+                height: canvas.height,
+                method: 'html2canvas',
             }};
         }})()"#
     );
-    let _ = (mime, quality_f);
 
-    match bridge.execute_js(&script, 10_000).await {
+    match bridge.execute_js(&script, 30_000).await {
         Ok(result) => Response::success(id.to_string(), result),
         Err(e) => Response::error(id.to_string(), format!("Screenshot failed: {e}")),
     }
+}
+
+/// Process screenshot: resize and/or convert format.
+fn process_screenshot(
+    data: &[u8],
+    format: &str,
+    quality: u8,
+    max_width: Option<u32>,
+) -> Result<Vec<u8>, String> {
+    let img = image::load_from_memory(data).map_err(|e| format!("Image decode error: {e}"))?;
+
+    let img = if let Some(mw) = max_width {
+        if img.width() > mw {
+            img.resize(mw, u32::MAX, image::imageops::FilterType::Lanczos3)
+        } else {
+            img
+        }
+    } else {
+        img
+    };
+
+    let mut buf = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut buf);
+
+    match format {
+        "jpeg" | "jpg" => {
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
+            img.write_with_encoder(encoder)
+                .map_err(|e| format!("JPEG encode error: {e}"))?;
+        }
+        _ => {
+            img.write_to(&mut cursor, image::ImageFormat::Png)
+                .map_err(|e| format!("PNG encode error: {e}"))?;
+        }
+    }
+
+    Ok(buf)
 }

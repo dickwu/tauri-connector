@@ -229,6 +229,9 @@ impl ConnectorBuilder {
                         }
                     };
 
+                    // 1b. Set app handle on bridge for eval fallback
+                    bridge.set_app_handle(handle.clone()).await;
+
                     // 2. Inject bridge JS into all current webviews
                     let init_script = bridge::bridge_init_script(bridge.port());
                     for (_label, window) in handle.webview_windows() {

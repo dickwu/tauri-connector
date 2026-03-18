@@ -25,6 +25,29 @@ fn to_mcp_content(response: Response) -> Value {
     }
 }
 
+/// Convert a screenshot Response to MCP image content (or fall back to text).
+fn to_mcp_image_or_text(response: Response) -> Value {
+    match response.payload {
+        ResponsePayload::Success { ref result } => {
+            if let (Some(base64), Some(mime)) = (
+                result.get("base64").and_then(|v| v.as_str()),
+                result.get("mimeType").and_then(|v| v.as_str()),
+            ) {
+                json!({
+                    "content": [{
+                        "type": "image",
+                        "data": base64,
+                        "mimeType": mime,
+                    }]
+                })
+            } else {
+                to_mcp_content(response)
+            }
+        }
+        _ => to_mcp_content(response),
+    }
+}
+
 fn str_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
@@ -55,11 +78,13 @@ pub async fn call_tool(
         }
 
         "webview_screenshot" => {
-            let format = str_arg(args, "format").unwrap_or_else(|| "jpeg".to_string());
+            let format = str_arg(args, "format").unwrap_or_else(|| "png".to_string());
             let quality = num_arg(args, "quality").unwrap_or(80.0) as u8;
             let max_width = num_arg(args, "maxWidth").map(|n| n as u32);
             let wid = window_id(args);
-            handlers::screenshot(id, &format, quality, max_width, &wid, bridge).await
+            let resp = handlers::screenshot(id, &format, quality, max_width, &wid, bridge, app).await;
+            // Return image content if base64 data is present
+            return to_mcp_image_or_text(resp);
         }
 
         "webview_dom_snapshot" => {

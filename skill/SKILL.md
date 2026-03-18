@@ -5,7 +5,7 @@ description: "Interact with Tauri v2 desktop apps via tauri-connector. Use this 
 
 # Tauri Connector
 
-Deep inspection and interaction with Tauri v2 desktop apps. Fixes the `__TAURI__ not available` bug by using an internal WebSocket bridge instead of Tauri's IPC layer. The **MCP server runs inside the plugin** -- starts automatically when the Tauri app runs.
+Deep inspection and interaction with Tauri v2 desktop apps. Fixes the `__TAURI__ not available` bug by using a dual-path JS execution strategy: WebSocket bridge (primary) with Tauri eval+event fallback. The **MCP server runs inside the plugin** -- starts automatically when the Tauri app runs.
 
 ## When to Use
 
@@ -56,9 +56,9 @@ Check `src-tauri/capabilities/default.json` (or the main capabilities file). Add
 }
 ```
 
-### Step 4: Verify `withGlobalTauri`
+### Step 4: Verify `withGlobalTauri` (REQUIRED)
 
-Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` section. If missing, add it -- this enables the auto-push DOM feature:
+Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` section. This is **required** for the eval+event fallback JS execution path and auto-push DOM feature. If missing, add it:
 
 ```json
 {
@@ -286,6 +286,25 @@ async def test():
 
 asyncio.run(test())
 ```
+
+## Screenshot
+
+Take screenshots of the Tauri webview via the `webview_screenshot` MCP tool or WS API:
+
+```bash
+# Via WebSocket (type: "screenshot")
+ws.send(JSON.stringify({
+  id: "1", type: "screenshot",
+  format: "png", quality: 80,
+  max_width: 1280, window_id: "main"
+}));
+```
+
+The screenshot uses a tiered approach:
+1. **Native screencapture** (macOS) -- uses window position/size, supports resize and format conversion. Requires Screen Recording permission.
+2. **html2canvas fallback** -- dynamically injects html2canvas with `foreignObjectRendering: true` for modern CSS support. No app dependencies needed.
+
+The MCP tool returns image content directly. The WS API returns base64-encoded image data in the result.
 
 ## Common Workflows
 

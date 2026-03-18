@@ -25,6 +25,8 @@ pub struct Bridge {
     script_tx: mpsc::UnboundedSender<String>,
     /// Pending JS evaluation results, keyed by request ID
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<serde_json::Value, String>>>>>,
+    /// App handle for eval-based fallback execution
+    app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 }
 
 impl Bridge {
@@ -42,6 +44,7 @@ impl Bridge {
             port,
             script_tx,
             pending: pending.clone(),
+            app_handle: Arc::new(Mutex::new(None)),
         };
 
         let bridge_clone = bridge.clone();
@@ -59,8 +62,30 @@ impl Bridge {
         self.port
     }
 
-    /// Execute JavaScript in the webview via the bridge and wait for the result.
+    /// Set the app handle for eval-based fallback JS execution.
+    pub async fn set_app_handle(&self, handle: tauri::AppHandle) {
+        *self.app_handle.lock().await = Some(handle);
+    }
+
+    /// Execute JavaScript in the webview. Tries WS bridge, falls back to eval+event.
     pub async fn execute_js(
+        &self,
+        script: &str,
+        timeout_ms: u64,
+    ) -> Result<serde_json::Value, String> {
+        // Try WS bridge with short timeout
+        match self.execute_js_ws(script, timeout_ms.min(2000)).await {
+            Ok(v) => return Ok(v),
+            Err(_) => {
+                // WS bridge timed out, fall back to eval+event path
+            }
+        }
+
+        // Fallback: eval + Tauri event
+        self.execute_js_via_eval(script, timeout_ms).await
+    }
+
+    async fn execute_js_ws(
         &self,
         script: &str,
         timeout_ms: u64,
@@ -69,32 +94,82 @@ impl Bridge {
         let (tx, rx) = oneshot::channel();
 
         {
-            let mut pending = self.pending.lock().await;
-            pending.insert(id.clone(), tx);
+            self.pending.lock().await.insert(id.clone(), tx);
         }
 
-        let cmd = BridgeCommand {
-            id: id.clone(),
-            script: script.to_string(),
-        };
+        let cmd = BridgeCommand { id: id.clone(), script: script.to_string() };
         let msg = serde_json::to_string(&cmd).map_err(|e| e.to_string())?;
-        self.script_tx
-            .send(msg)
-            .map_err(|_| "Bridge not connected".to_string())?;
+        self.script_tx.send(msg).map_err(|_| "Bridge not connected".to_string())?;
 
-        let result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx)
+        tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx)
             .await
             .map_err(|_| {
-                // Clean up pending entry on timeout
                 let pending = self.pending.clone();
                 let id = id.clone();
-                tokio::spawn(async move {
-                    pending.lock().await.remove(&id);
-                });
-                "Script execution timeout".to_string()
+                tokio::spawn(async move { pending.lock().await.remove(&id); });
+                "WS bridge timeout".to_string()
             })?
-            .map_err(|_| "Bridge channel closed".to_string())?;
+            .map_err(|_| "Bridge channel closed".to_string())?
+    }
 
+    async fn execute_js_via_eval(
+        &self,
+        script: &str,
+        timeout_ms: u64,
+    ) -> Result<serde_json::Value, String> {
+        use tauri::{Listener, Manager};
+
+        let app = self.app_handle.lock().await;
+        let app = app.as_ref().ok_or("App handle not set for eval fallback")?;
+        let window = app.get_webview_window("main")
+            .ok_or("Window 'main' not found")?;
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let event_name = format!("connector-eval-{id}");
+        let (tx, rx) = oneshot::channel::<Result<serde_json::Value, String>>();
+        let tx = std::sync::Mutex::new(Some(tx));
+
+        let listener_id = app.listen(&event_name, move |event| {
+            if let Some(tx) = tx.lock().unwrap().take() {
+                let payload_str = event.payload();
+                // The payload may be double-quoted (string-wrapped JSON from Tauri event system)
+                let inner = serde_json::from_str::<String>(payload_str)
+                    .unwrap_or_else(|_| payload_str.to_string());
+                match serde_json::from_str::<BridgeResult>(&inner) {
+                    Ok(r) => {
+                        let v = if let Some(e) = r.error { Err(e) }
+                                else { Ok(r.result.unwrap_or(serde_json::Value::Null)) };
+                        let _ = tx.send(v);
+                    }
+                    Err(e) => { let _ = tx.send(Err(format!("Parse error: {e}"))); }
+                }
+            }
+        });
+
+        let escaped = script.replace('\\', "\\\\").replace('`', "\\`");
+        let js = format!(
+            r#"(async function(){{
+                try{{
+                    const AF=Object.getPrototypeOf(async function(){{}}).constructor;
+                    const r=await new AF('return ('+`{escaped}`+')')();
+                    let p;try{{JSON.stringify(r);p=JSON.stringify({{id:'{id}',result:r}})}}catch(_){{p=JSON.stringify({{id:'{id}',result:String(r)}})}}
+                    if(window.__TAURI_INTERNALS__)window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{{event:'{event_name}',payload:p}});
+                }}catch(e){{
+                    const p=JSON.stringify({{id:'{id}',error:e.message||String(e)}});
+                    if(window.__TAURI_INTERNALS__)window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{{event:'{event_name}',payload:p}});
+                }}
+            }})()"#
+        );
+
+        window.eval(&js).map_err(|e| format!("eval inject failed: {e}"))?;
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms), rx
+        ).await
+        .map_err(|_| "Script execution timeout (eval path)".to_string())?
+        .map_err(|_| "Result channel closed".to_string())?;
+
+        app.unlisten(listener_id);
         result
     }
 
@@ -118,42 +193,57 @@ impl Bridge {
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let (mut ws_tx, mut ws_rx) = ws_stream.split();
             let pending = self.pending.clone();
 
-            // Forward scripts from plugin → webview bridge
-            let forward_task = tokio::spawn(async move {
-                while let Some(msg) = script_rx.recv().await {
-                    if ws_tx.send(Message::Text(msg.into())).await.is_err() {
-                        break;
-                    }
-                }
-            });
+            // Use a single loop with select! instead of split() to avoid
+            // potential buffering issues between SplitSink and SplitStream
+            let mut ws_stream = ws_stream;
 
-            // Receive results from webview bridge → plugin
-            while let Some(Ok(msg)) = ws_rx.next().await {
-                if let Message::Text(text) = msg {
-                    match serde_json::from_str::<BridgeResult>(&text) {
-                        Ok(result) => {
-                            let mut pending = pending.lock().await;
-                            if let Some(tx) = pending.remove(&result.id) {
-                                let value = if let Some(error) = result.error {
-                                    Err(error)
-                                } else {
-                                    Ok(result.result.unwrap_or(serde_json::Value::Null))
-                                };
-                                let _ = tx.send(value);
+            loop {
+                tokio::select! {
+                    // Script to send to webview
+                    script_msg = script_rx.recv() => {
+                        match script_msg {
+                            Some(msg) => {
+                                if ws_stream.send(Message::Text(msg.into())).await.is_err() {
+                                    break;
+                                }
                             }
+                            None => break,
                         }
-                        Err(e) => {
-                            eprintln!("[connector][bridge] Invalid result message: {e}");
+                    }
+                    // Result from webview
+                    ws_msg = ws_stream.next() => {
+                        match ws_msg {
+                            Some(Ok(Message::Text(text))) => {
+                                match serde_json::from_str::<BridgeResult>(&text) {
+                                    Ok(result) => {
+                                        let mut pending = pending.lock().await;
+                                        if let Some(tx) = pending.remove(&result.id) {
+                                            let value = if let Some(error) = result.error {
+                                                Err(error)
+                                            } else {
+                                                Ok(result.result.unwrap_or(serde_json::Value::Null))
+                                            };
+                                            let _ = tx.send(value);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[connector][bridge] Invalid result message: {e}");
+                                    }
+                                }
+                            }
+                            Some(Ok(_)) => {} // Ignore non-text messages
+                            Some(Err(_)) => break,
+                            None => {
+                                break;
+                            }
                         }
                     }
                 }
             }
 
             println!("[connector][bridge] Webview client disconnected");
-            forward_task.abort();
 
             // Reconnect: create a new script_rx channel for next connection
             // The old script_rx is consumed, so we break and let the webview reconnect
@@ -170,6 +260,9 @@ pub fn bridge_init_script(port: u16) -> String {
         r#"(function() {{
   if (window.__CONNECTOR_BRIDGE__) return;
   window.__CONNECTOR_BRIDGE__ = true;
+
+  // Capture native WebSocket before frameworks (Next.js/Turbopack HMR) can patch it
+  const NativeWebSocket = window.WebSocket;
 
   const BRIDGE_PORT = {port};
   let ws = null;
@@ -201,7 +294,7 @@ pub fn bridge_init_script(port: u16) -> String {
 
   function connect() {{
     try {{
-      ws = new WebSocket('ws://127.0.0.1:' + BRIDGE_PORT);
+      ws = new NativeWebSocket('ws://127.0.0.1:' + BRIDGE_PORT);
     }} catch (e) {{
       scheduleReconnect();
       return;
@@ -209,12 +302,14 @@ pub fn bridge_init_script(port: u16) -> String {
 
     ws.onopen = function() {{
       origConsole.log('[connector] Bridge connected on port ' + BRIDGE_PORT);
+      // Send hello to verify bidirectional communication
+      try {{ ws.send(JSON.stringify({{ id: '__bridge_hello__', result: 'connected' }})); }} catch (_) {{}}
     }};
 
     ws.onmessage = function(event) {{
       let cmd;
       try {{
-        cmd = JSON.parse(event.data);
+        cmd = JSON.parse(typeof event.data === 'string' ? event.data : '');
       }} catch (e) {{
         return;
       }}
@@ -245,7 +340,6 @@ pub fn bridge_init_script(port: u16) -> String {
     const script = cmd.script;
 
     try {{
-      // Use async Function constructor for top-level await support
       const AsyncFunction = Object.getPrototypeOf(async function(){{}}).constructor;
       const fn = new AsyncFunction('return (' + script + ')');
       const result = await fn();

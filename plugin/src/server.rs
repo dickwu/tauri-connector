@@ -132,7 +132,7 @@ async fn handle_command(
 
         // Screenshot
         Command::Screenshot { format, quality, max_width, window_id } => {
-            handlers::screenshot(&id, &format, quality, max_width, &window_id, bridge).await
+            handlers::screenshot(&id, &format, quality, max_width, &window_id, bridge, app).await
         }
 
         // DOM
