@@ -32,7 +32,11 @@ fn save_refs(refs: &RefMap) {
 }
 
 #[derive(Parser)]
-#[command(name = "tauri-connector", about = "CLI for interacting with Tauri apps")]
+#[command(
+    name = "tauri-connector",
+    about = "CLI for interacting with Tauri apps",
+    version = env!("CARGO_PKG_VERSION"),
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
