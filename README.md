@@ -11,15 +11,26 @@ A Tauri v2 plugin with **embedded MCP server** + Rust CLI for deep inspection an
 
 ## The Fix
 
-tauri-connector uses an **internal WebSocket bridge** instead of Tauri's IPC layer. A small JS client injected into the webview connects back to the plugin via `ws://127.0.0.1:{port}`. Results flow through this dedicated channel, completely bypassing the content world isolation issue.
+tauri-connector uses a **dual-path JS execution** strategy:
 
-The **MCP server runs inside the plugin** -- when your Tauri app starts, the MCP server starts automatically. No separate process needed.
+1. **WS Bridge (primary)** -- A small JS client injected into the webview connects back to the plugin via `ws://127.0.0.1:{port}`. Scripts and results flow through this dedicated WebSocket channel.
+
+2. **Eval+Event fallback** -- If the WS bridge times out (2s), the plugin falls back to injecting JS via Tauri's `window.eval()` and receiving results through Tauri's event system. This path requires `withGlobalTauri: true`.
+
+The fallback is transparent -- callers get the same result regardless of which path succeeds. The **MCP server runs inside the plugin** -- when your Tauri app starts, it starts automatically.
 
 ```
 Frontend JS (app context)
   |-- invoke('plugin:connector|push_dom') --> Rust state (cached DOM)
   |-- invoke('plugin:connector|push_logs') -> Rust state (cached logs)
-  '-- WebSocket ws://127.0.0.1:9300 --------> Bridge (JS execution)
+  '-- WebSocket ws://127.0.0.1:9300 --------> Bridge (JS execution, path 1)
+
+Plugin (Rust)
+  |-- bridge.execute_js()
+  |   |-- try WS bridge (2s timeout) --------> webview JS via WebSocket
+  |   '-- fallback: window.eval() + event ---> webview JS via Tauri IPC
+  |-- native screencapture (macOS) ----------> PNG/JPEG with resize
+  '-- html2canvas fallback ------------------> foreignObjectRendering
 
 Claude Code -------- SSE http://host:9556/sse -----> Embedded MCP server
                                                       |-- handlers (direct, in-process)
@@ -90,7 +101,7 @@ The plugin auto-pushes DOM snapshots from the frontend via Tauri's native IPC (`
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.1"
+tauri-plugin-connector = "0.2"
 ```
 
 ### 2. Register it (debug-only)
@@ -110,7 +121,7 @@ tauri-plugin-connector = "0.1"
 "connector:default"
 ```
 
-### 4. Set `withGlobalTauri` (recommended)
+### 4. Set `withGlobalTauri` (required)
 
 ```json
 // src-tauri/tauri.conf.json
@@ -413,13 +424,23 @@ tauri-connector/
 
 ## How It Works
 
-### Internal WebSocket Bridge
+### JS Execution (Dual Path)
 
-1. Plugin starts an internal WebSocket on `127.0.0.1:9300-9400`
-2. Bridge JS is injected into the webview via `WebviewWindow`
-3. The bridge connects to the internal WebSocket from the page's main JS context
-4. JS execution requests flow through this WebSocket channel
-5. Results return through the same channel -- no `window.__TAURI__` needed
+The bridge uses two execution paths for maximum reliability:
+
+1. **WS Bridge (primary, 2s timeout)**: Internal WebSocket on `127.0.0.1:9300-9400`. Bridge JS injected into the webview connects back, executes scripts via `AsyncFunction`, and returns results through the WebSocket. Uses `tokio::select!` for multiplexed read/write on a single stream.
+
+2. **Eval+Event fallback**: If the WS bridge times out, the plugin injects JS via Tauri's `window.eval()` and receives results through Tauri's event system (`plugin:event|emit`). Requires `withGlobalTauri: true`. Handles double-serialized event payloads automatically.
+
+The fallback is transparent -- `bridge.execute_js()` returns the same result regardless of which path succeeded.
+
+### Screenshot
+
+The `webview_screenshot` tool uses a tiered approach:
+
+1. **Native screencapture** (macOS): Uses `screencapture -R` with Retina-aware window position/size. Supports resize (`maxWidth`) and format conversion (PNG/JPEG) via the `image` crate. Requires Screen Recording permission.
+
+2. **html2canvas fallback**: Dynamically injects [html2canvas](https://html2canvas.hertzen.com/) from CDN with `foreignObjectRendering: true` for modern CSS support (including `lab()`, `oklch()` colors). No app dependencies needed. Returns MCP image content type directly.
 
 ### Embedded MCP Server
 
