@@ -357,7 +357,7 @@ Once installed, Claude will automatically:
 - **Debug issues** using console logs, app state, and JS execution
 - **Automate testing** with snapshot -> click/fill/verify workflows
 
-> **For contributors:** `skill/RELEASE.md` is a project-only skill for the release workflow (version bumps, cargo publish, GitHub releases). It is not installed globally — it works automatically when Claude Code is used inside this repo.
+> **For contributors:** The release workflow skill is at `.claude/skills/tauri-connector-release/SKILL.md` — it triggers automatically when you say "release" or "bump version" inside this repo.
 
 ## MCP Server
 
@@ -478,7 +478,6 @@ tauri-connector/
 |-- skill/                      # Claude Code skill + bun scripts
 |   |-- SKILL.md                # Usage guide (loaded by Claude Code)
 |   |-- SETUP.md                # Setup instructions
-|   |-- RELEASE.md              # Release workflow (version bump, publish, gh release)
 |   '-- scripts/                # Bun scripts for WS interaction
 |       |-- connector.ts        # Shared helper (auto-discovers ports via PID file)
 |       |-- state.ts, eval.ts, screenshot.ts, snapshot.ts
