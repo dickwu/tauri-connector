@@ -155,130 +155,146 @@ Look for:
 
 The MCP server is now live. Claude Code connects automatically via the URL in `.mcp.json`.
 
-## CLI Usage
+## WebSocket API via Bun
 
-### Install (build from source)
+Connect directly to the plugin WebSocket on port 9555 using `bun -e`. No build step or extra dependencies -- bun has native WebSocket support.
+
+### Execute JavaScript
+
+```bash
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'execute_js',
+  script: '(() => ({ title: document.title, url: location.href }))()',
+  window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
+```
+
+### Take Screenshot
+
+```bash
+bun -e "
+const fs = require('fs');
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'screenshot',
+  format: 'png', quality: 80, max_width: 1280, window_id: 'main'
+}));
+ws.onmessage = (e) => {
+  const r = JSON.parse(e.data);
+  if (r.result?.base64) {
+    fs.writeFileSync('/tmp/screenshot.png', Buffer.from(r.result.base64, 'base64'));
+    console.log('Saved /tmp/screenshot.png', r.result.width + 'x' + r.result.height);
+  } else { console.log(r); }
+  ws.close();
+};
+setTimeout(() => process.exit(1), 60000);
+"
+```
+
+### DOM Snapshot / Click / Type
+
+```bash
+# Accessibility tree snapshot
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'dom_snapshot', snapshot_type: 'accessibility', window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data).result); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
+
+# Click an element
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'interact', action: 'click', selector: 'button.submit', window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
+
+# Type text into focused element
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'keyboard', action: 'type', text: 'hello', window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
+```
+
+### App State / Logs / Windows
+
+```bash
+# App metadata (no bridge needed)
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({ id: '1', type: 'backend_state' }));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 5000);
+"
+
+# Console logs
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'console_logs', lines: 20, window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 5000);
+"
+```
+
+### WS Command Reference
+
+All commands use `{ id, type, ...params }` with snake_case types:
+
+| Type | Key Params |
+|---|---|
+| `ping` | -- |
+| `execute_js` | `script`, `window_id` |
+| `screenshot` | `format`, `quality`, `max_width`, `window_id` |
+| `dom_snapshot` | `snapshot_type`, `selector`, `window_id` |
+| `find_element` | `selector`, `strategy`, `window_id` |
+| `get_styles` | `selector`, `properties`, `window_id` |
+| `interact` | `action`, `selector`, `strategy`, `x`, `y`, `window_id` |
+| `keyboard` | `action`, `text`, `key`, `modifiers`, `window_id` |
+| `wait_for` | `selector`, `strategy`, `text`, `timeout`, `window_id` |
+| `window_list` / `window_info` / `window_resize` | `window_id`, `width`, `height` |
+| `backend_state` | -- |
+| `ipc_execute_command` | `command`, `args` |
+| `ipc_monitor` | `action` |
+| `ipc_get_captured` | `filter`, `limit` |
+| `ipc_emit_event` | `event_name`, `payload` |
+| `console_logs` | `lines`, `filter`, `window_id` |
+
+## Rust CLI (Alternative)
+
+A Rust CLI with ref-based element addressing is also available:
 
 ```bash
 cargo build -p connector-cli --release
 # Binary at target/release/tauri-connector
 ```
 
-### Commands
-
 ```bash
-tauri-connector <command> [args...]
-tauri-connector --help               # List all commands
-tauri-connector examples             # Detailed help with examples
+tauri-connector snapshot -i          # DOM snapshot with ref IDs
+tauri-connector click @e5            # Click by ref
+tauri-connector fill @e3 "query"     # Fill input
+tauri-connector get text @e7         # Get text
+tauri-connector press Enter          # Press key
+tauri-connector logs -n 10           # Console logs
+tauri-connector state                # App metadata
 ```
 
-### Snapshot
-
-```bash
-tauri-connector snapshot                        # Full DOM tree with refs
-tauri-connector snapshot -i                     # Interactive elements only
-tauri-connector snapshot -c                     # Compact (strip wrappers)
-tauri-connector snapshot -i -c                  # Interactive + compact (best for LLM)
-tauri-connector snapshot -d 3                   # Max depth 3
-tauri-connector snapshot -s ".main-content"     # Scope to selector
-```
-
-Output format (similar to agent-browser):
-
-```
-- role "accessible-name" [attr1, attr2, ref=eN]
-```
-
-Example:
-
-```
-- navigation
-  - link "Home" [ref=e1]
-  - link "Products" [ref=e2]
-- main
-  - heading "Dashboard" [level=1, ref=e3]
-  - textbox "Search" [required, ref=e4]: current value
-  - button "Submit" [ref=e5]
-  - switch [checked=false, ref=e6]
-```
-
-### Interactions
-
-All commands accept `@eN` refs or CSS selectors:
-
-```bash
-tauri-connector click @e5                       # Click element
-tauri-connector dblclick @e3                    # Double-click
-tauri-connector hover @e2                       # Hover
-tauri-connector focus @e4                       # Focus
-tauri-connector fill @e4 "hello@example.com"    # Clear + fill input
-tauri-connector type @e4 "search query"         # Type character by character
-tauri-connector check @e6                       # Check checkbox
-tauri-connector uncheck @e6                     # Uncheck checkbox
-tauri-connector select @e7 "Option A" "Option B" # Select option(s)
-tauri-connector scrollintoview @e10             # Scroll element into view
-```
-
-### Keyboard
-
-```bash
-tauri-connector press Enter
-tauri-connector press Tab
-tauri-connector press Escape
-```
-
-### Scroll
-
-```bash
-tauri-connector scroll down 500                 # Scroll page down 500px
-tauri-connector scroll up 300                   # Scroll page up
-tauri-connector scroll left 200                 # Scroll horizontally
-tauri-connector scroll down 300 --selector @e5  # Scroll within element
-```
-
-### Getters
-
-```bash
-tauri-connector get title                       # Page title
-tauri-connector get url                         # Current URL
-tauri-connector get text @e3                    # Text content
-tauri-connector get html @e3                    # Inner HTML
-tauri-connector get value @e4                   # Input value
-tauri-connector get attr @e1 href               # Attribute value
-tauri-connector get box @e5                     # Bounding box {x, y, width, height}
-tauri-connector get styles @e5                  # All computed styles
-tauri-connector get count ".list-item"          # Element count by selector
-```
-
-### Wait
-
-```bash
-tauri-connector wait ".loading-complete"        # Wait for element
-tauri-connector wait --text "Success"           # Wait for text to appear
-tauri-connector wait --timeout 10000 ".slow"    # Custom timeout
-```
-
-### Other
-
-```bash
-tauri-connector eval "document.title"           # Run arbitrary JS
-tauri-connector logs                            # Console logs (last 20)
-tauri-connector logs -n 50                      # Last 50 logs
-tauri-connector logs -f "error"                 # Filter logs
-tauri-connector state                           # App metadata
-tauri-connector windows                         # List all windows
-```
-
-### Ref Persistence
-
-Refs from `snapshot` are saved to `/tmp/tauri-connector-refs.json` and persist across CLI invocations. Run `snapshot` again to refresh refs after DOM changes.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `TAURI_CONNECTOR_HOST` | `127.0.0.1` | Plugin host |
-| `TAURI_CONNECTOR_PORT` | `9555` | Plugin WebSocket port |
+Environment: `TAURI_CONNECTOR_HOST` (default `127.0.0.1`), `TAURI_CONNECTOR_PORT` (default `9555`).
 
 ## Claude Code Skill (Recommended)
 
