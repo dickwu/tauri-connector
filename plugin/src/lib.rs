@@ -256,6 +256,7 @@ impl ConnectorBuilder {
                     ));
 
                     // 5. Start embedded MCP SSE server (if enabled)
+                    let mut mcp_port_actual: Option<u16> = None;
                     if mcp_enabled {
                         match mcp::start(
                             &bind_address,
@@ -266,13 +267,14 @@ impl ConnectorBuilder {
                         )
                         .await
                         {
-                            Ok(mcp_port) => {
+                            Ok(port) => {
+                                mcp_port_actual = Some(port);
                                 let config = handle.config();
                                 println!(
                                     "[connector][mcp] MCP ready for '{}' — url: http://{}:{}/sse",
                                     config.product_name.clone().unwrap_or_default(),
                                     bind_address,
-                                    mcp_port,
+                                    port,
                                 );
                             }
                             Err(e) => {
@@ -291,19 +293,34 @@ impl ConnectorBuilder {
                             }
                         };
 
+                    let ws_port = server.port();
                     let config = handle.config();
                     println!(
                         "[connector] Plugin ready for '{}' ({}) — WS on {}:{}",
                         config.product_name.clone().unwrap_or_default(),
                         config.identifier,
                         bind_address,
-                        server.port()
+                        ws_port,
+                    );
+
+                    // 7. Write PID file so bun scripts can auto-discover ports
+                    let pid_file = write_pid_file(
+                        ws_port,
+                        mcp_port_actual,
+                        bridge_port,
+                        &config.product_name.clone().unwrap_or_default(),
+                        &config.identifier,
                     );
 
                     server.set_app_handle(handle);
 
                     if let Err(e) = server.run(bind_address).await {
                         eprintln!("[connector] Server error: {e}");
+                    }
+
+                    // Clean up PID file on exit
+                    if let Some(path) = pid_file {
+                        let _ = std::fs::remove_file(&path);
                     }
                 });
 
@@ -316,4 +333,46 @@ impl ConnectorBuilder {
 /// Initialize the plugin with default settings.
 pub fn init() -> TauriPlugin<Wry> {
     ConnectorBuilder::new().build()
+}
+
+/// Write a `.connector.json` PID file to `target/` so bun scripts can auto-discover ports.
+/// Returns the path if successful (for cleanup on exit).
+fn write_pid_file(
+    ws_port: u16,
+    mcp_port: Option<u16>,
+    bridge_port: u16,
+    app_name: &str,
+    app_id: &str,
+) -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    // exe = .../target/debug/app-name  ->  target/ is 2 levels up
+    let target_dir = exe.parent()?.parent()?;
+
+    let pid_path = target_dir.join(".connector.json");
+    let pid = std::process::id();
+
+    let info = serde_json::json!({
+        "pid": pid,
+        "ws_port": ws_port,
+        "mcp_port": mcp_port,
+        "bridge_port": bridge_port,
+        "app_name": app_name,
+        "app_id": app_id,
+        "exe": exe.to_string_lossy(),
+        "started_at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    });
+
+    match std::fs::write(&pid_path, serde_json::to_string_pretty(&info).ok()?) {
+        Ok(()) => {
+            println!("[connector] PID file: {}", pid_path.display());
+            Some(pid_path)
+        }
+        Err(e) => {
+            eprintln!("[connector] Failed to write PID file: {e}");
+            None
+        }
+    }
 }

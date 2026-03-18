@@ -1,124 +1,33 @@
 ---
 name: tauri-connector
-description: "Interact with Tauri v2 desktop apps via tauri-connector. Use this skill when the user wants to: test Tauri UI, automate webview interactions, take DOM snapshots, click/hover/fill elements, inspect app state, read console logs, execute JS in webviews, debug Tauri desktop apps, or SET UP tauri-connector in a project. Also use when the user mentions admin/, front/, or tool/ desktop apps, or asks about DOM inspection, element interaction, or app testing. Provides automated setup, embedded MCP server, Rust CLI with ref-based element addressing."
+description: "Interact with Tauri v2 desktop apps via tauri-connector. Use this skill when the user wants to: test Tauri UI, automate webview interactions, take DOM snapshots, click/hover/fill elements, inspect app state, read console logs, execute JS in webviews, debug Tauri desktop apps, or SET UP tauri-connector in a project. Also use when the user mentions admin/, front/, or tool/ desktop apps, or asks about DOM inspection, element interaction, or app testing. Provides automated setup, embedded MCP server, bun scripts for WebSocket interaction."
 ---
 
 # Tauri Connector
 
-Deep inspection and interaction with Tauri v2 desktop apps. Fixes the `__TAURI__ not available` bug by using a dual-path JS execution strategy: WebSocket bridge (primary) with Tauri eval+event fallback. The **MCP server runs inside the plugin** -- starts automatically when the Tauri app runs.
+Deep inspection and interaction with Tauri v2 desktop apps. The **MCP server runs inside the plugin** -- starts automatically when the Tauri app runs.
 
-## When to Use
+## Setup
 
-- Setting up tauri-connector in a Tauri project
-- Testing UI flows in Tauri desktop apps
-- Automating webview interactions (click, hover, fill, type, scroll)
-- Taking DOM snapshots for understanding page structure
-- Reading console logs from the webview
-- Executing JavaScript in the webview context
-- Inspecting app metadata, window state, IPC commands
-- Debugging desktop app behavior
+For first-time setup in a Tauri project, read `skill/SETUP.md` in the tauri-connector repo. Key steps: add `tauri-plugin-connector = "0.2"` to Cargo.toml, register plugin, add permissions, set `withGlobalTauri: true`, add MCP URL to `.mcp.json`.
 
-## Automated Setup
+## Checking if the App is Running
 
-When the user asks to set up tauri-connector in a Tauri project, follow these steps automatically. Detect the project by looking for `src-tauri/` directory and `tauri.conf.json`.
+The plugin writes a PID file to `target/.connector.json` when it starts. The bun scripts auto-discover ports from this file. To check manually:
 
-### Step 1: Add Cargo dependency
+```bash
+# Check if PID file exists (look in the Tauri project's target dir)
+cat src-tauri/target/debug/.connector.json 2>/dev/null || cat target/debug/.connector.json 2>/dev/null
 
-Check `src-tauri/Cargo.toml`. If `tauri-plugin-connector` is not present, add it:
-
-```toml
-[dependencies]
-tauri-plugin-connector = "0.2"
+# Or check the port directly
+lsof -i :9555 -P -n 2>/dev/null | grep LISTEN
 ```
 
-### Step 2: Register the plugin
-
-Check `src-tauri/src/lib.rs` or `src-tauri/src/main.rs` for the `tauri::Builder` chain. Add the plugin registration wrapped in `#[cfg(debug_assertions)]` so it only runs in dev builds:
-
-```rust
-#[cfg(debug_assertions)]
-{
-    builder = builder.plugin(tauri_plugin_connector::init());
-}
-```
-
-Place this BEFORE the `.invoke_handler()` call and AFTER the initial builder creation.
-
-### Step 3: Add permissions
-
-Check `src-tauri/capabilities/default.json` (or the main capabilities file). Add `"connector:default"` to the `permissions` array:
-
-```json
-{
-  "permissions": [
-    "connector:default"
-  ]
-}
-```
-
-### Step 4: Verify `withGlobalTauri` (REQUIRED)
-
-Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` section. This is **required** for the eval+event fallback JS execution path and auto-push DOM feature. If missing, add it:
-
-```json
-{
-  "app": {
-    "withGlobalTauri": true
-  }
-}
-```
-
-### Step 5: Configure Claude Code
-
-Add to `.mcp.json` in the project root:
-
-```json
-{
-  "mcpServers": {
-    "tauri-connector": {
-      "url": "http://127.0.0.1:9556/sse"
-    }
-  }
-}
-```
-
-The MCP server is embedded in the plugin -- no separate command or install needed.
-
-### Step 6: Verify
-
-Run the app with `bun run tauri dev` (or `cargo tauri dev`). Look for these log lines:
-
-```
-[connector][bridge] Internal bridge on port 9300
-[connector][mcp] SSE server listening on 0.0.0.0:9556
-[connector][mcp] MCP ready for 'App Name' -- url: http://0.0.0.0:9556/sse
-[connector] Plugin ready for 'App Name' (com.app.id) -- WS on 0.0.0.0:9555
-```
-
-### Custom Configuration
-
-For localhost-only access, custom ports, or disabling the embedded MCP:
-
-```rust
-use tauri_plugin_connector::ConnectorBuilder;
-
-#[cfg(debug_assertions)]
-{
-    builder = builder.plugin(
-        ConnectorBuilder::new()
-            .bind_address("127.0.0.1")   // default: 0.0.0.0
-            .port_range(9600, 9700)      // WS port range (default: 9555-9655)
-            .mcp_port_range(9700, 9800)  // MCP port range (default: 9556-9656)
-            .build()
-    );
-}
-```
+If the app is already running in another terminal, the bun scripts connect directly -- no need to start a new instance.
 
 ## Bun Scripts
 
-Ready-to-run scripts in `skill/scripts/`. No build step -- bun runs TypeScript natively with built-in WebSocket support.
-
-Set `SCRIPTS` for convenience:
+Ready-to-run scripts at `~/opensource/tauri-connector/skill/scripts/`. Bun runs TypeScript natively with built-in WebSocket. Scripts auto-discover ports from the PID file.
 
 ```bash
 SCRIPTS=~/opensource/tauri-connector/skill/scripts
@@ -151,8 +60,15 @@ bun run $SCRIPTS/wait.ts "Success" --text              # Wait for text
 | Variable | Default | Description |
 |---|---|---|
 | `TAURI_CONNECTOR_HOST` | `127.0.0.1` | Plugin host |
-| `TAURI_CONNECTOR_PORT` | `9555` | Plugin WS port |
+| `TAURI_CONNECTOR_PORT` | auto from PID file, or `9555` | Plugin WS port |
 | `TAURI_CONNECTOR_TIMEOUT` | `15000` | Default timeout (ms) |
+
+### Port Discovery
+
+Scripts resolve the WS port in this order:
+1. `TAURI_CONNECTOR_PORT` env var (explicit override)
+2. `target/.connector.json` PID file (auto-discovery from nearby `target/` dirs)
+3. Default `9555`
 
 ### Inline Alternative
 
@@ -167,37 +83,28 @@ setTimeout(() => process.exit(1), 5000);
 "
 ```
 
-### WS Command Types Reference
+## WS Command Types
 
-All commands use `{ id, type, ...params }`. The `type` field uses snake_case:
+All commands use `{ id, type, ...params }` with snake_case types:
 
-| Type | Required Params | Optional Params |
-|---|---|---|
-| `ping` | -- | -- |
-| `execute_js` | `script` | `window_id` |
-| `screenshot` | -- | `format`, `quality`, `max_width`, `window_id` |
-| `dom_snapshot` | -- | `snapshot_type`, `selector`, `window_id` |
-| `get_cached_dom` | -- | `window_id` |
-| `find_element` | `selector` | `strategy`, `window_id` |
-| `get_styles` | `selector` | `properties`, `window_id` |
-| `interact` | `action` | `selector`, `strategy`, `x`, `y`, `direction`, `distance`, `window_id` |
-| `keyboard` | `action` | `text`, `key`, `modifiers`, `window_id` |
-| `wait_for` | -- | `selector`, `strategy`, `text`, `timeout`, `window_id` |
-| `window_list` | -- | -- |
-| `window_info` | -- | `window_id` |
-| `window_resize` | `width`, `height` | `window_id` |
-| `backend_state` | -- | -- |
-| `ipc_execute_command` | `command` | `args` |
-| `ipc_monitor` | `action` | -- |
-| `ipc_get_captured` | -- | `filter`, `limit` |
-| `ipc_emit_event` | `event_name` | `payload` |
-| `console_logs` | -- | `lines`, `filter`, `window_id` |
+| Type | Key Params |
+|---|---|
+| `execute_js` | `script`, `window_id` |
+| `screenshot` | `format`, `quality`, `max_width`, `window_id` |
+| `dom_snapshot` | `snapshot_type`, `selector`, `window_id` |
+| `find_element` | `selector`, `strategy`, `window_id` |
+| `interact` | `action`, `selector`, `strategy`, `x`, `y`, `window_id` |
+| `keyboard` | `action`, `text`, `key`, `modifiers`, `window_id` |
+| `wait_for` | `selector`, `strategy`, `text`, `timeout`, `window_id` |
+| `backend_state` | -- |
+| `console_logs` | `lines`, `filter`, `window_id` |
+| `window_list` / `window_info` | `window_id` |
+| `ipc_execute_command` | `command`, `args` |
+| `ipc_emit_event` | `event_name`, `payload` |
 
 ## MCP Server
 
-### Embedded (Default -- Recommended)
-
-The MCP server runs inside the plugin. No setup beyond adding the URL to `.mcp.json`:
+The embedded MCP server starts automatically. Configure in `.mcp.json`:
 
 ```json
 {
@@ -209,88 +116,43 @@ The MCP server runs inside the plugin. No setup beyond adding the URL to `.mcp.j
 }
 ```
 
-Start the Tauri app and the MCP server is live. Tool calls go directly to the plugin handlers -- zero overhead.
-
-### Standalone (Alternative)
-
-If you can't modify the Tauri app, use the standalone Rust MCP binary:
-
-```bash
-cargo build -p connector-mcp-server --release
-```
-
-```json
-{
-  "mcpServers": {
-    "tauri-connector": {
-      "command": "tauri-connector-mcp",
-      "env": {
-        "TAURI_CONNECTOR_HOST": "127.0.0.1",
-        "TAURI_CONNECTOR_PORT": "9555"
-      }
-    }
-  }
-}
-```
-
-### 20 MCP Tools
-
-| Category | Tools |
-|---|---|
-| JavaScript | `webview_execute_js` |
-| DOM | `webview_dom_snapshot`, `get_cached_dom` |
-| Elements | `webview_find_element`, `webview_get_styles`, `webview_get_pointed_element`, `webview_select_element` |
-| Interaction | `webview_interact`, `webview_keyboard`, `webview_wait_for` |
-| Screenshot | `webview_screenshot` |
-| Windows | `manage_window` |
-| IPC | `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured`, `ipc_emit_event` |
-| Logs | `read_logs` |
-| Setup | `get_setup_instructions`, `list_devices` |
+20 MCP tools: `webview_execute_js`, `webview_screenshot`, `webview_dom_snapshot`, `get_cached_dom`, `webview_find_element`, `webview_get_styles`, `webview_get_pointed_element`, `webview_select_element`, `webview_interact`, `webview_keyboard`, `webview_wait_for`, `manage_window`, `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured`, `ipc_emit_event`, `read_logs`, `get_setup_instructions`, `list_devices`.
 
 ## Common Workflows
 
 ### Understand Current Page
 
 ```bash
-bun run $SCRIPTS/state.ts                                          # App info
+bun run $SCRIPTS/state.ts
 bun run $SCRIPTS/eval.ts "(() => ({ title: document.title, url: location.href }))()"
-bun run $SCRIPTS/snapshot.ts accessibility                         # Full a11y tree
-bun run $SCRIPTS/screenshot.ts /tmp/page.png                       # Visual capture
+bun run $SCRIPTS/snapshot.ts accessibility
+bun run $SCRIPTS/screenshot.ts /tmp/page.png
 ```
 
 ### Fill a Form
 
 ```bash
-bun run $SCRIPTS/snapshot.ts accessibility ".form"                 # Find fields
-bun run $SCRIPTS/fill.ts "input[name=email]" "user@example.com"    # Fill email
-bun run $SCRIPTS/fill.ts "input[name=name]" "John"                 # Fill name
-bun run $SCRIPTS/click.ts "button[type=submit]"                    # Submit
-bun run $SCRIPTS/wait.ts "Success" --text                          # Confirm
+bun run $SCRIPTS/snapshot.ts accessibility ".form"
+bun run $SCRIPTS/fill.ts "input[name=email]" "user@example.com"
+bun run $SCRIPTS/click.ts "button[type=submit]"
+bun run $SCRIPTS/wait.ts "Success" --text
 ```
 
-### Debug an Issue
+### Debug
 
 ```bash
-bun run $SCRIPTS/logs.ts 50 error                                  # Error logs
-bun run $SCRIPTS/state.ts                                          # App version
+bun run $SCRIPTS/logs.ts 50 error
+bun run $SCRIPTS/state.ts
 bun run $SCRIPTS/eval.ts "document.querySelector('.error')?.textContent"
 ```
 
 ## Troubleshooting
 
 ### Connection Refused
-App isn't running or plugin isn't loaded. Run `bun run tauri dev` and check for `[connector]` logs.
+App isn't running or plugin isn't loaded. Check: `lsof -i :9555 | grep LISTEN`. Start with `bun run tauri dev`.
 
-### Refs Not Working
-Refs expire after DOM changes. Run `snapshot` again to refresh.
+### Stale PID File
+If the app crashed, the PID file may be stale. Scripts verify the PID is alive and ignore dead entries. Delete manually if needed: `rm target/debug/.connector.json`.
 
 ### Port Conflict
-Use `ConnectorBuilder::new().port_range(9600, 9700).mcp_port_range(9700, 9800)`.
-
-## Source
-
-- Plugin + Embedded MCP: `~/opensource/tauri-connector/plugin/`
-- Rust CLI: `~/opensource/tauri-connector/crates/cli/`
-- Standalone MCP: `~/opensource/tauri-connector/crates/mcp-server/`
-- Shared Client: `~/opensource/tauri-connector/crates/client/`
-- GitHub: https://github.com/dickwu/tauri-connector
+Use `ConnectorBuilder::new().port_range(9600, 9700)` or set `TAURI_CONNECTOR_PORT=9600`.
