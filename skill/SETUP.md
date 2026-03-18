@@ -2,6 +2,21 @@
 
 Step-by-step guide to add tauri-connector to a Tauri v2 project. Detect the project by looking for `src-tauri/` directory and `tauri.conf.json`.
 
+## Step 0: Install the CLI (macOS/Linux)
+
+```bash
+# Homebrew (recommended)
+brew install dickwu/tap/tauri-connector
+
+# Or self-update if already installed
+tauri-connector update
+
+# Or build from source
+cargo build -p connector-cli --release
+```
+
+This installs both `tauri-connector` (CLI) and `tauri-connector-mcp` (standalone MCP server).
+
 ## Step 1: Add Cargo dependency
 
 Check `src-tauri/Cargo.toml`. If `tauri-plugin-connector` is not present, add it:

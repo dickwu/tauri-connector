@@ -22,15 +22,17 @@ lsof -i :9555 -P -n 2>/dev/null | grep LISTEN
 
 ## CLI (Primary)
 
-The `tauri-connector` CLI is the recommended way to interact with Tauri apps from the terminal. Install from GitHub releases or build from source:
+The `tauri-connector` CLI is the recommended way to interact with Tauri apps from the terminal.
 
 ```bash
-# Build from source
-cargo build -p connector-cli --release
-# Binary at target/release/tauri-connector
+# Homebrew (macOS/Linux)
+brew install dickwu/tap/tauri-connector
 
-# Or download from GitHub releases
-# https://github.com/dickwu/tauri-connector/releases
+# Or self-update if already installed
+tauri-connector update
+
+# Or build from source
+cargo build -p connector-cli --release
 ```
 
 ### Quick Reference
