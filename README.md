@@ -29,8 +29,8 @@ Plugin (Rust)
   |-- bridge.execute_js()
   |   |-- try WS bridge (2s timeout) --------> webview JS via WebSocket
   |   '-- fallback: window.eval() + event ---> webview JS via Tauri IPC
-  |-- native screencapture (macOS) ----------> PNG/JPEG with resize
-  '-- html2canvas fallback ------------------> foreignObjectRendering
+  |-- xcap native capture (cross-platform) --> PNG/JPEG/WebP with resize
+  '-- snapdom fallback ---------------------> DOM-to-image via @zumer/snapdom
 
 Claude Code -------- SSE http://host:9556/sse -----> Embedded MCP server
                                                       |-- handlers (direct, in-process)
@@ -101,7 +101,7 @@ The plugin auto-pushes DOM snapshots from the frontend via Tauri's native IPC (`
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.2"
+tauri-plugin-connector = "0.3"
 ```
 
 ### 2. Register it (debug-only)
@@ -128,7 +128,21 @@ tauri-plugin-connector = "0.2"
 { "app": { "withGlobalTauri": true } }
 ```
 
-### 5. Configure Claude Code
+### 5. Install snapdom (screenshot fallback)
+
+```bash
+# In your frontend project
+npm install @zumer/snapdom   # or: bun add @zumer/snapdom
+```
+
+If your project uses Vite/webpack, no extra setup needed. Otherwise expose on window:
+
+```typescript
+import { snapdom } from '@zumer/snapdom';
+window.snapdom = snapdom;
+```
+
+### 6. Configure Claude Code
 
 ```json
 // .mcp.json -- the MCP server starts automatically with the app
@@ -141,7 +155,7 @@ tauri-plugin-connector = "0.2"
 }
 ```
 
-### 6. Run
+### 7. Run
 
 ```bash
 bun run tauri dev
@@ -460,9 +474,9 @@ The fallback is transparent -- `bridge.execute_js()` returns the same result reg
 
 The `webview_screenshot` tool uses a tiered approach:
 
-1. **Native screencapture** (macOS): Uses `screencapture -R` with Retina-aware window position/size. Supports resize (`maxWidth`) and format conversion (PNG/JPEG) via the `image` crate. Requires Screen Recording permission.
+1. **xcap native capture** (cross-platform): Uses the [xcap](https://github.com/nashaofu/xcap) crate for pixel-accurate window capture on Windows, macOS, and Linux. Matches the window by title, captures via native OS APIs, then resizes (`maxWidth`) and encodes to PNG/JPEG/WebP via the `image` crate. Runs on a blocking thread to avoid stalling the Tokio runtime.
 
-2. **html2canvas fallback**: Dynamically injects [html2canvas](https://html2canvas.hertzen.com/) from CDN with `foreignObjectRendering: true` for modern CSS support (including `lab()`, `oklch()` colors). No app dependencies needed. Returns MCP image content type directly.
+2. **snapdom fallback**: When xcap is unavailable (e.g. Wayland without permissions, CI environments), falls back to [snapdom](https://github.com/zumerlab/snapdom) (`@zumer/snapdom`) — a fast DOM-to-image library that captures exactly what the web engine renders. Loaded via dynamic `import()` or `window.snapdom` global. No CDN dependency, works fully offline.
 
 ### PID File Auto-Discovery
 
@@ -492,7 +506,8 @@ The CLI's `snapshot` command assigns sequential ref IDs (`e1`, `e2`, ...) to int
 ## Requirements
 
 - Tauri v2.x
-- Rust 2021+ edition
+- Rust 2024 edition
+- `@zumer/snapdom` in frontend (optional, for screenshot fallback when xcap is unavailable)
 
 ## License
 

@@ -666,127 +666,135 @@ pub async fn screenshot(
     bridge: &Bridge,
     app: Option<&tauri::AppHandle>,
 ) -> Response {
-    // Try native platform screenshot first
+    // Tier 1: xcap native capture (cross-platform, pixel-accurate)
     if let Some(app) = app {
-        if let Some(result) = native_screenshot(app, window_id, format, quality, max_width).await {
-            return Response::success(id.to_string(), result);
+        match xcap_screenshot(app, window_id, format, quality, max_width).await {
+            Ok(result) => return Response::success(id.to_string(), result),
+            Err(e) => {
+                eprintln!("[connector][screenshot] xcap failed, falling back to snapdom: {e}");
+            }
         }
     }
 
-    // Fallback: JS-based capture via canvas
-    js_screenshot(id, format, quality, bridge).await
+    // Tier 2: snapdom JS capture (requires @zumer/snapdom in frontend)
+    snapdom_screenshot(id, format, quality, max_width, bridge).await
 }
 
-/// Native platform screenshot (macOS via screencapture).
-async fn native_screenshot(
+/// Cross-platform screenshot using xcap.
+/// Captures the actual rendered window pixels — matches what the real web engine shows.
+async fn xcap_screenshot(
     app: &tauri::AppHandle,
     window_id: &str,
     format: &str,
     quality: u8,
     max_width: Option<u32>,
-) -> Option<serde_json::Value> {
-    let window = app.get_webview_window(window_id)?;
-    let scale = window.scale_factor().ok().unwrap_or(1.0);
-    let pos = window.outer_position().ok()?;
-    let size = window.outer_size().ok()?;
+) -> Result<serde_json::Value, String> {
+    let tauri_window = app
+        .get_webview_window(window_id)
+        .ok_or_else(|| format!("Window '{window_id}' not found"))?;
 
-    // Convert physical pixels to logical points for screencapture
-    let x = (pos.x as f64 / scale) as i32;
-    let y = (pos.y as f64 / scale) as i32;
-    let w = (size.width as f64 / scale) as u32;
-    let h = (size.height as f64 / scale) as u32;
+    let title = tauri_window
+        .title()
+        .map_err(|e| format!("Failed to get window title: {e}"))?;
 
-    let tmp = std::env::temp_dir().join(format!(
-        "connector-screenshot-{}.png",
-        uuid::Uuid::new_v4()
-    ));
-    let tmp_path = tmp.to_string_lossy().to_string();
+    // xcap uses blocking OS APIs — run on a blocking thread
+    let captured = tokio::task::spawn_blocking(move || -> Result<image::RgbaImage, String> {
+        let windows =
+            xcap::Window::all().map_err(|e| format!("Failed to enumerate windows: {e}"))?;
 
-    #[cfg(target_os = "macos")]
-    {
-        let rect = format!("{},{},{},{}", x, y, w, h);
-        let output = tokio::process::Command::new("screencapture")
-            .args(["-R", &rect, "-t", "png", "-x", &tmp_path])
-            .output()
-            .await
-            .ok()?;
+        let target = windows
+            .into_iter()
+            .find(|w| {
+                let is_minimized = w.is_minimized().unwrap_or(true);
+                let w_title = w.title().unwrap_or_default();
+                !is_minimized && w_title.contains(&title)
+            })
+            .ok_or_else(|| format!("No visible window matching title '{title}'"))?;
 
-        if !output.status.success() {
-            return None;
-        }
-    }
+        target
+            .capture_image()
+            .map_err(|e| format!("xcap capture failed: {e}"))
+    })
+    .await
+    .map_err(|e| format!("Screenshot task panicked: {e}"))??;
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (x, y, w, h, &tmp_path);
-        return None;
-    }
+    let width = captured.width();
+    let height = captured.height();
 
-    let img_bytes = tokio::fs::read(&tmp).await.ok()?;
-    let _ = tokio::fs::remove_file(&tmp).await;
+    let encoded = encode_image(captured, format, quality, max_width)?;
 
-    let processed = process_screenshot(&img_bytes, format, quality, max_width).ok()?;
-    let mime = if format == "png" {
-        "image/png"
-    } else {
-        "image/jpeg"
+    let mime = match format {
+        "jpeg" | "jpg" => "image/jpeg",
+        "webp" => "image/webp",
+        _ => "image/png",
     };
-    let base64_data =
-        base64::engine::general_purpose::STANDARD.encode(&processed);
 
-    Some(serde_json::json!({
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(&encoded);
+
+    Ok(serde_json::json!({
         "base64": base64_data,
         "mimeType": mime,
-        "width": w,
-        "height": h,
+        "width": width,
+        "height": height,
+        "method": "xcap",
     }))
 }
 
-/// JS-based fallback screenshot using SVG foreignObject serialization.
-/// Does not require any external CDN or library.
-async fn js_screenshot(
+/// Fallback screenshot using snapdom (@zumer/snapdom).
+/// Requires the frontend project to have snapdom installed.
+/// Captures the DOM as the web engine renders it — no re-rendering artifacts.
+async fn snapdom_screenshot(
     id: &str,
     format: &str,
     quality: u8,
+    max_width: Option<u32>,
     bridge: &Bridge,
 ) -> Response {
-    let mime = if format == "png" {
-        "image/png"
-    } else {
-        "image/jpeg"
+    let mime = match format {
+        "jpeg" | "jpg" => "image/jpeg",
+        "webp" => "image/webp",
+        _ => "image/png",
     };
     let quality_f = f64::from(quality) / 100.0;
+    let max_w = max_width.unwrap_or(0);
 
     let script = format!(
         r#"(async () => {{
-            // Load html2canvas if not present
-            if (typeof html2canvas === 'undefined') {{
-                await new Promise(function(resolve, reject) {{
-                    var s = document.createElement('script');
-                    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-                    s.onload = resolve;
-                    s.onerror = function() {{ reject('Failed to load html2canvas'); }};
-                    document.head.appendChild(s);
-                }});
+            let snapdomFn;
+            try {{
+                const mod = await import('@zumer/snapdom');
+                snapdomFn = mod.snapdom || mod.default;
+            }} catch (_) {{
+                if (typeof window.snapdom === 'function') {{
+                    snapdomFn = window.snapdom;
+                }} else if (typeof window.snapdom === 'object' && typeof window.snapdom.snapdom === 'function') {{
+                    snapdomFn = window.snapdom.snapdom;
+                }}
             }}
-            var canvas = await html2canvas(document.body, {{
-                useCORS: true,
-                allowTaint: true,
-                logging: false,
-                foreignObjectRendering: true,
-                width: window.innerWidth,
-                height: window.innerHeight,
-                windowWidth: window.innerWidth,
-                windowHeight: window.innerHeight,
-            }});
-            var dataUrl = canvas.toDataURL('{mime}', {quality_f});
-            var base64 = dataUrl.split(',')[1] || '';
+            if (!snapdomFn) {{
+                throw new Error('snapdom not available — install @zumer/snapdom in your frontend project');
+            }}
+            const result = await snapdomFn(document.documentElement);
+            const canvas = await result.toCanvas();
+            let finalCanvas = canvas;
+            const maxW = {max_w};
+            if (maxW > 0 && canvas.width > maxW) {{
+                const ratio = maxW / canvas.width;
+                const newH = Math.round(canvas.height * ratio);
+                finalCanvas = document.createElement('canvas');
+                finalCanvas.width = maxW;
+                finalCanvas.height = newH;
+                const ctx = finalCanvas.getContext('2d');
+                ctx.drawImage(canvas, 0, 0, maxW, newH);
+            }}
+            const dataUrl = finalCanvas.toDataURL('{mime}', {quality_f});
+            const base64 = dataUrl.split(',')[1] || '';
             return {{
                 base64: base64,
                 mimeType: '{mime}',
-                width: canvas.width,
-                height: canvas.height,
-                method: 'html2canvas',
+                width: finalCanvas.width,
+                height: finalCanvas.height,
+                method: 'snapdom',
             }};
         }})()"#
     );
@@ -797,23 +805,20 @@ async fn js_screenshot(
     }
 }
 
-/// Process screenshot: resize and/or convert format.
-fn process_screenshot(
-    data: &[u8],
+/// Encode an RgbaImage to the requested format, optionally resizing.
+fn encode_image(
+    image: image::RgbaImage,
     format: &str,
     quality: u8,
     max_width: Option<u32>,
 ) -> Result<Vec<u8>, String> {
-    let img = image::load_from_memory(data).map_err(|e| format!("Image decode error: {e}"))?;
+    let img = image::DynamicImage::ImageRgba8(image);
 
-    let img = if let Some(mw) = max_width {
-        if img.width() > mw {
+    let img = match max_width {
+        Some(mw) if img.width() > mw => {
             img.resize(mw, u32::MAX, image::imageops::FilterType::Lanczos3)
-        } else {
-            img
         }
-    } else {
-        img
+        _ => img,
     };
 
     let mut buf = Vec::new();
@@ -821,9 +826,14 @@ fn process_screenshot(
 
     match format {
         "jpeg" | "jpg" => {
-            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
+            let encoder =
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
             img.write_with_encoder(encoder)
                 .map_err(|e| format!("JPEG encode error: {e}"))?;
+        }
+        "webp" => {
+            img.write_to(&mut cursor, image::ImageFormat::WebP)
+                .map_err(|e| format!("WebP encode error: {e}"))?;
         }
         _ => {
             img.write_to(&mut cursor, image::ImageFormat::Png)

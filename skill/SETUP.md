@@ -8,7 +8,7 @@ Check `src-tauri/Cargo.toml`. If `tauri-plugin-connector` is not present, add it
 
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.2"
+tauri-plugin-connector = "0.3"
 ```
 
 ## Step 2: Register the plugin
@@ -48,7 +48,33 @@ Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` 
 }
 ```
 
-## Step 5: Configure Claude Code
+## Step 5: Install snapdom (screenshot fallback)
+
+The screenshot tool uses `xcap` for native window capture (cross-platform). When `xcap` is unavailable (e.g. Wayland without permissions, or CI environments), it falls back to `snapdom` — a fast DOM-to-image library that captures exactly what the web engine renders.
+
+Install in your frontend project:
+
+```bash
+# npm
+npm install @zumer/snapdom
+
+# bun
+bun add @zumer/snapdom
+
+# pnpm
+pnpm add @zumer/snapdom
+```
+
+**Option A (recommended):** If your project uses a bundler (Vite, webpack, etc.), no extra setup needed — the plugin uses dynamic `import('@zumer/snapdom')` automatically.
+
+**Option B (global):** If dynamic import doesn't work in your setup, expose snapdom on `window` in your app's entry point:
+
+```typescript
+import { snapdom } from '@zumer/snapdom';
+window.snapdom = snapdom;
+```
+
+## Step 6: Configure Claude Code
 
 Add to `.mcp.json` in the project root:
 
@@ -64,7 +90,7 @@ Add to `.mcp.json` in the project root:
 
 The MCP server is embedded in the plugin -- no separate command or install needed.
 
-## Step 6: Verify
+## Step 7: Verify
 
 Run the app with `bun run tauri dev` (or `cargo tauri dev`). Look for these log lines:
 

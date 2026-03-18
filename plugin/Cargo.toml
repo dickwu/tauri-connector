@@ -1,8 +1,8 @@
 [package]
 name = "tauri-plugin-connector"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
-description = "MCP-compatible Tauri v2 plugin with screenshot, dual-path JS execution, PID file auto-discovery, and embedded MCP server"
+description = "MCP-compatible Tauri v2 plugin with xcap cross-platform screenshot, snapdom fallback, dual-path JS execution, and embedded MCP server"
 license = "MIT"
 repository = "https://github.com/dickwu/tauri-connector"
 homepage = "https://github.com/dickwu/tauri-connector"
@@ -28,7 +28,8 @@ tokio-tungstenite = "0.29"
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+xcap = "0.8"
 thiserror = "2"
 axum = "0.8"
 tokio-stream = "0.1"

@@ -33,11 +33,11 @@ pub fn tool_definitions() -> Value {
                 })
             ),
             tool_def("webview_screenshot",
-                "Take a screenshot of the Tauri webview",
+                "Take a screenshot of the Tauri window using native xcap capture (cross-platform)",
                 json!({
                     "type": "object",
                     "properties": {
-                        "format": { "type": "string", "enum": ["png", "jpeg"] },
+                        "format": { "type": "string", "enum": ["png", "jpeg", "webp"] },
                         "quality": { "type": "number", "minimum": 0, "maximum": 100 },
                         "maxWidth": { "type": "number" },
                         "windowId": { "type": "string" }

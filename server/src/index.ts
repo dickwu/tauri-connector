@@ -57,9 +57,9 @@ function createServer() {
 
   server.tool(
     'webview_screenshot',
-    'Take a screenshot of the Tauri webview',
+    'Take a screenshot of the Tauri window using native xcap capture (cross-platform)',
     {
-      format: z.enum(['png', 'jpeg']).optional(),
+      format: z.enum(['png', 'jpeg', 'webp']).optional(),
       quality: z.number().min(0).max(100).optional(),
       maxWidth: z.number().optional(),
       windowId: z.string().optional(),

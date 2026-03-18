@@ -9,7 +9,7 @@ Deep inspection and interaction with Tauri v2 desktop apps. The **MCP server run
 
 ## Setup
 
-For first-time setup in a Tauri project, read `skill/SETUP.md` in the tauri-connector repo. Key steps: add `tauri-plugin-connector = "0.2"` to Cargo.toml, register plugin, add permissions, set `withGlobalTauri: true`, add MCP URL to `.mcp.json`.
+For first-time setup in a Tauri project, read `skill/SETUP.md` in the tauri-connector repo. Key steps: add `tauri-plugin-connector = "0.3"` to Cargo.toml, register plugin, add permissions, set `withGlobalTauri: true`, install `@zumer/snapdom` in frontend, add MCP URL to `.mcp.json`.
 
 ## Checking if the App is Running
 
@@ -90,7 +90,7 @@ All commands use `{ id, type, ...params }` with snake_case types:
 | Type | Key Params |
 |---|---|
 | `execute_js` | `script`, `window_id` |
-| `screenshot` | `format`, `quality`, `max_width`, `window_id` |
+| `screenshot` | `format` (png/jpeg/webp), `quality`, `max_width`, `window_id` |
 | `dom_snapshot` | `snapshot_type`, `selector`, `window_id` |
 | `find_element` | `selector`, `strategy`, `window_id` |
 | `interact` | `action`, `selector`, `strategy`, `x`, `y`, `window_id` |
