@@ -100,6 +100,7 @@ impl PluginState {
         filtered.into_iter().rev().collect()
     }
 
+    #[allow(dead_code)]
     pub async fn push_ipc_event(&self, event: IpcEvent) {
         let mut events = self.ipc_events.lock().await;
         if events.len() >= MAX_IPC_EVENTS {
@@ -133,6 +134,7 @@ impl PluginState {
         *self.ipc_monitor_active.lock().await = active;
     }
 
+    #[allow(dead_code)]
     pub async fn is_ipc_monitoring(&self) -> bool {
         *self.ipc_monitor_active.lock().await
     }

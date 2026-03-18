@@ -64,10 +64,12 @@ pub enum Command {
     },
     SelectElement {
         #[serde(default = "default_window")]
+        #[allow(dead_code)]
         window_id: String,
     },
     GetPointedElement {
         #[serde(default = "default_window")]
+        #[allow(dead_code)]
         window_id: String,
     },
 
@@ -129,6 +131,7 @@ pub enum Command {
 
     // --- IPC ---
     BackendState,
+    #[allow(clippy::enum_variant_names)]
     IpcExecuteCommand {
         command: String,
         #[serde(default)]

@@ -6,6 +6,7 @@ use serde_json::Value;
 /// Incoming JSON-RPC request from the MCP client.
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {
+    #[allow(dead_code)]
     pub jsonrpc: String,
     #[serde(default)]
     pub id: Option<Value>,

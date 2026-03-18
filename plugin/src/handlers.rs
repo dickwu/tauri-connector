@@ -209,6 +209,7 @@ pub async fn get_pointed_element(
 
 // ============ Interaction ============
 
+#[allow(clippy::too_many_arguments)]
 pub async fn interact(
     id: &str,
     action: &str,

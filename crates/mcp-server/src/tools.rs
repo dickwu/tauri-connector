@@ -294,12 +294,6 @@ fn window_id(args: &Value) -> String {
     str_arg(args, "windowId").unwrap_or_else(|| "main".to_string())
 }
 
-async fn ensure_connected(client: &mut ConnectorClient, host: &str, port: u16) -> Result<(), String> {
-    if !client.is_connected() {
-        client.connect(host, port).await?;
-    }
-    Ok(())
-}
 
 // ─── Tool Handlers ───
 

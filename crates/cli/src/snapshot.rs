@@ -30,6 +30,7 @@ const CONTENT_ROLES: &[&str] = &[
 ];
 
 /// Options for building a snapshot script.
+#[derive(Default)]
 pub struct SnapshotOptions {
     pub interactive: bool,
     pub compact: bool,
@@ -37,16 +38,6 @@ pub struct SnapshotOptions {
     pub selector: Option<String>,
 }
 
-impl Default for SnapshotOptions {
-    fn default() -> Self {
-        Self {
-            interactive: false,
-            compact: false,
-            max_depth: 0,
-            selector: None,
-        }
-    }
-}
 
 /// Build the JavaScript that runs in the webview to produce a ref-annotated snapshot.
 /// Returns JS that evaluates to `{ snapshot: string, refs: Record<string, RefEntry> }`.

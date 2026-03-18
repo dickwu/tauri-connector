@@ -16,6 +16,8 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::protocol::{BridgeCommand, BridgeResult};
 
+type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Result<serde_json::Value, String>>>>>;
+
 /// Manages the internal WebSocket bridge to the webview.
 #[derive(Clone)]
 pub struct Bridge {
@@ -24,7 +26,7 @@ pub struct Bridge {
     /// Channel to send scripts to the connected webview bridge client
     script_tx: mpsc::UnboundedSender<String>,
     /// Pending JS evaluation results, keyed by request ID
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<serde_json::Value, String>>>>>,
+    pending: PendingMap,
     /// App handle for eval-based fallback execution
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 }
@@ -37,8 +39,7 @@ impl Bridge {
             .ok_or_else(|| "No available port in range 9300-9400".to_string())?;
 
         let (script_tx, script_rx) = mpsc::unbounded_channel::<String>();
-        let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<serde_json::Value, String>>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
 
         let bridge = Self {
             port,
@@ -181,74 +182,64 @@ impl Bridge {
             .await
             .map_err(|e| e.to_string())?;
 
+        let (stream, addr) = listener
+            .accept()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        println!("[connector][bridge] Webview client connected from {addr}");
+
+        let mut ws_stream = tokio_tungstenite::accept_async(stream)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let pending = self.pending.clone();
+
+        // Use a single loop with select! instead of split() to avoid
+        // potential buffering issues between SplitSink and SplitStream
         loop {
-            let (stream, addr) = listener
-                .accept()
-                .await
-                .map_err(|e| e.to_string())?;
-
-            println!("[connector][bridge] Webview client connected from {addr}");
-
-            let ws_stream = tokio_tungstenite::accept_async(stream)
-                .await
-                .map_err(|e| e.to_string())?;
-
-            let pending = self.pending.clone();
-
-            // Use a single loop with select! instead of split() to avoid
-            // potential buffering issues between SplitSink and SplitStream
-            let mut ws_stream = ws_stream;
-
-            loop {
-                tokio::select! {
-                    // Script to send to webview
-                    script_msg = script_rx.recv() => {
-                        match script_msg {
-                            Some(msg) => {
-                                if ws_stream.send(Message::Text(msg.into())).await.is_err() {
-                                    break;
-                                }
-                            }
-                            None => break,
-                        }
-                    }
-                    // Result from webview
-                    ws_msg = ws_stream.next() => {
-                        match ws_msg {
-                            Some(Ok(Message::Text(text))) => {
-                                match serde_json::from_str::<BridgeResult>(&text) {
-                                    Ok(result) => {
-                                        let mut pending = pending.lock().await;
-                                        if let Some(tx) = pending.remove(&result.id) {
-                                            let value = if let Some(error) = result.error {
-                                                Err(error)
-                                            } else {
-                                                Ok(result.result.unwrap_or(serde_json::Value::Null))
-                                            };
-                                            let _ = tx.send(value);
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("[connector][bridge] Invalid result message: {e}");
-                                    }
-                                }
-                            }
-                            Some(Ok(_)) => {} // Ignore non-text messages
-                            Some(Err(_)) => break,
-                            None => {
+            tokio::select! {
+                // Script to send to webview
+                script_msg = script_rx.recv() => {
+                    match script_msg {
+                        Some(msg) => {
+                            if ws_stream.send(Message::Text(msg.into())).await.is_err() {
                                 break;
                             }
                         }
+                        None => break,
+                    }
+                }
+                // Result from webview
+                ws_msg = ws_stream.next() => {
+                    match ws_msg {
+                        Some(Ok(Message::Text(text))) => {
+                            match serde_json::from_str::<BridgeResult>(&text) {
+                                Ok(result) => {
+                                    let mut pending = pending.lock().await;
+                                    if let Some(tx) = pending.remove(&result.id) {
+                                        let value = if let Some(error) = result.error {
+                                            Err(error)
+                                        } else {
+                                            Ok(result.result.unwrap_or(serde_json::Value::Null))
+                                        };
+                                        let _ = tx.send(value);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[connector][bridge] Invalid result message: {e}");
+                                }
+                            }
+                        }
+                        Some(Ok(_)) => {} // Ignore non-text messages
+                        Some(Err(_)) => break,
+                        None => break,
                     }
                 }
             }
-
-            println!("[connector][bridge] Webview client disconnected");
-
-            // Reconnect: create a new script_rx channel for next connection
-            // The old script_rx is consumed, so we break and let the webview reconnect
-            break;
         }
+
+        println!("[connector][bridge] Webview client disconnected");
 
         Ok(())
     }

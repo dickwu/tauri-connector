@@ -16,7 +16,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 const DEFAULT_TIMEOUT_MS: u64 = 35_000;
 
-type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type _WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 struct PendingRequest {
     tx: oneshot::Sender<Result<Value, String>>,

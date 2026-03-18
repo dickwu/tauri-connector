@@ -323,9 +323,9 @@ pub async fn get_prop(
     }
 
     let Some(t) = target else {
-        return Err(format!(
-            "Usage: get <text|html|value|attr|box|styles> <@ref|selector> [attr-name]"
-        ));
+        return Err(
+            "Usage: get <text|html|value|attr|box|styles> <@ref|selector> [attr-name]".to_string()
+        );
     };
 
     let action_js = match prop {
