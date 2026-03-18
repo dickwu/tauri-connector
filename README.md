@@ -432,8 +432,14 @@ tauri-connector/
 |           |-- main.rs         # Clap CLI entry point
 |           |-- commands.rs     # Command implementations
 |           '-- snapshot.rs     # Ref system + DOM snapshot builder
-|-- skill/                      # Claude Code skill
-|   '-- SKILL.md
+|-- skill/                      # Claude Code skill + bun scripts
+|   |-- SKILL.md                # Usage guide (loaded by Claude Code)
+|   |-- SETUP.md                # Setup instructions
+|   '-- scripts/                # Bun scripts for WS interaction
+|       |-- connector.ts        # Shared helper (auto-discovers ports via PID file)
+|       |-- state.ts, eval.ts, screenshot.ts, snapshot.ts
+|       |-- click.ts, fill.ts, find.ts, wait.ts
+|       '-- logs.ts, windows.ts
 |-- LICENSE
 '-- README.md
 ```
@@ -457,6 +463,16 @@ The `webview_screenshot` tool uses a tiered approach:
 1. **Native screencapture** (macOS): Uses `screencapture -R` with Retina-aware window position/size. Supports resize (`maxWidth`) and format conversion (PNG/JPEG) via the `image` crate. Requires Screen Recording permission.
 
 2. **html2canvas fallback**: Dynamically injects [html2canvas](https://html2canvas.hertzen.com/) from CDN with `foreignObjectRendering: true` for modern CSS support (including `lab()`, `oklch()` colors). No app dependencies needed. Returns MCP image content type directly.
+
+### PID File Auto-Discovery
+
+When the plugin starts, it writes `target/.connector.json` with all port info:
+
+```json
+{ "pid": 12345, "ws_port": 9555, "mcp_port": 9556, "bridge_port": 9300, "app_name": "MyApp", "app_id": "com.example.app" }
+```
+
+The bun scripts in `skill/scripts/` auto-discover this file, verify the PID is alive, and connect without any env vars. If the Tauri app is already running in another terminal, the scripts connect directly -- no need to start a new instance.
 
 ### Embedded MCP Server
 
