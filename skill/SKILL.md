@@ -114,201 +114,54 @@ use tauri_plugin_connector::ConnectorBuilder;
 }
 ```
 
-## WebSocket API via Bun
+## Bun Scripts
 
-Connect directly to the plugin WSocket on port 9555 using inline bun scripts. No build step or dependencies needed -- bun has built-in WebSocket support.
+Ready-to-run scripts in `skill/scripts/`. No build step -- bun runs TypeScript natively with built-in WebSocket support.
 
-### Helper Pattern
-
-All commands follow this pattern. Write the script inline and run with `bun -e`:
+Set `SCRIPTS` for convenience:
 
 ```bash
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => {
-  ws.send(JSON.stringify({ id: '1', type: 'TYPE', ...PARAMS }));
-};
-ws.onmessage = (e) => {
-  console.log(JSON.parse(e.data));
-  ws.close();
-};
-setTimeout(() => { ws.close(); process.exit(1); }, 15000);
-"
+SCRIPTS=~/opensource/tauri-connector/skill/scripts
 ```
 
-### App State (no bridge needed)
+### Quick Reference
+
+```bash
+bun run $SCRIPTS/state.ts                              # App metadata
+bun run $SCRIPTS/eval.ts "document.title"              # Execute JS
+bun run $SCRIPTS/screenshot.ts /tmp/shot.png 1280      # Screenshot (path, max_width)
+bun run $SCRIPTS/snapshot.ts                           # DOM accessibility tree
+bun run $SCRIPTS/snapshot.ts structure                  # DOM structure tree
+bun run $SCRIPTS/snapshot.ts accessibility ".sidebar"   # Scoped snapshot
+bun run $SCRIPTS/find.ts "button"                      # Find elements by CSS
+bun run $SCRIPTS/find.ts "Submit" text                 # Find by text content
+bun run $SCRIPTS/click.ts "button.submit"              # Click element
+bun run $SCRIPTS/click.ts "Add New" text               # Click by text
+bun run $SCRIPTS/fill.ts "input.search" "query"        # Focus + type into input
+bun run $SCRIPTS/logs.ts 50                            # Last 50 console logs
+bun run $SCRIPTS/logs.ts 20 error                      # Filtered logs
+bun run $SCRIPTS/windows.ts                            # List windows
+bun run $SCRIPTS/windows.ts main                       # Window info
+bun run $SCRIPTS/wait.ts ".loaded"                     # Wait for element
+bun run $SCRIPTS/wait.ts "Success" --text              # Wait for text
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `TAURI_CONNECTOR_HOST` | `127.0.0.1` | Plugin host |
+| `TAURI_CONNECTOR_PORT` | `9555` | Plugin WS port |
+| `TAURI_CONNECTOR_TIMEOUT` | `15000` | Default timeout (ms) |
+
+### Inline Alternative
+
+For one-off commands without the scripts, use `bun -e`:
 
 ```bash
 bun -e "
 const ws = new WebSocket('ws://127.0.0.1:9555');
 ws.onopen = () => ws.send(JSON.stringify({ id: '1', type: 'backend_state' }));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 5000);
-"
-```
-
-### Execute JavaScript
-
-```bash
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'execute_js',
-  script: '(() => ({ title: document.title, url: location.href }))()',
-  window_id: 'main'
-}));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 15000);
-"
-```
-
-### Take Screenshot
-
-```bash
-bun -e "
-const fs = require('fs');
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'screenshot',
-  format: 'png', quality: 80, max_width: 1280, window_id: 'main'
-}));
-ws.onmessage = (e) => {
-  const r = JSON.parse(e.data);
-  if (r.result?.base64) {
-    fs.writeFileSync('/tmp/screenshot.png', Buffer.from(r.result.base64, 'base64'));
-    console.log('Saved /tmp/screenshot.png', r.result.width + 'x' + r.result.height);
-  } else { console.log(r); }
-  ws.close();
-};
-setTimeout(() => process.exit(1), 60000);
-"
-```
-
-### DOM Snapshot
-
-```bash
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'dom_snapshot',
-  snapshot_type: 'accessibility', window_id: 'main'
-}));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data).result); ws.close(); };
-setTimeout(() => process.exit(1), 15000);
-"
-```
-
-### Find Element
-
-```bash
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'find_element',
-  selector: 'button', strategy: 'css', window_id: 'main'
-}));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 15000);
-"
-```
-
-### Click Element
-
-```bash
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'interact',
-  action: 'click', selector: 'button.submit', strategy: 'css', window_id: 'main'
-}));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 15000);
-"
-```
-
-### Type Text / Press Key
-
-```bash
-# Type into focused element
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'keyboard',
-  action: 'type', text: 'hello world', window_id: 'main'
-}));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 15000);
-"
-
-# Press a key
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'keyboard',
-  action: 'press', key: 'Enter', window_id: 'main'
-}));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 15000);
-"
-```
-
-### Wait for Element
-
-```bash
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'wait_for',
-  selector: '.loaded', strategy: 'css', timeout: 10000, window_id: 'main'
-}));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 15000);
-"
-```
-
-### Console Logs
-
-```bash
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'console_logs', lines: 20, window_id: 'main'
-}));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 5000);
-"
-```
-
-### Window Management
-
-```bash
-# List all windows
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({ id: '1', type: 'window_list' }));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 5000);
-"
-
-# Get window info
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({ id: '1', type: 'window_info', window_id: 'main' }));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 5000);
-"
-```
-
-### IPC Commands
-
-```bash
-# Emit a Tauri event
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'ipc_emit_event',
-  event_name: 'test-event', payload: { key: 'value' }
-}));
 ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
 setTimeout(() => process.exit(1), 5000);
 "
@@ -399,35 +252,28 @@ cargo build -p connector-mcp-server --release
 ### Understand Current Page
 
 ```bash
-# Get app state + run JS to read page info
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'execute_js',
-  script: '(() => ({ title: document.title, url: location.href, h1: document.querySelector(\"h1\")?.textContent }))()',
-  window_id: 'main'
-}));
-ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
-setTimeout(() => process.exit(1), 15000);
-"
+bun run $SCRIPTS/state.ts                                          # App info
+bun run $SCRIPTS/eval.ts "(() => ({ title: document.title, url: location.href }))()"
+bun run $SCRIPTS/snapshot.ts accessibility                         # Full a11y tree
+bun run $SCRIPTS/screenshot.ts /tmp/page.png                       # Visual capture
+```
+
+### Fill a Form
+
+```bash
+bun run $SCRIPTS/snapshot.ts accessibility ".form"                 # Find fields
+bun run $SCRIPTS/fill.ts "input[name=email]" "user@example.com"    # Fill email
+bun run $SCRIPTS/fill.ts "input[name=name]" "John"                 # Fill name
+bun run $SCRIPTS/click.ts "button[type=submit]"                    # Submit
+bun run $SCRIPTS/wait.ts "Success" --text                          # Confirm
 ```
 
 ### Debug an Issue
 
 ```bash
-# Check console logs for errors
-bun -e "
-const ws = new WebSocket('ws://127.0.0.1:9555');
-ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'console_logs', lines: 50, filter: 'error', window_id: 'main'
-}));
-ws.onmessage = (e) => {
-  const r = JSON.parse(e.data);
-  (r.result?.logs || []).forEach(l => console.log('[' + l.level + ']', l.message));
-  ws.close();
-};
-setTimeout(() => process.exit(1), 5000);
-"
+bun run $SCRIPTS/logs.ts 50 error                                  # Error logs
+bun run $SCRIPTS/state.ts                                          # App version
+bun run $SCRIPTS/eval.ts "document.querySelector('.error')?.textContent"
 ```
 
 ## Troubleshooting
