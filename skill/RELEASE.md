@@ -96,8 +96,10 @@ git push origin vX.Y.Z
 
 This triggers `.github/workflows/release.yml` which:
 1. Builds CLI + MCP server for 5 targets (x86_64/aarch64 Linux, x86_64/aarch64 macOS, x86_64 Windows)
-2. Generates SHA256 checksums
-3. Creates a GitHub Release with all binaries attached
+2. Packages raw binaries + `.tar.gz` tarballs (for Homebrew)
+3. Generates SHA256 checksums
+4. Creates a GitHub Release with all assets attached
+5. Auto-updates the Homebrew formula at `dickwu/homebrew-tap`
 
 ### 8. Verify Release
 
@@ -108,16 +110,37 @@ gh run watch <run-id> --exit-status
 
 # Check the release
 gh release view vX.Y.Z
+
+# Verify Homebrew formula was updated
+gh api repos/dickwu/homebrew-tap/contents/Formula/tauri-connector.rb --jq '.content' | base64 -d | head -5
 ```
 
-The release should have 10 binaries (2 per platform × 5 platforms) plus SHA256SUMS.txt.
+The release should have:
+- 10 raw binaries (2 per platform x 5 platforms)
+- 5 tarballs (1 per platform, for Homebrew)
+- SHA256SUMS.txt
 
 ### 9. Post-Release
 
 After verifying:
 - Check the crates.io page: https://crates.io/crates/tauri-plugin-connector
 - Check the GitHub release page for download links
+- Verify Homebrew install works: `brew install dickwu/tap/tauri-connector`
 - If this was a minor/major bump, consider updating the GitHub repo description
+
+## Homebrew
+
+Users install via:
+```bash
+brew install dickwu/tap/tauri-connector
+```
+
+This installs both `tauri-connector` and `tauri-connector-mcp` binaries. The formula is auto-updated by the release workflow — no manual steps needed.
+
+To upgrade:
+```bash
+brew upgrade tauri-connector
+```
 
 ## Quick Release (Patch)
 

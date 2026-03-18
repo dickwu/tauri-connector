@@ -307,6 +307,10 @@ All commands use `{ id, type, ...params }` with snake_case types:
 A Rust CLI with ref-based element addressing is also available:
 
 ```bash
+# Homebrew (macOS/Linux)
+brew install dickwu/tap/tauri-connector
+
+# Or build from source
 cargo build -p connector-cli --release
 # Binary at target/release/tauri-connector
 ```
