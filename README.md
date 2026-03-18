@@ -51,23 +51,36 @@ CLI (Rust) -------- WebSocket ws://host:9555 -----> Plugin WS server
 
 ## Features
 
-### 20 MCP Tools
+### 20 Tools (MCP + CLI)
 
-| Category | Tools |
-|---|---|
-| JavaScript | `webview_execute_js` |
-| DOM | `webview_dom_snapshot`, `get_cached_dom` |
-| Elements | `webview_find_element`, `webview_get_styles`, `webview_get_pointed_element`, `webview_select_element` |
-| Interaction | `webview_interact`, `webview_keyboard`, `webview_wait_for` |
-| Screenshot | `webview_screenshot` |
-| Windows | `manage_window` |
-| IPC | `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured`, `ipc_emit_event` |
-| Logs | `read_logs` |
-| Setup | `get_setup_instructions`, `list_devices` |
+Every tool is available via both the embedded MCP server (for Claude Code) and the Rust CLI (for terminal use). The CLI uses ref-based element addressing inspired by [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser).
 
-### CLI with Ref-Based Element Addressing
+| Category | MCP Tool | CLI Command |
+|---|---|---|
+| JavaScript | `webview_execute_js` | `eval <script>` |
+| DOM | `webview_dom_snapshot` | `snapshot [-i] [-c]` |
+| DOM (cached) | `get_cached_dom` | `dom` |
+| Elements | `webview_find_element` | `find <selector> [-s css\|xpath\|text]` |
+| Styles | `webview_get_styles` | `get styles <@ref\|selector>` |
+| Picker | `webview_get_pointed_element` | `pointed` |
+| Select | `webview_select_element` | *(visual picker, not yet implemented)* |
+| Interact | `webview_interact` | `click`, `dblclick`, `hover`, `focus`, `fill`, `type`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview` |
+| Keyboard | `webview_keyboard` | `press <key>` |
+| Wait | `webview_wait_for` | `wait <selector> [--text] [--timeout]` |
+| Screenshot | `webview_screenshot` | `screenshot <path> [-f png\|jpeg\|webp] [-m maxWidth]` |
+| Windows | `manage_window` | `windows`, `resize <w> <h>` |
+| State | `ipc_get_backend_state` | `state` |
+| IPC | `ipc_execute_command` | `ipc exec <cmd> [-a '{...}']` |
+| Monitor | `ipc_monitor` | `ipc monitor` / `ipc unmonitor` |
+| Captured | `ipc_get_captured` | `ipc captured [-f filter]` |
+| Events | `ipc_emit_event` | `emit <event> [-p '{...}']` |
+| Logs | `read_logs` | `logs [-n 20] [-f filter]` |
+| Setup | `get_setup_instructions` | `examples` |
+| Devices | `list_devices` | *(info only)* |
 
-Inspired by [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser). Take a DOM snapshot with stable ref IDs, then interact with elements using those refs:
+### CLI Ref-Based Addressing
+
+Take a DOM snapshot with stable ref IDs, then interact with elements using those refs:
 
 ```bash
 # Take snapshot -- assigns ref IDs to interactive elements
