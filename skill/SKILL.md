@@ -114,105 +114,231 @@ use tauri_plugin_connector::ConnectorBuilder;
 }
 ```
 
-## CLI Usage
+## WebSocket API via Bun
 
-The CLI is a Rust binary. Build it from the tauri-connector repo:
+Connect directly to the plugin WSocket on port 9555 using inline bun scripts. No build step or dependencies needed -- bun has built-in WebSocket support.
 
-```bash
-cargo build -p connector-cli --release
-# Binary at target/release/tauri-connector
-```
+### Helper Pattern
 
-Or run directly during development:
+All commands follow this pattern. Write the script inline and run with `bun -e`:
 
 ```bash
-cargo run -p connector-cli -- <command>
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => {
+  ws.send(JSON.stringify({ id: '1', type: 'TYPE', ...PARAMS }));
+};
+ws.onmessage = (e) => {
+  console.log(JSON.parse(e.data));
+  ws.close();
+};
+setTimeout(() => { ws.close(); process.exit(1); }, 15000);
+"
 ```
 
-Set an alias for convenience:
+### App State (no bridge needed)
 
 ```bash
-alias tc="~/opensource/tauri-connector/target/release/tauri-connector"
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({ id: '1', type: 'backend_state' }));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 5000);
+"
 ```
 
-### Workflow: Snapshot then Interact
+### Execute JavaScript
 
 ```bash
-tc snapshot -i
-
-# Output:
-# - button "Add New" [ref=e5]
-# - textbox "Search" [ref=e3]
-# - heading "Dashboard" [level=1, ref=e7]
-
-tc click @e5            # Click "Add New"
-tc fill @e3 "query"     # Fill search box
-tc get text @e7         # Get heading text
-tc press Enter          # Press key
-tc hover @e2            # Hover element
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'execute_js',
+  script: '(() => ({ title: document.title, url: location.href }))()',
+  window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
 ```
 
-### Snapshot Options
+### Take Screenshot
 
 ```bash
-tc snapshot              # Full DOM tree with refs
-tc snapshot -i           # Interactive elements only (best for LLM)
-tc snapshot -c           # Compact mode
-tc snapshot -i -c        # Interactive + compact (most concise)
-tc snapshot -s ".content" # Scope to CSS selector
+bun -e "
+const fs = require('fs');
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'screenshot',
+  format: 'png', quality: 80, max_width: 1280, window_id: 'main'
+}));
+ws.onmessage = (e) => {
+  const r = JSON.parse(e.data);
+  if (r.result?.base64) {
+    fs.writeFileSync('/tmp/screenshot.png', Buffer.from(r.result.base64, 'base64'));
+    console.log('Saved /tmp/screenshot.png', r.result.width + 'x' + r.result.height);
+  } else { console.log(r); }
+  ws.close();
+};
+setTimeout(() => process.exit(1), 60000);
+"
 ```
 
-### Element Interactions
+### DOM Snapshot
 
 ```bash
-tc click @e5             # Click
-tc dblclick @e3          # Double-click
-tc hover @e2             # Hover
-tc focus @e4             # Focus
-tc fill @e4 "text"       # Clear and fill input
-tc type @e4 "text"       # Type character by character
-tc check @e6             # Check checkbox
-tc uncheck @e6           # Uncheck
-tc select @e7 "Option"   # Select dropdown option
-tc scrollintoview @e10   # Scroll element into view
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'dom_snapshot',
+  snapshot_type: 'accessibility', window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data).result); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
 ```
 
-### Keyboard and Scroll
+### Find Element
 
 ```bash
-tc press Enter           # Press key
-tc press Tab
-tc scroll down 500       # Scroll page
-tc scroll up 300
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'find_element',
+  selector: 'button', strategy: 'css', window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
 ```
 
-### Get Information
+### Click Element
 
 ```bash
-tc get title             # Page title
-tc get url               # Current URL
-tc get text @e3          # Element text content
-tc get html @e3          # Inner HTML
-tc get value @e4         # Input value
-tc get attr @e1 href     # Attribute
-tc get box @e5           # Bounding box
-tc get count ".item"     # Element count
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'interact',
+  action: 'click', selector: 'button.submit', strategy: 'css', window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
 ```
 
-### Wait and Debug
+### Type Text / Press Key
 
 ```bash
-tc wait ".loaded"        # Wait for element
-tc wait --text "Success" # Wait for text
-tc logs                  # Console logs
-tc logs -n 50 -f "error" # Filtered logs
-tc state                 # App metadata
-tc windows               # Window list
+# Type into focused element
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'keyboard',
+  action: 'type', text: 'hello world', window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
+
+# Press a key
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'keyboard',
+  action: 'press', key: 'Enter', window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
 ```
 
-### Ref Format
+### Wait for Element
 
-Three formats accepted: `@e1`, `ref=e1`, or `e1`. Refs persist across CLI invocations in `/tmp/tauri-connector-refs.json`. Run `snapshot` again to refresh after DOM changes.
+```bash
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'wait_for',
+  selector: '.loaded', strategy: 'css', timeout: 10000, window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
+```
+
+### Console Logs
+
+```bash
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'console_logs', lines: 20, window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 5000);
+"
+```
+
+### Window Management
+
+```bash
+# List all windows
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({ id: '1', type: 'window_list' }));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 5000);
+"
+
+# Get window info
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({ id: '1', type: 'window_info', window_id: 'main' }));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 5000);
+"
+```
+
+### IPC Commands
+
+```bash
+# Emit a Tauri event
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'ipc_emit_event',
+  event_name: 'test-event', payload: { key: 'value' }
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 5000);
+"
+```
+
+### WS Command Types Reference
+
+All commands use `{ id, type, ...params }`. The `type` field uses snake_case:
+
+| Type | Required Params | Optional Params |
+|---|---|---|
+| `ping` | -- | -- |
+| `execute_js` | `script` | `window_id` |
+| `screenshot` | -- | `format`, `quality`, `max_width`, `window_id` |
+| `dom_snapshot` | -- | `snapshot_type`, `selector`, `window_id` |
+| `get_cached_dom` | -- | `window_id` |
+| `find_element` | `selector` | `strategy`, `window_id` |
+| `get_styles` | `selector` | `properties`, `window_id` |
+| `interact` | `action` | `selector`, `strategy`, `x`, `y`, `direction`, `distance`, `window_id` |
+| `keyboard` | `action` | `text`, `key`, `modifiers`, `window_id` |
+| `wait_for` | -- | `selector`, `strategy`, `text`, `timeout`, `window_id` |
+| `window_list` | -- | -- |
+| `window_info` | -- | `window_id` |
+| `window_resize` | `width`, `height` | `window_id` |
+| `backend_state` | -- | -- |
+| `ipc_execute_command` | `command` | `args` |
+| `ipc_monitor` | `action` | -- |
+| `ipc_get_captured` | -- | `filter`, `limit` |
+| `ipc_emit_event` | `event_name` | `payload` |
+| `console_logs` | -- | `lines`, `filter`, `window_id` |
 
 ## MCP Server
 
@@ -268,80 +394,40 @@ cargo build -p connector-mcp-server --release
 | Logs | `read_logs` |
 | Setup | `get_setup_instructions`, `list_devices` |
 
-## WebSocket API
-
-Connect directly to the plugin WS on port 9555 for custom automation:
-
-```python
-import asyncio, websockets, json
-
-async def test():
-    async with websockets.connect('ws://127.0.0.1:9555') as ws:
-        await ws.send(json.dumps({
-            'id': '1', 'type': 'execute_js',
-            'script': '(() => document.title)()',
-            'window_id': 'main'
-        }))
-        print(await ws.recv())
-
-asyncio.run(test())
-```
-
-## Screenshot
-
-Take screenshots of the Tauri webview via the `webview_screenshot` MCP tool or WS API:
-
-```bash
-# Via WebSocket (type: "screenshot")
-ws.send(JSON.stringify({
-  id: "1", type: "screenshot",
-  format: "png", quality: 80,
-  max_width: 1280, window_id: "main"
-}));
-```
-
-The screenshot uses a tiered approach:
-1. **Native screencapture** (macOS) -- uses window position/size, supports resize and format conversion. Requires Screen Recording permission.
-2. **html2canvas fallback** -- dynamically injects html2canvas with `foreignObjectRendering: true` for modern CSS support. No app dependencies needed.
-
-The MCP tool returns image content directly. The WS API returns base64-encoded image data in the result.
-
 ## Common Workflows
 
 ### Understand Current Page
 
 ```bash
-tc snapshot -i -c          # Get interactive elements
-tc get title               # Page title
-tc get url                 # Current URL
-tc logs -n 10              # Recent console output
-```
-
-### Fill a Form
-
-```bash
-tc snapshot -i             # Find form fields
-tc fill @e3 "John"        # Fill name
-tc fill @e4 "john@ex.com" # Fill email
-tc click @e7              # Click submit
-tc wait --text "Success"  # Wait for confirmation
-```
-
-### Navigate and Test
-
-```bash
-tc snapshot -i             # See current page
-tc click @e12              # Click nav item
-tc snapshot -i             # See new page
-tc get text @e5            # Verify content
+# Get app state + run JS to read page info
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'execute_js',
+  script: '(() => ({ title: document.title, url: location.href, h1: document.querySelector(\"h1\")?.textContent }))()',
+  window_id: 'main'
+}));
+ws.onmessage = (e) => { console.log(JSON.parse(e.data)); ws.close(); };
+setTimeout(() => process.exit(1), 15000);
+"
 ```
 
 ### Debug an Issue
 
 ```bash
-tc logs -f "error"         # Check for errors
-tc state                   # App version/environment
-tc snapshot -s ".error-panel"  # Scope to error area
+# Check console logs for errors
+bun -e "
+const ws = new WebSocket('ws://127.0.0.1:9555');
+ws.onopen = () => ws.send(JSON.stringify({
+  id: '1', type: 'console_logs', lines: 50, filter: 'error', window_id: 'main'
+}));
+ws.onmessage = (e) => {
+  const r = JSON.parse(e.data);
+  (r.result?.logs || []).forEach(l => console.log('[' + l.level + ']', l.message));
+  ws.close();
+};
+setTimeout(() => process.exit(1), 5000);
+"
 ```
 
 ## Troubleshooting
