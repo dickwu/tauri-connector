@@ -8,6 +8,7 @@ use connector_client::ConnectorClient;
 
 mod commands;
 mod snapshot;
+mod update;
 
 use snapshot::RefMap;
 
@@ -210,6 +211,12 @@ enum Commands {
     State,
     /// List windows
     Windows,
+    /// Check for updates and self-update
+    Update {
+        /// Just check, don't install
+        #[arg(long)]
+        check: bool,
+    },
     /// Show detailed help with examples
     Examples,
 }
@@ -245,6 +252,14 @@ async fn main() {
 
     if matches!(cli.command, Commands::Examples) {
         print_help();
+        return;
+    }
+
+    if let Commands::Update { check } = &cli.command {
+        if let Err(e) = update::run(*check).await {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
         return;
     }
 
@@ -359,6 +374,7 @@ async fn main() {
         }
         Commands::State => commands::state(&client).await,
         Commands::Windows => commands::windows(&client).await,
+        Commands::Update { .. } => unreachable!(),
         Commands::Examples => unreachable!(),
     };
 
