@@ -144,8 +144,8 @@ async fn handle_command(
         }
 
         // Element Operations
-        Command::FindElement { selector, strategy, window_id } => {
-            handlers::find_element(&id, &selector, &strategy, &window_id, bridge).await
+        Command::FindElement { selector, strategy, target, window_id } => {
+            handlers::find_element(&id, &selector, &strategy, target.as_deref(), &window_id, bridge).await
         }
         Command::GetStyles { selector, properties, window_id } => {
             handlers::get_styles(&id, &selector, properties.as_deref(), &window_id, bridge).await

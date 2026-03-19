@@ -97,6 +97,7 @@ pub async fn find_element(
     id: &str,
     selector: &str,
     strategy: &str,
+    target: Option<&str>,
     _window_id: &str,
     bridge: &Bridge,
 ) -> Response {
@@ -144,6 +145,41 @@ pub async fn find_element(
             }})()"#,
             text = selector.replace('"', r#"\""#)
         ),
+        "regex" => {
+            let tgt = target.unwrap_or("text");
+            let match_expr = match tgt {
+                "class" => "el.className || ''",
+                "id" => "el.id || ''",
+                "attr" => "Array.from(el.attributes).map(a => a.name + '=' + a.value).join(' ')",
+                "all" => "el.outerHTML",
+                _ => "(el.textContent || '').trim()",
+            };
+            format!(
+                r#"(() => {{
+                    const re = new RegExp("{pat}", "i");
+                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+                    const elements = [];
+                    while (walker.nextNode()) {{
+                        const el = walker.currentNode;
+                        const val = {match_expr};
+                        if (re.test(val)) {{
+                            const rect = el.getBoundingClientRect();
+                            elements.push({{
+                                tag: el.tagName.toLowerCase(),
+                                id: el.id || null,
+                                className: el.className || null,
+                                text: (el.textContent || '').trim().substring(0, 200),
+                                rect: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }},
+                                visible: rect.width > 0 && rect.height > 0
+                            }});
+                        }}
+                    }}
+                    return {{ count: elements.length, elements }};
+                }})()"#,
+                pat = selector.replace('"', r#"\""#),
+                match_expr = match_expr,
+            )
+        }
         _ => format!(
             r#"(() => {{
                 const els = document.querySelectorAll("{sel}");

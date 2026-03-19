@@ -116,8 +116,9 @@ pub async fn call_tool(
         "webview_find_element" => {
             let selector = str_arg(args, "selector").unwrap_or_default();
             let strategy = str_arg(args, "strategy").unwrap_or_else(|| "css".to_string());
+            let target = str_arg(args, "target");
             let wid = window_id(args);
-            handlers::find_element(id, &selector, &strategy, &wid, bridge).await
+            handlers::find_element(id, &selector, &strategy, target.as_deref(), &wid, bridge).await
         }
 
         "webview_get_styles" => {

@@ -52,6 +52,8 @@ pub enum Command {
         selector: String,
         #[serde(default = "default_strategy")]
         strategy: String,
+        #[serde(default)]
+        target: Option<String>,
         #[serde(default = "default_window")]
         window_id: String,
     },
