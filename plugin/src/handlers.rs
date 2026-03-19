@@ -2,11 +2,15 @@
 
 #[cfg(feature = "xcap")]
 use base64::Engine;
+use std::io::{Seek, SeekFrom, Write};
+use std::sync::Arc;
+use regex::Regex;
 use tauri::{Emitter, Manager};
 
 use crate::bridge::Bridge;
 use crate::protocol::{AppInfo, BackendState, EnvInfo, Response, TauriInfo, WindowEntry};
-use crate::state::PluginState;
+#[allow(unused_imports)]
+use crate::state::{EventEntry, PluginState};
 
 // ============ JavaScript Execution ============
 
@@ -626,14 +630,17 @@ pub async fn ipc_monitor(
     id: &str,
     action: &str,
     state: &PluginState,
+    bridge: &crate::bridge::Bridge,
 ) -> Response {
     match action {
         "start" => {
             state.set_ipc_monitoring(true).await;
+            let _ = bridge.execute_js("window.__CONNECTOR_IPC_MONITOR__ = true", 2_000).await;
             Response::success(id.to_string(), serde_json::json!({ "monitoring": true }))
         }
         "stop" => {
             state.set_ipc_monitoring(false).await;
+            let _ = bridge.execute_js("window.__CONNECTOR_IPC_MONITOR__ = false", 2_000).await;
             Response::success(id.to_string(), serde_json::json!({ "monitoring": false }))
         }
         _ => Response::error(id.to_string(), format!("Unknown action: {action}. Use: start, stop")),
@@ -643,14 +650,51 @@ pub async fn ipc_monitor(
 pub async fn ipc_get_captured(
     id: &str,
     filter: Option<&str>,
+    pattern: Option<&str>,
     limit: usize,
+    since: Option<u64>,
     state: &PluginState,
 ) -> Response {
-    let events = state.get_ipc_events(filter, limit).await;
-    match serde_json::to_value(&events) {
+    let path = state.log_dir.join("ipc.log");
+    let re = match pattern {
+        Some(p) => match Regex::new(p) {
+            Ok(r) => Some(r),
+            Err(e) => return Response::error(id.to_string(), format!("Invalid regex: {e}")),
+        },
+        None => None,
+    };
+    let filter_lower = filter.map(|f| f.to_lowercase());
+
+    let _writer = state.ipc_writer.lock().await;
+    let entries = crate::state::read_jsonl_filtered::<crate::state::IpcEvent>(
+        &path,
+        |line| {
+            if let Some(ts) = since {
+                if let Some(pos) = line.find("\"timestamp\":") {
+                    let rest = &line[pos + 12..];
+                    if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next() {
+                        if let Ok(t) = val.parse::<u64>() {
+                            if t < ts { return false; }
+                        }
+                    }
+                }
+            }
+            if let Some(ref re) = re {
+                return re.is_match(line);
+            }
+            if let Some(ref f) = filter_lower {
+                return line.to_lowercase().contains(f);
+            }
+            true
+        },
+        limit,
+    );
+    drop(_writer);
+
+    match serde_json::to_value(&entries) {
         Ok(v) => Response::success(
             id.to_string(),
-            serde_json::json!({ "count": events.len(), "events": v }),
+            serde_json::json!({ "count": entries.len(), "events": v }),
         ),
         Err(e) => Response::error(id.to_string(), format!("Serialization error: {e}")),
     }
@@ -678,18 +722,57 @@ pub async fn ipc_emit_event(
 
 // ============ Console Logs ============
 
+#[allow(clippy::too_many_arguments)]
 pub async fn console_logs(
     id: &str,
     lines: usize,
     filter: Option<&str>,
-    _window_id: &str,
+    pattern: Option<&str>,
+    level: Option<&str>,
+    window_id: &str,
     state: &PluginState,
 ) -> Response {
-    let logs = state.get_logs(lines, filter).await;
-    match serde_json::to_value(&logs) {
+    let path = state.log_dir.join("console.log");
+    let re = match pattern {
+        Some(p) => match Regex::new(p) {
+            Ok(r) => Some(r),
+            Err(e) => return Response::error(id.to_string(), format!("Invalid regex: {e}")),
+        },
+        None => None,
+    };
+    let levels: Option<Vec<String>> = level.map(|l| {
+        l.split(',').map(|s| s.trim().to_lowercase()).collect()
+    });
+    let filter_lower = filter.map(|f| f.to_lowercase());
+    let wid = window_id.to_string();
+
+    let _writer = state.console_writer.lock().await;
+    let entries = crate::state::read_jsonl_filtered::<crate::state::LogEntry>(
+        &path,
+        |line| {
+            if let Some(ref lvls) = levels {
+                let has_level = lvls.iter().any(|l| line.contains(&format!("\"level\":\"{}\"", l)));
+                if !has_level { return false; }
+            }
+            if !line.contains(&format!("\"window_id\":\"{}\"", wid)) {
+                return false;
+            }
+            if let Some(ref re) = re {
+                return re.is_match(line);
+            }
+            if let Some(ref f) = filter_lower {
+                return line.to_lowercase().contains(f);
+            }
+            true
+        },
+        lines,
+    );
+    drop(_writer);
+
+    match serde_json::to_value(&entries) {
         Ok(v) => Response::success(
             id.to_string(),
-            serde_json::json!({ "count": logs.len(), "logs": v }),
+            serde_json::json!({ "count": entries.len(), "logs": v }),
         ),
         Err(e) => Response::error(id.to_string(), format!("Serialization error: {e}")),
     }
@@ -888,4 +971,321 @@ fn encode_image(
     }
 
     Ok(buf)
+}
+
+// ============ Log Management ============
+
+pub async fn clear_logs(
+    id: &str,
+    source: &str,
+    state: &PluginState,
+) -> Response {
+    async fn clear(writer: &Arc<tokio::sync::Mutex<std::io::BufWriter<std::fs::File>>>) {
+        let mut w = writer.lock().await;
+        let _ = w.flush();
+        let file = w.get_mut();
+        let _ = file.set_len(0);
+        let _ = file.seek(SeekFrom::Start(0));
+    }
+
+    match source {
+        "console" => clear(&state.console_writer).await,
+        "ipc" => clear(&state.ipc_writer).await,
+        "events" => clear(&state.event_writer).await,
+        "all" => {
+            clear(&state.console_writer).await;
+            clear(&state.ipc_writer).await;
+            clear(&state.event_writer).await;
+        }
+        _ => return Response::error(id.to_string(), format!("Unknown source: {source}. Use: console, ipc, events, all")),
+    }
+
+    Response::success(id.to_string(), serde_json::json!({ "cleared": true, "source": source }))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn read_log_file(
+    id: &str,
+    source: &str,
+    lines: usize,
+    level: Option<&str>,
+    pattern: Option<&str>,
+    since: Option<u64>,
+    window_id: Option<&str>,
+    state: &PluginState,
+) -> Response {
+    let (path, writer) = match source {
+        "console" => (state.log_dir.join("console.log"), &state.console_writer),
+        "ipc" => (state.log_dir.join("ipc.log"), &state.ipc_writer),
+        "events" => (state.log_dir.join("events.log"), &state.event_writer),
+        _ => return Response::error(id.to_string(), format!("Unknown source: {source}")),
+    };
+
+    let re = match pattern {
+        Some(p) => match Regex::new(p) {
+            Ok(r) => Some(r),
+            Err(e) => return Response::error(id.to_string(), format!("Invalid regex: {e}")),
+        },
+        None => None,
+    };
+    let levels: Option<Vec<String>> = if source == "console" {
+        level.map(|l| l.split(',').map(|s| s.trim().to_lowercase()).collect())
+    } else {
+        None
+    };
+    let wid = window_id.map(|s| s.to_string());
+
+    let _w = writer.lock().await;
+    let entries = crate::state::read_jsonl_filtered::<serde_json::Value>(
+        &path,
+        |line| {
+            if let Some(ts) = since {
+                if let Some(pos) = line.find("\"timestamp\":") {
+                    let rest = &line[pos + 12..];
+                    if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next() {
+                        if let Ok(t) = val.parse::<u64>() {
+                            if t < ts { return false; }
+                        }
+                    }
+                }
+            }
+            if let Some(ref lvls) = levels {
+                let has_level = lvls.iter().any(|l| line.contains(&format!("\"level\":\"{}\"", l)));
+                if !has_level { return false; }
+            }
+            if let Some(ref wid) = wid {
+                if source != "ipc" && !line.contains(&format!("\"window_id\":\"{}\"", wid)) {
+                    return false;
+                }
+            }
+            if let Some(ref re) = re {
+                return re.is_match(line);
+            }
+            true
+        },
+        lines,
+    );
+    drop(_w);
+
+    Response::success(
+        id.to_string(),
+        serde_json::json!({ "source": source, "count": entries.len(), "entries": entries }),
+    )
+}
+
+// ============ Event Listeners ============
+
+pub async fn ipc_listen(
+    id: &str,
+    action: &str,
+    events: Option<&[String]>,
+    state: &PluginState,
+    bridge: &crate::bridge::Bridge,
+) -> Response {
+    match action {
+        "start" => {
+            let Some(event_names) = events else {
+                return Response::error(id.to_string(), "events parameter required for start");
+            };
+            let listeners = state.event_listeners.lock().await;
+            let new_events: Vec<&String> = event_names.iter()
+                .filter(|e| !listeners.contains(e))
+                .collect();
+
+            if new_events.is_empty() {
+                return Response::success(id.to_string(), serde_json::json!({
+                    "listening": *listeners,
+                    "added": 0,
+                }));
+            }
+
+            let events_js: Vec<String> = new_events.iter().map(|e| {
+                format!(
+                    "window.__TAURI__.event.listen('{ev}', function(ev) {{\
+                        var ipc = window.__CONNECTOR_ORIG_INVOKE__ || window.__TAURI_INTERNALS__.invoke;\
+                        ipc('plugin:connector|push_event', {{\
+                            payload: {{ event: '{ev}', payload: ev.payload, timestamp: Date.now(), windowId: ev.windowLabel || 'main' }}\
+                        }}).catch(function(){{}});\
+                    }}).then(function(unlisten) {{\
+                        window.__CONNECTOR_EVENT_LISTENERS__ = window.__CONNECTOR_EVENT_LISTENERS__ || {{}};\
+                        window.__CONNECTOR_EVENT_LISTENERS__['{ev}'] = unlisten;\
+                    }});",
+                    ev = e,
+                )
+            }).collect();
+
+            let script = events_js.join("\n");
+            drop(listeners); // release lock before bridge call
+            match bridge.execute_js(&script, 5_000).await {
+                Ok(_) => {
+                    let mut listeners = state.event_listeners.lock().await;
+                    for e in &new_events {
+                        listeners.push((*e).clone());
+                    }
+                    Response::success(id.to_string(), serde_json::json!({
+                        "listening": *listeners,
+                        "added": new_events.len(),
+                    }))
+                }
+                Err(e) => Response::error(id.to_string(), format!("Failed to register listeners: {e}")),
+            }
+        }
+        "stop" => {
+            let script = r#"(function() {
+                var listeners = window.__CONNECTOR_EVENT_LISTENERS__ || {};
+                Object.values(listeners).forEach(function(unlisten) {
+                    if (typeof unlisten === 'function') unlisten();
+                });
+                window.__CONNECTOR_EVENT_LISTENERS__ = {};
+            })()"#;
+            let _ = bridge.execute_js(script, 5_000).await;
+
+            let mut listeners = state.event_listeners.lock().await;
+            listeners.clear();
+            Response::success(id.to_string(), serde_json::json!({ "listening": [], "stopped": true }))
+        }
+        _ => Response::error(id.to_string(), format!("Unknown action: {action}. Use: start, stop")),
+    }
+}
+
+pub async fn event_get_captured(
+    id: &str,
+    event: Option<&str>,
+    pattern: Option<&str>,
+    limit: usize,
+    since: Option<u64>,
+    state: &PluginState,
+) -> Response {
+    let path = state.log_dir.join("events.log");
+    let re = match pattern {
+        Some(p) => match Regex::new(p) {
+            Ok(r) => Some(r),
+            Err(e) => return Response::error(id.to_string(), format!("Invalid regex: {e}")),
+        },
+        None => None,
+    };
+
+    let _w = state.event_writer.lock().await;
+    let entries = crate::state::read_jsonl_filtered::<serde_json::Value>(
+        &path,
+        |line| {
+            if let Some(ts) = since {
+                if let Some(pos) = line.find("\"timestamp\":") {
+                    let rest = &line[pos + 12..];
+                    if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next() {
+                        if let Ok(t) = val.parse::<u64>() {
+                            if t < ts { return false; }
+                        }
+                    }
+                }
+            }
+            if let Some(ev) = event {
+                if !line.contains(&format!("\"event\":\"{}\"", ev)) {
+                    return false;
+                }
+            }
+            if let Some(ref re) = re {
+                return re.is_match(line);
+            }
+            true
+        },
+        limit,
+    );
+    drop(_w);
+
+    Response::success(
+        id.to_string(),
+        serde_json::json!({ "count": entries.len(), "entries": entries }),
+    )
+}
+
+// ============ Snapshot Search ============
+
+pub async fn search_snapshot(
+    id: &str,
+    pattern: &str,
+    context: usize,
+    mode: &str,
+    window_id: &str,
+    state: &PluginState,
+    bridge: &crate::bridge::Bridge,
+) -> Response {
+    let context = context.min(10);
+
+    // Check cached snapshot first (< 10s old)
+    let snapshot_text = {
+        let cache = state.dom_cache.lock().await;
+        if let Some(entry) = cache.get(window_id) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if entry.snapshot_mode == mode && now - entry.timestamp < 10 {
+                Some(entry.snapshot.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    let snapshot = match snapshot_text {
+        Some(s) => s,
+        None => {
+            let script = format!(
+                "JSON.stringify(window.__CONNECTOR_SNAPSHOT__({{ mode: '{}' }}).snapshot)",
+                mode
+            );
+            match bridge.execute_js(&script, 15_000).await {
+                Ok(val) => {
+                    let s = val.as_str().unwrap_or("").to_string();
+                    if s.is_empty() {
+                        return Response::error(id.to_string(), "Snapshot returned empty — page may still be loading");
+                    }
+                    s
+                }
+                Err(e) => return Response::error(id.to_string(), format!("Snapshot failed: {e}")),
+            }
+        }
+    };
+
+    let re = match Regex::new(pattern) {
+        Ok(r) => r,
+        Err(e) => return Response::error(id.to_string(), format!("Invalid regex: {e}")),
+    };
+
+    let all_lines: Vec<&str> = snapshot.lines().collect();
+    let mut matches: Vec<serde_json::Value> = Vec::new();
+    let mut last_end: usize = 0;
+
+    for (i, line) in all_lines.iter().enumerate() {
+        if re.is_match(line) {
+            let ctx_start = i.saturating_sub(context);
+            let ctx_end = (i + context + 1).min(all_lines.len());
+            let actual_start = if ctx_start < last_end { last_end } else { ctx_start };
+            last_end = ctx_end;
+
+            if actual_start < ctx_end {
+                let ctx_lines: Vec<&str> = all_lines[actual_start..ctx_end].to_vec();
+                matches.push(serde_json::json!({
+                    "line": i + 1,
+                    "content": line,
+                    "context": ctx_lines,
+                }));
+            } else {
+                matches.push(serde_json::json!({
+                    "line": i + 1,
+                    "content": line,
+                    "context": [],
+                }));
+            }
+        }
+    }
+
+    Response::success(id.to_string(), serde_json::json!({
+        "matches": matches,
+        "total": matches.len(),
+        "pattern": pattern,
+    }))
 }
