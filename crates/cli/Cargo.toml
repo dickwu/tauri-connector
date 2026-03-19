@@ -3,13 +3,19 @@ name = "connector-cli"
 version = "0.5.0"
 edition = "2021"
 description = "CLI for interacting with Tauri apps via tauri-plugin-connector"
+license = "MIT"
+repository = "https://github.com/dickwu/tauri-connector"
+homepage = "https://github.com/dickwu/tauri-connector"
+keywords = ["tauri", "cli", "connector", "automation", "webview"]
+categories = ["development-tools", "command-line-utilities"]
+readme = "../../README.md"
 
 [[bin]]
 name = "tauri-connector"
 path = "src/main.rs"
 
 [dependencies]
-connector-client = { path = "../client" }
+connector-client = { version = "0.5.0", path = "../client" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

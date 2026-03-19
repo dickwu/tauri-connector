@@ -3,13 +3,19 @@ name = "connector-mcp-server"
 version = "0.5.0"
 edition = "2021"
 description = "MCP server for tauri-plugin-connector (Rust)"
+license = "MIT"
+repository = "https://github.com/dickwu/tauri-connector"
+homepage = "https://github.com/dickwu/tauri-connector"
+keywords = ["tauri", "mcp", "server", "connector", "automation"]
+categories = ["development-tools"]
+readme = "../../README.md"
 
 [[bin]]
 name = "tauri-connector-mcp"
 path = "src/main.rs"
 
 [dependencies]
-connector-client = { path = "../client" }
+connector-client = { version = "0.5.0", path = "../client" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
