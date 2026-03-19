@@ -58,7 +58,7 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Category | MCP Tool | CLI Command |
 |---|---|---|
 | JavaScript | `webview_execute_js` | `eval <script>` |
-| DOM | `webview_dom_snapshot` | `snapshot [-i] [-c]` |
+| DOM | `webview_dom_snapshot` | `snapshot [-i] [-c] [--mode ai\|accessibility\|structure]` |
 | DOM (cached) | `get_cached_dom` | `dom` |
 | Elements | `webview_find_element` | `find <selector> [-s css\|xpath\|text]` |
 | Styles | `webview_get_styles` | `get styles <@ref\|selector>` |
@@ -83,27 +83,48 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 Take a DOM snapshot with stable ref IDs, then interact with elements using those refs:
 
 ```bash
-# Take snapshot -- assigns ref IDs to interactive elements
+# Take snapshot -- assigns ref IDs, enriches with React component names, stitches portals
 $ tauri-connector snapshot -i
-- button "Add New" [ref=e113]
-- heading "Task Centre" [level=1, ref=e103]
-- switch [checked=false, ref=e104]
-- textbox "Search..." [ref=e16]
-- menuitem [ref=e8]
-  - img "user" [ref=e10]
+- complementary [component=MainMenu]
+  - menu [ref=e6, component=InheritableContextProvider]
+    - menuitem [ref=e7, component=LegacyMenuItem]
+      - img "calendar" [ref=e21]
+  - main [component=MainMenu]
+    - heading "Task Centre" [level=1, ref=e103]
+    - textbox "Search..." [ref=e16]
+    - combobox "Status" [ref=e50, component=InternalSelect, expanded=true]:
+      - listbox "Status options" [portal]:        # stitched from document.body
+        - option "Active" [selected, ref=e51]
+        - option "Inactive" [ref=e52]
 
 # Interact using refs (persist across CLI invocations)
-$ tauri-connector click @e113         # Click "Add New"
+$ tauri-connector click @e51          # Click "Active" option in portal
 $ tauri-connector fill @e16 "aspirin" # Fill search box
-$ tauri-connector hover @e8           # Hover menu item
+$ tauri-connector hover @e7           # Hover menu item
 $ tauri-connector get text @e103      # Get "Task Centre"
 $ tauri-connector press Enter         # Press key
 $ tauri-connector logs -n 5           # Last 5 console logs
 ```
 
-### Enhanced DOM Access
+### Unified Snapshot Engine (v0.5)
 
-The plugin auto-pushes DOM snapshots from the frontend via Tauri's native IPC (`invoke()`), which works in the app's own JS context. The `get_cached_dom` tool returns this pre-cached, LLM-friendly snapshot instantly.
+The DOM snapshot engine uses a single `window.__CONNECTOR_SNAPSHOT__()` function with three modes:
+
+| Mode | Output | Use case |
+|---|---|---|
+| `ai` (default) | Role, name, ARIA states, `ref=eN` IDs, `component=Name`, portal stitching | Claude interaction |
+| `accessibility` | Role, accessible name, ARIA states | Semantic understanding |
+| `structure` | Tag, id, classes, data-testid | Layout debugging |
+
+Key capabilities:
+- **TreeWalker API** for ~78x faster traversal (no stack overflow on deep React trees)
+- **Portal stitching** -- Ant Design modals/drawers/dropdowns are logically re-parented under their trigger via `aria-controls`/`aria-owns`
+- **React fiber enrichment** -- Component names (`component=AppointmentModal`) via `__reactFiber$` on DOM nodes
+- **Visibility pruning** -- `aria-hidden`, `display:none`, `visibility:hidden`, `role=presentation/none` automatically excluded
+- **Virtual scroll detection** -- `rc-virtual-list-holder` containers annotated with visible item count
+- **Token budgeting** -- `maxDepth` and `maxElements` for graceful truncation on large DOMs
+
+The plugin also auto-pushes DOM snapshots via Tauri IPC. The `get_cached_dom` tool returns this pre-cached snapshot instantly.
 
 ## Quick Start
 
@@ -226,11 +247,11 @@ setTimeout(() => process.exit(1), 60000);
 ### DOM Snapshot / Click / Type
 
 ```bash
-# Accessibility tree snapshot
+# AI snapshot (default mode -- includes refs, component names, portal stitching)
 bun -e "
 const ws = new WebSocket('ws://127.0.0.1:9555');
 ws.onopen = () => ws.send(JSON.stringify({
-  id: '1', type: 'dom_snapshot', snapshot_type: 'accessibility', window_id: 'main'
+  id: '1', type: 'dom_snapshot', mode: 'ai', window_id: 'main'
 }));
 ws.onmessage = (e) => { console.log(JSON.parse(e.data).result); ws.close(); };
 setTimeout(() => process.exit(1), 15000);
@@ -288,7 +309,7 @@ All commands use `{ id, type, ...params }` with snake_case types:
 | `ping` | -- |
 | `execute_js` | `script`, `window_id` |
 | `screenshot` | `format`, `quality`, `max_width`, `window_id` |
-| `dom_snapshot` | `snapshot_type`, `selector`, `window_id` |
+| `dom_snapshot` | `mode` (ai/accessibility/structure), `selector`, `max_depth`, `max_elements`, `react_enrich`, `follow_portals`, `shadow_dom`, `window_id` |
 | `find_element` | `selector`, `strategy`, `window_id` |
 | `get_styles` | `selector`, `properties`, `window_id` |
 | `interact` | `action`, `selector`, `strategy`, `x`, `y`, `window_id` |
@@ -316,7 +337,11 @@ cargo build -p connector-cli --release
 ```
 
 ```bash
-tauri-connector snapshot -i          # DOM snapshot with ref IDs
+tauri-connector snapshot -i          # AI snapshot with refs + component names
+tauri-connector snapshot -i --mode accessibility  # Accessibility tree only
+tauri-connector snapshot -i --no-react            # Skip React enrichment
+tauri-connector snapshot -i --no-portals          # Skip portal stitching
+tauri-connector snapshot -i --max-elements 2000   # Limit output size
 tauri-connector click @e5            # Click by ref
 tauri-connector fill @e3 "query"     # Fill input
 tauri-connector get text @e7         # Get text
@@ -430,18 +455,23 @@ Push DOM snapshots from your frontend for instant LLM access:
 ```typescript
 import { invoke } from '@tauri-apps/api/core';
 
+// The bridge auto-pushes DOM snapshots on page load and significant mutations.
+// For manual push (e.g. after a custom state change):
+const result = window.__CONNECTOR_SNAPSHOT__({ mode: 'ai', maxElements: 5000 });
 await invoke('plugin:connector|push_dom', {
   payload: {
     windowId: 'main',
-    html: document.body.innerHTML,
-    textContent: document.body.innerText,
-    accessibilityTree: '',
-    structureTree: '',
+    html: document.body.innerHTML.substring(0, 500000),
+    textContent: document.body.innerText.substring(0, 200000),
+    snapshot: result.snapshot,
+    snapshotMode: 'ai',
+    refs: JSON.stringify(result.refs),
+    meta: JSON.stringify(result.meta),
   }
 });
 ```
 
-The bridge JS also auto-pushes DOM on page load and significant mutations when `window.__TAURI_INTERNALS__` is available.
+The bridge JS auto-pushes DOM on page load and significant mutations (5s debounce) when `window.__TAURI_INTERNALS__` is available.
 
 ### Alt+Shift+Click Element Picker
 
@@ -531,7 +561,7 @@ The bridge intercepts `console.log/warn/error/info/debug`, storing entries in a 
 
 ### Ref System
 
-The CLI's `snapshot` command assigns sequential ref IDs (`e1`, `e2`, ...) to interactive and content elements based on their ARIA roles. Three ref formats are accepted: `@e1`, `ref=e1`, or `e1`. Refs are persisted to disk and used across subsequent CLI invocations until the next `snapshot` refreshes them.
+The unified snapshot engine assigns sequential ref IDs (`e0`, `e1`, ...) to interactive elements (buttons, links, inputs, checkboxes, etc.) and elements with `onclick`, `tabindex`, or `cursor:pointer`. Three ref formats are accepted: `@e1`, `ref=e1`, or `e1`. Refs are persisted to disk and used across subsequent CLI invocations until the next `snapshot` refreshes them. The ref resolution uses a three-strategy fallback: CSS selector, then role+name text matching, then `[role="..."]` attribute matching.
 
 ## Requirements
 
