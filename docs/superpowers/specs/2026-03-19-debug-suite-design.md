@@ -133,6 +133,9 @@ In `bridge.rs` init JS, wrap `window.__TAURI_INTERNALS__.invoke()`:
 ```javascript
 const _origInvoke = window.__TAURI_INTERNALS__.invoke;
 window.__TAURI_INTERNALS__.invoke = async function(cmd, args, options) {
+  if (cmd.startsWith('plugin:connector|')) {
+    return _origInvoke.call(this, cmd, args, options);
+  }
   const t0 = Date.now();
   try {
     const result = await _origInvoke.call(this, cmd, args, options);
@@ -153,7 +156,7 @@ window.__TAURI_INTERNALS__.invoke = async function(cmd, args, options) {
 };
 ```
 
-Note: Uses `_origInvoke` for the push call to avoid infinite recursion. Excludes `plugin:connector|*` commands to avoid self-monitoring noise.
+Note: Uses `_origInvoke` for the push call to avoid infinite recursion. The early-return guard on `plugin:connector|*` commands prevents self-monitoring noise and infinite loops.
 
 - `push_ipc_event` handler: appends to `{log_dir}/ipc.log`
 - `ipc_monitor start`: sets `window.__CONNECTOR_IPC_MONITOR__ = true` via bridge JS + flips Rust `ipc_monitor_active` flag
@@ -167,7 +170,7 @@ Note: Uses `_origInvoke` for the push call to avoid infinite recursion. Excludes
 | `filter` | string | null | Substring on command (backward compat) |
 | `pattern` | string | null | Regex across the full serialized entry |
 | `limit` | number | 100 | Max entries |
-| `since` | number | null | Timestamp floor |
+| `since` | number (u64) | null | Timestamp floor. Deserialized as `u64` in Rust. |
 
 Reads from `ipc.log` file with filtering.
 
@@ -178,22 +181,22 @@ Registers JS `listen()` for specific Tauri event names and buffers captures.
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `action` | string | required | `"start"` or `"stop"` |
-| `events` | string[] | required for start | Event names to listen for, e.g. `["user:login", "appointment:update"]` |
+| `events` | string[] | required for start, ignored for stop | Event names to listen for, e.g. `["user:login", "appointment:update"]`. On `"stop"`, all active listeners are removed regardless of this param. |
 
-**Start**: Injects JS via bridge that calls `window.__TAURI__.event.listen(eventName, callback)` for each event. Callback calls `_origInvoke('plugin:connector|push_event', { payload: { event, payload, timestamp, window_id } })`. Stores unlisten handles on `window.__CONNECTOR_EVENT_LISTENERS__`.
+**Start**: Injects JS via bridge that calls `window.__TAURI__.event.listen(eventName, callback)` for each event. Callback calls `window.__TAURI_INTERNALS__.invoke('plugin:connector|push_event', ...)` directly (bypasses the IPC wrapper since `plugin:connector|*` is excluded). The `_origInvoke` reference from the IPC wrapper is stored on `window.__CONNECTOR_ORIG_INVOKE__` at bridge init so the event callback can also use it. Stores unlisten handles on `window.__CONNECTOR_EVENT_LISTENERS__`.
 
 **Stop**: Injects JS via bridge that calls all unlisten functions from `window.__CONNECTOR_EVENT_LISTENERS__`, clears that object, then clears `event_listeners` in Rust state. If the webview has reloaded (e.g., after HMR or app restart), the JS unlisten handles are already gone -- the injected stop script is a no-op on the JS side, and we just clear the Rust state.
 
 **Double-start semantics**: Calling `start` with new events accumulates -- existing listeners are kept and new ones are added. Duplicate event names are deduplicated (no double-registration). Calling `start` with an already-listened event is a no-op for that event.
 
-### `event_get_captured` -- new tool (renamed from `event_get_captured` for consistency with `ipc_get_captured`)
+### `event_get_captured` -- new tool
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `event` | string | null | Filter by event name (exact match) |
 | `pattern` | string | null | Regex across the full serialized entry |
 | `limit` | number | 100 | Max entries |
-| `since` | number | null | Timestamp floor |
+| `since` | number (u64) | null | Timestamp floor. Deserialized as `u64` in Rust. |
 
 Reads from `events.log` file with filtering. Returns `{ count, entries: [...] }`.
 
