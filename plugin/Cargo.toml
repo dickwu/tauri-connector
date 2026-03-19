@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-connector"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 description = "MCP-compatible Tauri v2 plugin with xcap cross-platform screenshot, snapdom fallback, dual-path JS execution, and embedded MCP server"
 license = "MIT"
@@ -10,6 +10,13 @@ keywords = ["tauri", "mcp", "plugin", "webview", "automation"]
 categories = ["development-tools", "gui"]
 readme = "../README.md"
 links = "tauri-plugin-connector"
+
+[features]
+default = ["xcap"]
+xcap = ["dep:xcap", "dep:image"]
+
+[package.metadata.docs.rs]
+no-default-features = true
 
 [lib]
 name = "tauri_plugin_connector"
@@ -28,8 +35,8 @@ tokio-tungstenite = "0.29"
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
-xcap = "0.8"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
+xcap = { version = "0.8", optional = true }
 thiserror = "2"
 axum = "0.8"
 tokio-stream = "0.1"

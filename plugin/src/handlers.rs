@@ -1,5 +1,6 @@
 //! Command handlers for all supported operations.
 
+#[cfg(feature = "xcap")]
 use base64::Engine;
 use tauri::{Emitter, Manager};
 
@@ -692,6 +693,7 @@ pub async fn screenshot(
     app: Option<&tauri::AppHandle>,
 ) -> Response {
     // Tier 1: xcap native capture (cross-platform, pixel-accurate)
+    #[cfg(feature = "xcap")]
     if let Some(app) = app {
         match xcap_screenshot(app, window_id, format, quality, max_width).await {
             Ok(result) => return Response::success(id.to_string(), result),
@@ -701,10 +703,14 @@ pub async fn screenshot(
         }
     }
 
+    // suppress unused warnings when xcap feature is disabled
+    let _ = (app, window_id);
+
     // Tier 2: snapdom JS capture (requires @zumer/snapdom in frontend)
     snapdom_screenshot(id, format, quality, max_width, bridge).await
 }
 
+#[cfg(feature = "xcap")]
 /// Cross-platform screenshot using xcap.
 /// Captures the actual rendered window pixels — matches what the real web engine shows.
 async fn xcap_screenshot(
@@ -830,6 +836,7 @@ async fn snapdom_screenshot(
     }
 }
 
+#[cfg(feature = "xcap")]
 /// Encode an RgbaImage to the requested format, optionally resizing.
 fn encode_image(
     image: image::RgbaImage,

@@ -1,6 +1,6 @@
 [package]
 name = "connector-mcp-server"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 description = "MCP server for tauri-plugin-connector (Rust)"
 
