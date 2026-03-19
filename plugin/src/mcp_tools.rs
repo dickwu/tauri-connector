@@ -217,13 +217,15 @@ pub async fn call_tool(
 
         "ipc_monitor" => {
             let action = str_arg(args, "action").unwrap_or_default();
-            handlers::ipc_monitor(id, &action, state).await
+            handlers::ipc_monitor(id, &action, state, bridge).await
         }
 
         "ipc_get_captured" => {
             let filter = str_arg(args, "filter");
+            let pattern = str_arg(args, "pattern");
             let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
-            handlers::ipc_get_captured(id, filter.as_deref(), limit, state).await
+            let since = num_arg(args, "since").map(|n| n as u64);
+            handlers::ipc_get_captured(id, filter.as_deref(), pattern.as_deref(), limit, since, state).await
         }
 
         "ipc_emit_event" => {
@@ -235,8 +237,10 @@ pub async fn call_tool(
         "read_logs" => {
             let lines = num_arg(args, "lines").unwrap_or(50.0) as usize;
             let filter = str_arg(args, "filter");
+            let pattern = str_arg(args, "pattern");
+            let level = str_arg(args, "level");
             let wid = window_id(args);
-            handlers::console_logs(id, lines, filter.as_deref(), &wid, state).await
+            handlers::console_logs(id, lines, filter.as_deref(), pattern.as_deref(), level.as_deref(), &wid, state).await
         }
 
         "get_setup_instructions" => {
@@ -249,6 +253,44 @@ pub async fn call_tool(
             return json!({
                 "content": [{ "type": "text", "text": "This MCP server is embedded in the Tauri app. The app is running." }]
             });
+        }
+
+        "clear_logs" => {
+            let source = str_arg(args, "source").unwrap_or_else(|| "all".to_string());
+            handlers::clear_logs(id, &source, state).await
+        }
+
+        "read_log_file" => {
+            let source = str_arg(args, "source").unwrap_or_else(|| "console".to_string());
+            let lines = num_arg(args, "lines").unwrap_or(100.0) as usize;
+            let level = str_arg(args, "level");
+            let pattern = str_arg(args, "pattern");
+            let since = num_arg(args, "since").map(|n| n as u64);
+            let wid = str_arg(args, "windowId");
+            handlers::read_log_file(id, &source, lines, level.as_deref(), pattern.as_deref(), since, wid.as_deref(), state).await
+        }
+
+        "ipc_listen" => {
+            let action = str_arg(args, "action").unwrap_or_default();
+            let events: Option<Vec<String>> = args.get("events")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            handlers::ipc_listen(id, &action, events.as_deref(), state, bridge).await
+        }
+
+        "event_get_captured" => {
+            let event = str_arg(args, "event");
+            let pattern = str_arg(args, "pattern");
+            let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
+            let since = num_arg(args, "since").map(|n| n as u64);
+            handlers::event_get_captured(id, event.as_deref(), pattern.as_deref(), limit, since, state).await
+        }
+
+        "webview_search_snapshot" => {
+            let pattern = str_arg(args, "pattern").unwrap_or_default();
+            let context = num_arg(args, "context").unwrap_or(2.0) as usize;
+            let mode = str_arg(args, "mode").unwrap_or_else(|| "ai".to_string());
+            let wid = window_id(args);
+            handlers::search_snapshot(id, &pattern, context, &mode, &wid, state, bridge).await
         }
 
         _ => {
@@ -300,10 +342,11 @@ pub fn tool_definitions() -> Value {
                 json!({ "type": "object", "properties": { "windowId": { "type": "string" } } })
             ),
             tool_def("webview_find_element",
-                "Find elements by CSS selector, XPath, or text content",
+                "Find elements by CSS, XPath, text, or regex pattern",
                 json!({ "type": "object", "properties": {
                     "selector": { "type": "string" },
-                    "strategy": { "type": "string", "enum": ["css", "xpath", "text"] },
+                    "strategy": { "type": "string", "enum": ["css", "xpath", "text", "regex"] },
+                    "target": { "type": "string", "enum": ["text", "class", "id", "attr", "all"], "description": "What regex matches against (regex strategy only)" },
                     "windowId": { "type": "string" }
                 }, "required": ["selector"] })
             ),
@@ -382,10 +425,12 @@ pub fn tool_definitions() -> Value {
                 }, "required": ["action"] })
             ),
             tool_def("ipc_get_captured",
-                "Retrieve captured IPC traffic (requires monitoring started)",
+                "Retrieve captured IPC traffic. Supports regex pattern and timestamp filtering.",
                 json!({ "type": "object", "properties": {
-                    "filter": { "type": "string" },
-                    "limit": { "type": "number" }
+                    "filter": { "type": "string", "description": "Substring match on command name" },
+                    "pattern": { "type": "string", "description": "Regex on full entry (overrides filter)" },
+                    "limit": { "type": "number" },
+                    "since": { "type": "number", "description": "Only entries after this epoch ms" }
                 } })
             ),
             tool_def("ipc_emit_event",
@@ -396,10 +441,12 @@ pub fn tool_definitions() -> Value {
                 }, "required": ["eventName"] })
             ),
             tool_def("read_logs",
-                "Read captured console logs from the webview",
+                "Read console logs. Supports level filtering (error,warn) and regex patterns on messages.",
                 json!({ "type": "object", "properties": {
-                    "lines": { "type": "number" },
-                    "filter": { "type": "string" },
+                    "lines": { "type": "number", "description": "Max entries to return (default 50)" },
+                    "filter": { "type": "string", "description": "Substring match on message (backward compat)" },
+                    "pattern": { "type": "string", "description": "Regex pattern on message (overrides filter)" },
+                    "level": { "type": "string", "description": "Filter by level: error, warn, info, log, debug. Comma-separated." },
                     "windowId": { "type": "string" }
                 } })
             ),
@@ -410,6 +457,48 @@ pub fn tool_definitions() -> Value {
             tool_def("list_devices",
                 "List running Tauri app instances",
                 json!({ "type": "object", "properties": {} })
+            ),
+            tool_def("clear_logs",
+                "Clear log files. Specify source: console, ipc, events, or all.",
+                json!({ "type": "object", "properties": {
+                    "source": { "type": "string", "enum": ["console", "ipc", "events", "all"], "default": "all" }
+                } })
+            ),
+            tool_def("read_log_file",
+                "Read historical log files (persisted across app restarts). Supports regex and timestamp filtering.",
+                json!({ "type": "object", "properties": {
+                    "source": { "type": "string", "enum": ["console", "ipc", "events"] },
+                    "lines": { "type": "number", "description": "Max entries from tail (default 100)" },
+                    "level": { "type": "string", "description": "Level filter (console only)" },
+                    "pattern": { "type": "string", "description": "Regex on serialized entry" },
+                    "since": { "type": "number", "description": "Epoch ms floor" },
+                    "windowId": { "type": "string" }
+                }, "required": ["source"] })
+            ),
+            tool_def("ipc_listen",
+                "Listen for Tauri events. Start captures events to events.log, stop removes all listeners.",
+                json!({ "type": "object", "properties": {
+                    "action": { "type": "string", "enum": ["start", "stop"] },
+                    "events": { "type": "array", "items": { "type": "string" }, "description": "Event names to listen for" }
+                }, "required": ["action"] })
+            ),
+            tool_def("event_get_captured",
+                "Retrieve captured Tauri events from events.log. Filter by event name, regex, or timestamp.",
+                json!({ "type": "object", "properties": {
+                    "event": { "type": "string", "description": "Filter by event name (exact)" },
+                    "pattern": { "type": "string", "description": "Regex on full entry" },
+                    "limit": { "type": "number" },
+                    "since": { "type": "number", "description": "Epoch ms floor" }
+                } })
+            ),
+            tool_def("webview_search_snapshot",
+                "Search DOM snapshot with regex. Returns matched lines with context. Uses cached snapshot if fresh (<10s).",
+                json!({ "type": "object", "properties": {
+                    "pattern": { "type": "string" },
+                    "context": { "type": "number", "description": "Lines of context (default 2, max 10)" },
+                    "mode": { "type": "string", "enum": ["ai", "accessibility", "structure"] },
+                    "windowId": { "type": "string" }
+                }, "required": ["pattern"] })
             ),
         ]
     })
