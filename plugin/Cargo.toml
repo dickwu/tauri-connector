@@ -40,3 +40,4 @@ xcap = { version = "0.8", optional = true }
 thiserror = "2"
 axum = "0.8"
 tokio-stream = "0.1"
+regex = { version = "1", default-features = false, features = ["std", "perf"] }
