@@ -578,12 +578,12 @@ pub fn bridge_init_script(port: u16) -> String {
         if (isInteractive) {{
           refId = 'e' + (refCounter++);
           attrs.push('ref=' + refId);
-          const rect = el.getBoundingClientRect();
           refs[refId] = {{
+            tag: tag,
+            role: role || null,
+            name: (name || '').substring(0, 100),
             selector: buildSelector(el),
-            role: role || tag,
-            name: name || '',
-            rect: {{ x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) }}
+            nth: null,
           }};
         }}
         // React component enrichment
