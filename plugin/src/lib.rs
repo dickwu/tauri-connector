@@ -14,11 +14,15 @@
 //!
 //! // Push current DOM to the plugin for LLM consumption
 //! await invoke('plugin:connector|push_dom', {
-//!   windowId: 'main',
-//!   html: document.body.innerHTML,
-//!   textContent: document.body.innerText,
-//!   accessibilityTree: buildA11yTree(), // your helper
-//!   structureTree: buildStructureTree(), // your helper
+//!   payload: {
+//!     windowId: 'main',
+//!     html: document.body.innerHTML.substring(0, 500000),
+//!     textContent: document.body.innerText.substring(0, 200000),
+//!     snapshot: snapshotResult.snapshot,
+//!     snapshotMode: 'ai',
+//!     refs: JSON.stringify(snapshotResult.refs),
+//!     meta: JSON.stringify(snapshotResult.meta),
+//!   }
 //! });
 //! ```
 
@@ -54,9 +58,13 @@ struct PushDomPayload {
     #[serde(default)]
     text_content: String,
     #[serde(default)]
-    accessibility_tree: String,
+    snapshot: String,
     #[serde(default)]
-    structure_tree: String,
+    snapshot_mode: String,
+    #[serde(default)]
+    refs: String,
+    #[serde(default)]
+    meta: String,
 }
 
 fn default_main() -> String {
@@ -74,13 +82,20 @@ async fn push_dom(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
+    let refs: state::RefMap = serde_json::from_str(&payload.refs)
+        .map_err(|e| format!("Invalid refs JSON: {e}"))?;
+    let meta: state::SnapshotMeta = serde_json::from_str(&payload.meta)
+        .unwrap_or_default();
+
     state
         .push_dom(DomEntry {
             window_id: payload.window_id,
             html: payload.html,
             text_content: payload.text_content,
-            accessibility_tree: payload.accessibility_tree,
-            structure_tree: payload.structure_tree,
+            snapshot: payload.snapshot,
+            snapshot_mode: payload.snapshot_mode,
+            refs,
+            meta,
             timestamp,
         })
         .await;
