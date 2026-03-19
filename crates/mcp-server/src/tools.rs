@@ -70,12 +70,13 @@ pub fn tool_definitions() -> Value {
                 })
             ),
             tool_def("webview_find_element",
-                "Find elements by CSS selector, XPath, or text content",
+                "Find elements by CSS, XPath, text, or regex pattern",
                 json!({
                     "type": "object",
                     "properties": {
                         "selector": { "type": "string" },
-                        "strategy": { "type": "string", "enum": ["css", "xpath", "text"] },
+                        "strategy": { "type": "string", "enum": ["css", "xpath", "text", "regex"] },
+                        "target": { "type": "string", "enum": ["text", "class", "id", "attr", "all"], "description": "What regex matches against (regex strategy only)" },
                         "windowId": { "type": "string" }
                     },
                     "required": ["selector"]
@@ -194,12 +195,14 @@ pub fn tool_definitions() -> Value {
                 })
             ),
             tool_def("ipc_get_captured",
-                "Retrieve captured IPC traffic (requires monitoring to be started)",
+                "Retrieve captured IPC traffic. Supports regex pattern and timestamp filtering.",
                 json!({
                     "type": "object",
                     "properties": {
-                        "filter": { "type": "string" },
-                        "limit": { "type": "number" }
+                        "filter": { "type": "string", "description": "Substring match on command name" },
+                        "pattern": { "type": "string", "description": "Regex on full entry (overrides filter)" },
+                        "limit": { "type": "number" },
+                        "since": { "type": "number", "description": "Only entries after this epoch ms" }
                     }
                 })
             ),
@@ -215,14 +218,76 @@ pub fn tool_definitions() -> Value {
                 })
             ),
             tool_def("read_logs",
-                "Read captured console logs from the webview",
+                "Read console logs. Supports level filtering (error,warn) and regex patterns on messages.",
                 json!({
                     "type": "object",
                     "properties": {
-                        "lines": { "type": "number" },
-                        "filter": { "type": "string" },
+                        "lines": { "type": "number", "description": "Max entries to return (default 50)" },
+                        "filter": { "type": "string", "description": "Substring match on message (backward compat)" },
+                        "pattern": { "type": "string", "description": "Regex pattern on message (overrides filter)" },
+                        "level": { "type": "string", "description": "Filter by level: error, warn, info, log, debug. Comma-separated." },
                         "windowId": { "type": "string" }
                     }
+                })
+            ),
+            tool_def("clear_logs",
+                "Clear log files. Specify source: console, ipc, events, or all.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "source": { "type": "string", "enum": ["console", "ipc", "events", "all"], "default": "all" }
+                    }
+                })
+            ),
+            tool_def("read_log_file",
+                "Read historical log files (persisted across app restarts). Supports regex and timestamp filtering.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "source": { "type": "string", "enum": ["console", "ipc", "events"] },
+                        "lines": { "type": "number", "description": "Max entries from tail (default 100)" },
+                        "level": { "type": "string", "description": "Level filter (console only)" },
+                        "pattern": { "type": "string", "description": "Regex on serialized entry" },
+                        "since": { "type": "number", "description": "Epoch ms floor" },
+                        "windowId": { "type": "string" }
+                    },
+                    "required": ["source"]
+                })
+            ),
+            tool_def("ipc_listen",
+                "Listen for Tauri events. Start captures events to events.log, stop removes all listeners.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "action": { "type": "string", "enum": ["start", "stop"] },
+                        "events": { "type": "array", "items": { "type": "string" }, "description": "Event names to listen for" }
+                    },
+                    "required": ["action"]
+                })
+            ),
+            tool_def("event_get_captured",
+                "Retrieve captured Tauri events from events.log. Filter by event name, regex, or timestamp.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "event": { "type": "string", "description": "Filter by event name (exact)" },
+                        "pattern": { "type": "string", "description": "Regex on full entry" },
+                        "limit": { "type": "number" },
+                        "since": { "type": "number", "description": "Epoch ms floor" }
+                    }
+                })
+            ),
+            tool_def("webview_search_snapshot",
+                "Search DOM snapshot with regex. Returns matched lines with context. Uses cached snapshot if fresh (<10s).",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "pattern": { "type": "string" },
+                        "context": { "type": "number", "description": "Lines of context (default 2, max 10)" },
+                        "mode": { "type": "string", "enum": ["ai", "accessibility", "structure"] },
+                        "windowId": { "type": "string" }
+                    },
+                    "required": ["pattern"]
                 })
             ),
             tool_def("get_setup_instructions",
@@ -273,6 +338,11 @@ pub async fn call_tool(
         "ipc_get_captured" => handle_ipc_get_captured(client, args).await,
         "ipc_emit_event" => handle_ipc_emit_event(client, args).await,
         "read_logs" => handle_read_logs(client, args).await,
+        "clear_logs" => handle_clear_logs(client, args).await,
+        "read_log_file" => handle_read_log_file(client, args).await,
+        "ipc_listen" => handle_ipc_listen(client, args).await,
+        "event_get_captured" => handle_event_get_captured(client, args).await,
+        "webview_search_snapshot" => handle_search_snapshot(client, args).await,
         "get_setup_instructions" => Ok(json!(SETUP_INSTRUCTIONS)),
         "list_devices" => handle_list_devices(host, port).await,
         _ => Err(format!("Unknown tool: {name}")),
@@ -396,12 +466,14 @@ async fn handle_find_element(client: &mut ConnectorClient, args: &Value) -> Resu
     let selector = str_arg(args, "selector").ok_or("Missing 'selector' parameter")?;
     let strategy = str_arg(args, "strategy").unwrap_or_else(|| "css".to_string());
     let wid = window_id(args);
-    client.send(json!({
+    let mut cmd = json!({
         "type": "find_element",
         "selector": selector,
         "strategy": strategy,
         "window_id": wid,
-    })).await
+    });
+    if let Some(t) = str_arg(args, "target") { cmd["target"] = json!(t); }
+    client.send(cmd).await
 }
 
 async fn handle_get_styles(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
@@ -514,6 +586,8 @@ async fn handle_ipc_get_captured(client: &mut ConnectorClient, args: &Value) -> 
     let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
     let mut cmd = json!({ "type": "ipc_get_captured", "limit": limit });
     if let Some(f) = str_arg(args, "filter") { cmd["filter"] = json!(f); }
+    if let Some(p) = str_arg(args, "pattern") { cmd["pattern"] = json!(p); }
+    if let Some(s) = num_arg(args, "since") { cmd["since"] = json!(s as u64); }
     client.send(cmd).await
 }
 
@@ -529,7 +603,55 @@ async fn handle_read_logs(client: &mut ConnectorClient, args: &Value) -> Result<
     let wid = window_id(args);
     let mut cmd = json!({ "type": "console_logs", "lines": lines, "window_id": wid });
     if let Some(f) = str_arg(args, "filter") { cmd["filter"] = json!(f); }
+    if let Some(p) = str_arg(args, "pattern") { cmd["pattern"] = json!(p); }
+    if let Some(l) = str_arg(args, "level") { cmd["level"] = json!(l); }
     client.send(cmd).await
+}
+
+async fn handle_clear_logs(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+    let source = str_arg(args, "source").unwrap_or_else(|| "all".to_string());
+    client.send(json!({ "type": "clear_logs", "source": source })).await
+}
+
+async fn handle_read_log_file(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+    let source = str_arg(args, "source").ok_or("Missing 'source' parameter")?;
+    let lines = num_arg(args, "lines").unwrap_or(100.0) as usize;
+    let mut cmd = json!({ "type": "read_log_file", "source": source, "lines": lines });
+    if let Some(l) = str_arg(args, "level") { cmd["level"] = json!(l); }
+    if let Some(p) = str_arg(args, "pattern") { cmd["pattern"] = json!(p); }
+    if let Some(s) = num_arg(args, "since") { cmd["since"] = json!(s as u64); }
+    if let Some(w) = str_arg(args, "windowId") { cmd["window_id"] = json!(w); }
+    client.send(cmd).await
+}
+
+async fn handle_ipc_listen(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+    let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
+    let mut cmd = json!({ "type": "ipc_listen", "action": action });
+    if let Some(events) = args.get("events") { cmd["events"] = events.clone(); }
+    client.send(cmd).await
+}
+
+async fn handle_event_get_captured(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+    let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
+    let mut cmd = json!({ "type": "event_get_captured", "limit": limit });
+    if let Some(e) = str_arg(args, "event") { cmd["event"] = json!(e); }
+    if let Some(p) = str_arg(args, "pattern") { cmd["pattern"] = json!(p); }
+    if let Some(s) = num_arg(args, "since") { cmd["since"] = json!(s as u64); }
+    client.send(cmd).await
+}
+
+async fn handle_search_snapshot(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+    let pattern = str_arg(args, "pattern").ok_or("Missing 'pattern' parameter")?;
+    let context = num_arg(args, "context").unwrap_or(2.0) as usize;
+    let mode = str_arg(args, "mode").unwrap_or_else(|| "ai".to_string());
+    let wid = window_id(args);
+    client.send(json!({
+        "type": "search_snapshot",
+        "pattern": pattern,
+        "context": context,
+        "mode": mode,
+        "window_id": wid,
+    })).await
 }
 
 async fn handle_list_devices(host: &str, port: u16) -> Result<Value, String> {
