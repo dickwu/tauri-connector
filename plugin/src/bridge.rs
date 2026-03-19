@@ -283,6 +283,34 @@ pub fn bridge_init_script(port: u16) -> String {
   // Expose logs for retrieval
   window.__CONNECTOR_LOGS__ = consoleLogs;
 
+  // === IPC Invoke Wrapper (for monitoring) ===
+  if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {{
+    const _origInvoke = window.__TAURI_INTERNALS__.invoke;
+    window.__CONNECTOR_ORIG_INVOKE__ = _origInvoke;
+    window.__TAURI_INTERNALS__.invoke = async function(cmd, args, options) {{
+      if (cmd.startsWith('plugin:connector|')) {{
+        return _origInvoke.call(this, cmd, args, options);
+      }}
+      const t0 = Date.now();
+      try {{
+        const result = await _origInvoke.call(this, cmd, args, options);
+        if (window.__CONNECTOR_IPC_MONITOR__) {{
+          _origInvoke.call(this, 'plugin:connector|push_ipc_event', {{
+            payload: {{ command: cmd, args: args || {{}}, timestamp: t0, durationMs: Date.now() - t0 }}
+          }}).catch(function(){{}});
+        }}
+        return result;
+      }} catch(e) {{
+        if (window.__CONNECTOR_IPC_MONITOR__) {{
+          _origInvoke.call(this, 'plugin:connector|push_ipc_event', {{
+            payload: {{ command: cmd, args: args || {{}}, timestamp: t0, durationMs: Date.now() - t0, error: e.message }}
+          }}).catch(function(){{}});
+        }}
+        throw e;
+      }}
+    }};
+  }}
+
   function connect() {{
     try {{
       ws = new NativeWebSocket('ws://127.0.0.1:' + BRIDGE_PORT);
