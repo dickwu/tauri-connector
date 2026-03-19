@@ -143,8 +143,12 @@ pub enum Command {
     IpcGetCaptured {
         #[serde(default)]
         filter: Option<String>,
+        #[serde(default)]
+        pattern: Option<String>,
         #[serde(default = "default_ipc_limit")]
         limit: usize,
+        #[serde(default)]
+        since: Option<u64>,
     },
     IpcEmitEvent {
         event_name: String,
@@ -158,6 +162,55 @@ pub enum Command {
         lines: usize,
         #[serde(default)]
         filter: Option<String>,
+        #[serde(default)]
+        level: Option<String>,
+        #[serde(default)]
+        pattern: Option<String>,
+        #[serde(default = "default_window")]
+        window_id: String,
+    },
+    ClearLogs {
+        #[serde(default = "default_all")]
+        source: String,
+    },
+    ReadLogFile {
+        source: String,
+        #[serde(default = "default_read_lines")]
+        lines: usize,
+        #[serde(default)]
+        level: Option<String>,
+        #[serde(default)]
+        pattern: Option<String>,
+        #[serde(default)]
+        since: Option<u64>,
+        #[serde(default)]
+        window_id: Option<String>,
+    },
+
+    // --- Event Capture ---
+    IpcListen {
+        action: String,
+        #[serde(default)]
+        events: Option<Vec<String>>,
+    },
+    EventGetCaptured {
+        #[serde(default)]
+        event: Option<String>,
+        #[serde(default)]
+        pattern: Option<String>,
+        #[serde(default = "default_ipc_limit")]
+        limit: usize,
+        #[serde(default)]
+        since: Option<u64>,
+    },
+
+    // --- Search ---
+    SearchSnapshot {
+        pattern: String,
+        #[serde(default = "default_context")]
+        context: usize,
+        #[serde(default = "default_snapshot_mode")]
+        mode: String,
         #[serde(default = "default_window")]
         window_id: String,
     },
@@ -189,6 +242,18 @@ fn default_lines() -> usize {
 }
 fn default_ipc_limit() -> usize {
     100
+}
+fn default_all() -> String {
+    "all".to_string()
+}
+fn default_read_lines() -> usize {
+    100
+}
+fn default_context() -> usize {
+    2
+}
+fn default_snapshot_mode() -> String {
+    "ai".to_string()
 }
 
 /// Response sent back to MCP server.

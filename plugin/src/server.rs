@@ -180,17 +180,36 @@ async fn handle_command(
         Command::IpcExecuteCommand { command, args } => {
             handlers::ipc_execute_command(&id, &command, args.as_ref(), "main", bridge).await
         }
-        Command::IpcMonitor { action } => handlers::ipc_monitor(&id, &action, state).await,
-        Command::IpcGetCaptured { filter, limit } => {
-            handlers::ipc_get_captured(&id, filter.as_deref(), limit, state).await
+        Command::IpcMonitor { action } => handlers::ipc_monitor(&id, &action, state, bridge).await,
+        Command::IpcGetCaptured { filter, pattern, limit, since } => {
+            handlers::ipc_get_captured(&id, filter.as_deref(), pattern.as_deref(), limit, since, state).await
         }
         Command::IpcEmitEvent { event_name, payload } => {
             handlers::ipc_emit_event(&id, &event_name, payload.as_ref(), app).await
         }
 
         // Logs
-        Command::ConsoleLogs { lines, filter, window_id } => {
-            handlers::console_logs(&id, lines, filter.as_deref(), &window_id, state).await
+        Command::ConsoleLogs { lines, filter, level, pattern, window_id } => {
+            handlers::console_logs(&id, lines, filter.as_deref(), pattern.as_deref(), level.as_deref(), &window_id, state).await
+        }
+        Command::ClearLogs { source } => {
+            handlers::clear_logs(&id, &source, state).await
+        }
+        Command::ReadLogFile { source, lines, level, pattern, since, window_id } => {
+            handlers::read_log_file(&id, &source, lines, level.as_deref(), pattern.as_deref(), since, window_id.as_deref(), state).await
+        }
+
+        // Event Capture
+        Command::IpcListen { action, events } => {
+            handlers::ipc_listen(&id, &action, events.as_deref(), state, bridge).await
+        }
+        Command::EventGetCaptured { event, pattern, limit, since } => {
+            handlers::event_get_captured(&id, event.as_deref(), pattern.as_deref(), limit, since, state).await
+        }
+
+        // Search
+        Command::SearchSnapshot { pattern, context, mode, window_id } => {
+            handlers::search_snapshot(&id, &pattern, context, &mode, &window_id, state, bridge).await
         }
     }
 }
