@@ -9,7 +9,7 @@ Deep inspection and interaction with Tauri v2 desktop apps. The **MCP server run
 
 ## Setup
 
-For first-time setup in a Tauri project, read `skill/SETUP.md` in the tauri-connector repo. Key steps: add `tauri-plugin-connector = "0.4"` to Cargo.toml, register plugin, add permissions, set `withGlobalTauri: true`, install `@zumer/snapdom` in frontend, add MCP URL to `.mcp.json`.
+For first-time setup in a Tauri project, read `skill/SETUP.md` in the tauri-connector repo. Key steps: add `tauri-plugin-connector = "0.5"` to Cargo.toml, register plugin, add permissions, set `withGlobalTauri: true`, install `@zumer/snapdom` in frontend, add MCP URL to `.mcp.json`.
 
 ## Checking if the App is Running
 
