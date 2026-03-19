@@ -39,15 +39,20 @@ cargo build -p connector-cli --release
 
 ```bash
 # DOM & Inspection
-tauri-connector snapshot -i                    # DOM snapshot with ref IDs (interactive only)
-tauri-connector snapshot -i -c                 # Compact snapshot
-tauri-connector dom                            # Cached DOM (pushed from frontend)
-tauri-connector find "button"                  # Find elements by CSS
-tauri-connector find "Submit" -s text          # Find by text content
-tauri-connector get text @e7                   # Get text content by ref
-tauri-connector get title                      # Page title
-tauri-connector get url                        # Current URL
-tauri-connector pointed                        # Alt+Shift+Click element info
+tauri-connector snapshot -i                              # AI snapshot with refs (default)
+tauri-connector snapshot -i --mode accessibility          # Accessibility tree only
+tauri-connector snapshot -i --mode structure              # Structure tree only
+tauri-connector snapshot -i --no-react                    # Skip React component names
+tauri-connector snapshot -i --no-portals                  # Skip portal stitching
+tauri-connector snapshot -i --max-depth 5                 # Limit tree depth
+tauri-connector snapshot -i --max-elements 2000           # Limit element count
+tauri-connector dom                                       # Cached DOM (pushed from frontend)
+tauri-connector find "button"                             # Find elements by CSS
+tauri-connector find "Submit" -s text                     # Find by text content
+tauri-connector get text @e7                              # Get text content by ref
+tauri-connector get title                                 # Page title
+tauri-connector get url                                   # Current URL
+tauri-connector pointed                                   # Alt+Shift+Click element info
 
 # Interaction (use @eN refs from snapshot)
 tauri-connector click @e5                      # Click by ref
@@ -111,7 +116,9 @@ SCRIPTS=~/opensource/tauri-connector/skill/scripts
 bun run $SCRIPTS/state.ts                              # App metadata
 bun run $SCRIPTS/eval.ts "document.title"              # Execute JS
 bun run $SCRIPTS/screenshot.ts /tmp/shot.png 1280      # Screenshot
-bun run $SCRIPTS/snapshot.ts                           # DOM accessibility tree
+bun run $SCRIPTS/snapshot.ts                           # AI mode snapshot (default)
+bun run $SCRIPTS/snapshot.ts accessibility                # Accessibility tree
+bun run $SCRIPTS/snapshot.ts ai ".form"                   # Scoped to selector
 bun run $SCRIPTS/find.ts "button"                      # Find elements by CSS
 bun run $SCRIPTS/click.ts "button.submit"              # Click element
 bun run $SCRIPTS/hover.ts ".menu-trigger"              # Hover
@@ -138,7 +145,7 @@ The embedded MCP server starts automatically. Configure in `.mcp.json`:
 }
 ```
 
-20 MCP tools with full CLI parity: `webview_execute_js`, `webview_screenshot`, `webview_dom_snapshot`, `get_cached_dom`, `webview_find_element`, `webview_get_styles`, `webview_get_pointed_element`, `webview_select_element`, `webview_interact`, `webview_keyboard`, `webview_wait_for`, `manage_window`, `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured`, `ipc_emit_event`, `read_logs`, `get_setup_instructions`, `list_devices`.
+20 MCP tools with full CLI parity: `webview_execute_js`, `webview_screenshot`, `webview_dom_snapshot` (modes: ai/accessibility/structure, with portal stitching, React enrichment, and ref IDs), `get_cached_dom`, `webview_find_element`, `webview_get_styles`, `webview_get_pointed_element`, `webview_select_element`, `webview_interact`, `webview_keyboard`, `webview_wait_for`, `manage_window`, `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured`, `ipc_emit_event`, `read_logs`, `get_setup_instructions`, `list_devices`.
 
 ## Common Workflows
 
@@ -175,6 +182,25 @@ tauri-connector hover @e8                    # (Optional) hover-off to dismiss
 tauri-connector logs -n 50 -f error
 tauri-connector state
 tauri-connector eval "document.querySelector('.error')?.textContent"
+```
+
+### Ant Design / React Apps
+
+```bash
+# Full AI snapshot — portals stitched, components named
+tauri-connector snapshot -i
+# Output shows portals as logical children of triggers:
+# - combobox "Status" [ref=e5, component=InternalSelect, expanded=true]:
+#   - listbox "Status options" [portal]:
+#     - option "Active" [selected]
+#     - option "Inactive"
+
+# Virtual scroll containers annotated:
+# - list [virtual-scroll, visible=8]:
+#   - option "Item 1" [ref=e10]
+
+# Scope snapshot to a specific form
+tauri-connector snapshot -i -s ".ant-form"
 ```
 
 ### IPC Debugging

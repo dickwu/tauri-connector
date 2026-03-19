@@ -1,15 +1,19 @@
 #!/usr/bin/env bun
-/** Take a DOM snapshot. Args: [type] [selector]
- *  type: accessibility (default) | structure
+/** DOM snapshot. Args: [mode] [selector]
+ *  mode: ai (default) | accessibility | structure
  */
 import { sendAndPrint } from './connector';
 
-const snapshotType = process.argv[2] || 'accessibility';
+const mode = process.argv[2] || 'ai';
 const selector = process.argv[3] || undefined;
+const noReact = process.argv.includes('--no-react');
+const noPortals = process.argv.includes('--no-portals');
 
 await sendAndPrint({
   type: 'dom_snapshot',
-  snapshot_type: snapshotType,
-  ...(selector ? { selector } : {}),
+  mode,
+  ...(selector && !selector.startsWith('--') ? { selector } : {}),
+  react_enrich: !noReact,
+  follow_portals: !noPortals,
   window_id: 'main',
 });
