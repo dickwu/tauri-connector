@@ -165,6 +165,12 @@ enum Commands {
         /// Filter string
         #[arg(short, long)]
         filter: Option<String>,
+        /// Log level filter (e.g. error, warn, info)
+        #[arg(short, long)]
+        level: Option<String>,
+        /// Regex pattern to match
+        #[arg(short, long)]
+        pattern: Option<String>,
     },
     /// Take a screenshot and save to file
     Screenshot {
@@ -219,6 +225,16 @@ enum Commands {
         #[arg(short, long)]
         payload: Option<String>,
     },
+    /// Listen for and retrieve Tauri events
+    Events {
+        #[command(subcommand)]
+        action: EventCommands,
+    },
+    /// Clear log files
+    Clear {
+        /// What to clear: logs, ipc, events, all
+        target: String,
+    },
     /// App backend state
     State,
     /// List windows
@@ -252,10 +268,39 @@ enum IpcCommands {
         /// Filter by command name
         #[arg(short, long)]
         filter: Option<String>,
+        /// Regex pattern to match
+        #[arg(short, long)]
+        pattern: Option<String>,
+        /// Only entries since this timestamp (epoch ms)
+        #[arg(long)]
+        since: Option<u64>,
         /// Max entries to return
         #[arg(short, long, default_value_t = 100)]
         limit: usize,
     },
+}
+
+#[derive(Subcommand)]
+enum EventCommands {
+    /// Start listening for events
+    Listen {
+        /// Comma-separated event names
+        events: String,
+    },
+    /// Get captured events
+    Captured {
+        /// Regex pattern to match
+        #[arg(short, long)]
+        pattern: Option<String>,
+        /// Only entries since this timestamp (epoch ms)
+        #[arg(long)]
+        since: Option<u64>,
+        /// Max entries to return
+        #[arg(short, long, default_value_t = 100)]
+        limit: usize,
+    },
+    /// Stop listening
+    Stop,
 }
 
 #[tokio::main]
@@ -358,8 +403,8 @@ async fn main() {
             timeout,
         } => commands::wait(&client, selector.as_deref(), text.as_deref(), timeout).await,
         Commands::Eval { script } => commands::eval_js(&client, &script.join(" ")).await,
-        Commands::Logs { lines, filter } => {
-            commands::logs(&client, lines, filter.as_deref()).await
+        Commands::Logs { lines, filter, level, pattern } => {
+            commands::logs(&client, lines, filter.as_deref(), level.as_deref(), pattern.as_deref()).await
         }
         Commands::Screenshot {
             output,
@@ -384,13 +429,27 @@ async fn main() {
             }
             IpcCommands::Monitor => commands::ipc_monitor(&client, "start").await,
             IpcCommands::Unmonitor => commands::ipc_monitor(&client, "stop").await,
-            IpcCommands::Captured { filter, limit } => {
-                commands::ipc_captured(&client, filter.as_deref(), limit).await
+            IpcCommands::Captured { filter, pattern, since, limit } => {
+                commands::ipc_captured(&client, filter.as_deref(), pattern.as_deref(), since, limit).await
             }
         },
         Commands::Emit { event, payload } => {
             commands::ipc_emit(&client, &event, payload.as_deref()).await
         }
+        Commands::Events { action } => match action {
+            EventCommands::Listen { events } => {
+                commands::event_listen(&client, &events).await
+            }
+            EventCommands::Captured { pattern, since, limit } => {
+                commands::event_captured(&client, pattern.as_deref(), since, limit).await
+            }
+            EventCommands::Stop => {
+                commands::event_stop(&client).await
+            }
+        },
+        Commands::Clear { target } => {
+            commands::clear_logs(&client, &target).await
+        },
         Commands::State => commands::state(&client).await,
         Commands::Windows => commands::windows(&client).await,
         Commands::Update { .. } => unreachable!(),

@@ -399,41 +399,25 @@ pub async fn logs(
     client: &ConnectorClient,
     lines: usize,
     filter: Option<&str>,
+    level: Option<&str>,
+    pattern: Option<&str>,
 ) -> Result<(), String> {
-    let filter_clause = match filter {
-        Some(f) => {
-            let escaped = f.to_lowercase().replace('"', "\\\"");
-            format!(
-                r#".filter(l => l.message.toLowerCase().includes("{escaped}"))"#
-            )
-        }
-        None => String::new(),
-    };
+    let mut cmd = json!({ "type": "console_logs", "lines": lines, "window_id": "main" });
+    if let Some(f) = filter { cmd["filter"] = json!(f); }
+    if let Some(l) = level { cmd["level"] = json!(l); }
+    if let Some(p) = pattern { cmd["pattern"] = json!(p); }
 
-    let script = format!(
-        r#"(() => {{
-      const logs = (window.__CONNECTOR_LOGS__ || []){filter_clause};
-      return logs.slice(-{lines});
-    }})()"#
-    );
-
-    let result = exec_js(client, &script, 30_000).await?;
-    if let Some(entries) = result.as_array() {
-        for entry in entries {
+    let result = client.send(cmd).await?;
+    if let Some(logs) = result.get("logs").and_then(|v| v.as_array()) {
+        for entry in logs {
             let ts = entry.get("timestamp").and_then(|v| v.as_u64()).unwrap_or(0);
-            let level = entry
-                .get("level")
-                .and_then(|v| v.as_str())
-                .unwrap_or("LOG");
-            let msg = entry
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let lvl = entry.get("level").and_then(|v| v.as_str()).unwrap_or("LOG");
+            let msg = entry.get("message").and_then(|v| v.as_str()).unwrap_or("");
             let secs = ts / 1000;
             let h = (secs / 3600) % 24;
             let m = (secs / 60) % 60;
             let s = secs % 60;
-            println!("{h:02}:{m:02}:{s:02} {:<5} {msg}", level.to_uppercase());
+            println!("{h:02}:{m:02}:{s:02} {:<5} {msg}", lvl.to_uppercase());
         }
     } else {
         println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
@@ -582,15 +566,14 @@ pub async fn ipc_monitor(client: &ConnectorClient, action: &str) -> Result<(), S
 pub async fn ipc_captured(
     client: &ConnectorClient,
     filter: Option<&str>,
+    pattern: Option<&str>,
+    since: Option<u64>,
     limit: usize,
 ) -> Result<(), String> {
-    let mut cmd = json!({
-        "type": "ipc_get_captured",
-        "limit": limit,
-    });
-    if let Some(f) = filter {
-        cmd["filter"] = json!(f);
-    }
+    let mut cmd = json!({ "type": "ipc_get_captured", "limit": limit });
+    if let Some(f) = filter { cmd["filter"] = json!(f); }
+    if let Some(p) = pattern { cmd["pattern"] = json!(p); }
+    if let Some(s) = since { cmd["since"] = json!(s); }
     let result = client.send(cmd).await?;
     println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
     Ok(())
@@ -614,6 +597,57 @@ pub async fn ipc_emit(
         cmd["payload"] = p;
     }
     let result = client.send(cmd).await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Start listening for Tauri events.
+pub async fn event_listen(client: &ConnectorClient, events: &str) -> Result<(), String> {
+    let event_list: Vec<String> = events.split(',').map(|s| s.trim().to_string()).collect();
+    let result = client.send(json!({
+        "type": "ipc_listen",
+        "action": "start",
+        "events": event_list,
+    })).await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Get captured events.
+pub async fn event_captured(
+    client: &ConnectorClient,
+    pattern: Option<&str>,
+    since: Option<u64>,
+    limit: usize,
+) -> Result<(), String> {
+    let mut cmd = json!({ "type": "event_get_captured", "limit": limit });
+    if let Some(p) = pattern { cmd["pattern"] = json!(p); }
+    if let Some(s) = since { cmd["since"] = json!(s); }
+    let result = client.send(cmd).await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Stop listening for events.
+pub async fn event_stop(client: &ConnectorClient) -> Result<(), String> {
+    let result = client.send(json!({
+        "type": "ipc_listen",
+        "action": "stop",
+    })).await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Clear logs, IPC traffic, events, or all.
+pub async fn clear_logs(client: &ConnectorClient, target: &str) -> Result<(), String> {
+    let source = match target {
+        "logs" => "console",
+        "ipc" => "ipc",
+        "events" => "events",
+        "all" => "all",
+        _ => return Err(format!("Unknown target: {target}. Use: logs, ipc, events, all")),
+    };
+    let result = client.send(json!({ "type": "clear_logs", "source": source })).await?;
     println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
     Ok(())
 }
