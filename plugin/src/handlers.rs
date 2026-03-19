@@ -24,6 +24,7 @@ pub async fn execute_js(
 
 // ============ DOM Snapshot (via bridge JS) ============
 
+#[allow(clippy::too_many_arguments)]
 pub async fn dom_snapshot(
     id: &str,
     mode: &str,

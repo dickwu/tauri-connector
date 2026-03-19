@@ -16,6 +16,7 @@ async fn exec_js(client: &ConnectorClient, script: &str, timeout_ms: u64) -> Res
 }
 
 /// Take a DOM snapshot and return the ref map.
+#[allow(clippy::too_many_arguments)]
 pub async fn snapshot(
     client: &ConnectorClient,
     interactive: bool,
