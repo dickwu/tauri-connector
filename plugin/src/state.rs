@@ -156,6 +156,7 @@ impl PluginState {
         *self.ipc_monitor_active.lock().await = active;
     }
 
+    #[allow(dead_code)]
     pub async fn is_ipc_monitoring(&self) -> bool {
         *self.ipc_monitor_active.lock().await
     }
@@ -170,6 +171,7 @@ impl PluginState {
 }
 
 /// Flush and truncate the file behind a `BufWriter`, resetting it to empty.
+#[allow(dead_code)]
 pub fn clear_file(writer: &Mutex<BufWriter<File>>) {
     if let Ok(mut w) = writer.try_lock() {
         let _ = w.flush();

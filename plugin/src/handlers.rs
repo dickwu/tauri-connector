@@ -705,14 +705,15 @@ pub async fn ipc_get_captured(
     let entries = crate::state::read_jsonl_filtered::<crate::state::IpcEvent>(
         &path,
         |line| {
-            if let Some(ts) = since {
-                if let Some(pos) = line.find("\"timestamp\":") {
-                    let rest = &line[pos + 12..];
-                    if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next() {
-                        if let Ok(t) = val.parse::<u64>() {
-                            if t < ts { return false; }
-                        }
-                    }
+            if let Some(ts) = since
+                && let Some(pos) = line.find("\"timestamp\":")
+            {
+                let rest = &line[pos + 12..];
+                if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next()
+                    && let Ok(t) = val.parse::<u64>()
+                    && t < ts
+                {
+                    return false;
                 }
             }
             if let Some(ref re) = re {
@@ -1075,24 +1076,25 @@ pub async fn read_log_file(
     let entries = crate::state::read_jsonl_filtered::<serde_json::Value>(
         &path,
         |line| {
-            if let Some(ts) = since {
-                if let Some(pos) = line.find("\"timestamp\":") {
-                    let rest = &line[pos + 12..];
-                    if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next() {
-                        if let Ok(t) = val.parse::<u64>() {
-                            if t < ts { return false; }
-                        }
-                    }
+            if let Some(ts) = since
+                && let Some(pos) = line.find("\"timestamp\":")
+            {
+                let rest = &line[pos + 12..];
+                if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next()
+                    && let Ok(t) = val.parse::<u64>()
+                    && t < ts
+                {
+                    return false;
                 }
             }
             if let Some(ref lvls) = levels {
                 let has_level = lvls.iter().any(|l| line.contains(&format!("\"level\":\"{}\"", l)));
                 if !has_level { return false; }
             }
-            if let Some(ref wid) = wid {
-                if source != "ipc" && !line.contains(&format!("\"window_id\":\"{}\"", wid)) {
-                    return false;
-                }
+            if let Some(ref wid) = wid
+                && source != "ipc" && !line.contains(&format!("\"window_id\":\"{}\"", wid))
+            {
+                return false;
             }
             if let Some(ref re) = re {
                 return re.is_match(line);
@@ -1205,20 +1207,21 @@ pub async fn event_get_captured(
     let entries = crate::state::read_jsonl_filtered::<serde_json::Value>(
         &path,
         |line| {
-            if let Some(ts) = since {
-                if let Some(pos) = line.find("\"timestamp\":") {
-                    let rest = &line[pos + 12..];
-                    if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next() {
-                        if let Ok(t) = val.parse::<u64>() {
-                            if t < ts { return false; }
-                        }
-                    }
-                }
-            }
-            if let Some(ev) = event {
-                if !line.contains(&format!("\"event\":\"{}\"", ev)) {
+            if let Some(ts) = since
+                && let Some(pos) = line.find("\"timestamp\":")
+            {
+                let rest = &line[pos + 12..];
+                if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next()
+                    && let Ok(t) = val.parse::<u64>()
+                    && t < ts
+                {
                     return false;
                 }
+            }
+            if let Some(ev) = event
+                && !line.contains(&format!("\"event\":\"{}\"", ev))
+            {
+                return false;
             }
             if let Some(ref re) = re {
                 return re.is_match(line);
