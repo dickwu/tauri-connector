@@ -137,7 +137,7 @@ async fn handle_command(
 
         // DOM
         Command::DomSnapshot { snapshot_type, selector, window_id } => {
-            handlers::dom_snapshot(&id, &snapshot_type, selector.as_deref(), &window_id, bridge).await
+            handlers::dom_snapshot(&id, &snapshot_type, selector.as_deref(), None, None, true, true, false, &window_id, bridge).await
         }
         Command::GetCachedDom { window_id } => {
             handlers::get_cached_dom(&id, &window_id, state).await

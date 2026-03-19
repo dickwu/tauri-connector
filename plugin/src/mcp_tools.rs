@@ -88,10 +88,24 @@ pub async fn call_tool(
         }
 
         "webview_dom_snapshot" => {
-            let snapshot_type = str_arg(args, "type").unwrap_or_else(|| "accessibility".to_string());
+            // Backward compat: accept "type" as alias for "mode"
+            let mode = str_arg(args, "mode")
+                .or_else(|| str_arg(args, "type"))
+                .unwrap_or_else(|| "ai".to_string());
             let selector = str_arg(args, "selector");
+            let max_depth = num_arg(args, "max_depth").or_else(|| num_arg(args, "maxDepth")).map(|n| n as u64);
+            let max_elements = num_arg(args, "max_elements").or_else(|| num_arg(args, "maxElements")).map(|n| n as u64);
+            let react_enrich = args.get("react_enrich").or_else(|| args.get("reactEnrich"))
+                .and_then(|v| v.as_bool()).unwrap_or(true);
+            let follow_portals = args.get("follow_portals").or_else(|| args.get("followPortals"))
+                .and_then(|v| v.as_bool()).unwrap_or(true);
+            let shadow_dom = args.get("shadow_dom").or_else(|| args.get("shadowDom"))
+                .and_then(|v| v.as_bool()).unwrap_or(false);
             let wid = window_id(args);
-            handlers::dom_snapshot(id, &snapshot_type, selector.as_deref(), &wid, bridge).await
+            handlers::dom_snapshot(
+                id, &mode, selector.as_deref(), max_depth, max_elements,
+                react_enrich, follow_portals, shadow_dom, &wid, bridge,
+            ).await
         }
 
         "get_cached_dom" => {
@@ -269,12 +283,17 @@ pub fn tool_definitions() -> Value {
                 } })
             ),
             tool_def("webview_dom_snapshot",
-                "Get structured DOM snapshot (accessibility or structure tree) via JS bridge",
+                "Get structured DOM snapshot. Mode 'ai' (default) includes ref IDs for interaction, React component names, and stitches portals. Mode 'accessibility' shows ARIA roles/names. Mode 'structure' shows tags/classes.",
                 json!({ "type": "object", "properties": {
-                    "type": { "type": "string", "enum": ["accessibility", "structure"] },
-                    "selector": { "type": "string" },
+                    "mode": { "type": "string", "enum": ["ai", "accessibility", "structure"], "default": "ai" },
+                    "selector": { "type": "string", "description": "CSS selector to scope snapshot to a subtree" },
+                    "maxDepth": { "type": "number", "description": "Maximum tree depth (0 = unlimited)" },
+                    "maxElements": { "type": "number", "description": "Maximum elements to include (0 = unlimited)" },
+                    "reactEnrich": { "type": "boolean", "description": "Include React component names (default: true)" },
+                    "followPortals": { "type": "boolean", "description": "Stitch portals to their triggers (default: true)" },
+                    "shadowDom": { "type": "boolean", "description": "Traverse shadow DOM (default: false)" },
                     "windowId": { "type": "string" }
-                }, "required": ["type"] })
+                } })
             ),
             tool_def("get_cached_dom",
                 "Get cached DOM snapshot pushed from frontend. Faster and more LLM-friendly.",

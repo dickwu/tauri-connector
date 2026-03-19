@@ -26,8 +26,13 @@ pub async fn execute_js(
 
 pub async fn dom_snapshot(
     id: &str,
-    snapshot_type: &str,
+    mode: &str,
     selector: Option<&str>,
+    max_depth: Option<u64>,
+    max_elements: Option<u64>,
+    react_enrich: bool,
+    follow_portals: bool,
+    shadow_dom: bool,
     _window_id: &str,
     bridge: &Bridge,
 ) -> Response {
@@ -37,8 +42,14 @@ pub async fn dom_snapshot(
     };
 
     let script = format!(
-        "window.__CONNECTOR_DOM_SNAPSHOT__('{}', {})",
-        snapshot_type, selector_arg
+        "window.__CONNECTOR_SNAPSHOT__({{ mode: '{}', selector: {}, maxDepth: {}, maxElements: {}, reactEnrich: {}, followPortals: {}, shadowDom: {} }})",
+        mode,
+        selector_arg,
+        max_depth.unwrap_or(0),
+        max_elements.unwrap_or(0),
+        react_enrich,
+        follow_portals,
+        shadow_dom,
     );
 
     match bridge.execute_js(&script, 15_000).await {
@@ -61,14 +72,16 @@ pub async fn get_cached_dom(
                 "window_id": entry.window_id,
                 "html": entry.html,
                 "text_content": entry.text_content,
-                "accessibility_tree": entry.accessibility_tree,
-                "structure_tree": entry.structure_tree,
+                "snapshot": entry.snapshot,
+                "snapshot_mode": entry.snapshot_mode,
+                "refs": entry.refs,
+                "meta": entry.meta,
                 "timestamp": entry.timestamp,
             }),
         ),
         None => Response::error(
             id.to_string(),
-            format!("No cached DOM for window '{window_id}'. Call connector_push_dom from your frontend first."),
+            format!("No cached DOM for window '{window_id}'. The app may still be loading — wait a few seconds and retry."),
         ),
     }
 }
