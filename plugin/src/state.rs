@@ -1,5 +1,6 @@
 //! Shared plugin state accessible from Tauri commands and WebSocket handlers.
 
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -11,14 +12,38 @@ const MAX_LOG_ENTRIES: usize = 1000;
 /// Maximum number of captured IPC events.
 const MAX_IPC_EVENTS: usize = 500;
 
+/// Metadata for a referenced DOM element (shared with CLI crate).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RefEntry {
+    pub tag: String,
+    pub role: Option<String>,
+    pub name: String,
+    pub selector: String,
+    pub nth: Option<usize>,
+}
+
+/// Type alias for the ref map.
+pub type RefMap = HashMap<String, RefEntry>;
+
+/// Metadata about a snapshot capture.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SnapshotMeta {
+    pub element_count: usize,
+    pub truncated: bool,
+    pub portal_count: usize,
+    pub virtual_scroll_containers: usize,
+}
+
 /// Cached DOM snapshot pushed from the frontend via `invoke()`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DomEntry {
     pub window_id: String,
     pub html: String,
     pub text_content: String,
-    pub accessibility_tree: String,
-    pub structure_tree: String,
+    pub snapshot: String,
+    pub snapshot_mode: String,
+    pub refs: RefMap,
+    pub meta: SnapshotMeta,
     pub timestamp: u64,
 }
 
