@@ -40,7 +40,7 @@ mod state;
 
 use bridge::Bridge;
 use server::Server;
-use state::{DomEntry, LogEntry, PluginState};
+use state::{DomEntry, EventEntry, IpcEvent, LogEntry, PluginState};
 
 const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0";
 const DEFAULT_PORT_RANGE: (u16, u16) = (9555, 9655);
@@ -156,6 +156,61 @@ async fn set_pointed_element(
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushIpcEventPayload {
+    command: String,
+    #[serde(default)]
+    args: serde_json::Value,
+    timestamp: u64,
+    #[serde(default)]
+    duration_ms: Option<u64>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[tauri::command]
+async fn push_ipc_event(
+    app: AppHandle,
+    payload: PushIpcEventPayload,
+) -> Result<(), String> {
+    let state = app.state::<PluginState>();
+    state.push_ipc_event(IpcEvent {
+        command: payload.command,
+        args: payload.args,
+        timestamp: payload.timestamp,
+        duration_ms: payload.duration_ms,
+        error: payload.error,
+    }).await;
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushEventPayload {
+    event: String,
+    #[serde(default)]
+    payload: serde_json::Value,
+    timestamp: u64,
+    #[serde(default = "default_main")]
+    window_id: String,
+}
+
+#[tauri::command]
+async fn push_event(
+    app: AppHandle,
+    payload: PushEventPayload,
+) -> Result<(), String> {
+    let state = app.state::<PluginState>();
+    state.push_event(EventEntry {
+        event: payload.event,
+        payload: payload.payload,
+        timestamp: payload.timestamp,
+        window_id: payload.window_id,
+    }).await;
+    Ok(())
+}
+
 // ============ Plugin Builder ============
 
 /// Plugin builder with configuration options.
@@ -227,12 +282,26 @@ impl ConnectorBuilder {
                 push_dom,
                 push_logs,
                 set_pointed_element,
+                push_ipc_event,
+                push_event,
             ])
             .setup(move |app, _api| {
-                let plugin_state = PluginState::default();
+                let log_dir = app.path().app_data_dir()
+                    .unwrap_or_else(|_| std::env::temp_dir())
+                    .join(".tauri-connector");
+
+                let plugin_state = match PluginState::new(log_dir.clone()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("[connector] Failed to init log dir: {e}, falling back to temp dir");
+                        PluginState::new(std::env::temp_dir().join(".tauri-connector"))
+                            .expect("temp dir should be writable")
+                    }
+                };
                 app.manage(plugin_state.clone());
 
                 let handle = app.clone();
+                let log_dir_for_pid = log_dir.clone();
 
                 tauri::async_runtime::spawn(async move {
                     // 1. Start internal bridge (JS <-> plugin via WebSocket)
@@ -325,6 +394,7 @@ impl ConnectorBuilder {
                         bridge_port,
                         &config.product_name.clone().unwrap_or_default(),
                         &config.identifier,
+                        &log_dir_for_pid,
                     );
 
                     server.set_app_handle(handle);
@@ -358,6 +428,7 @@ fn write_pid_file(
     bridge_port: u16,
     app_name: &str,
     app_id: &str,
+    log_dir: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     // exe = .../target/debug/app-name  ->  target/ is 2 levels up
@@ -373,6 +444,7 @@ fn write_pid_file(
         "bridge_port": bridge_port,
         "app_name": app_name,
         "app_id": app_id,
+        "log_dir": log_dir.to_string_lossy(),
         "exe": exe.to_string_lossy(),
         "started_at": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
