@@ -362,138 +362,525 @@ pub fn bridge_init_script(port: u16) -> String {
     ws.send(JSON.stringify(payload));
   }}
 
-  // DOM snapshot helpers
-  window.__CONNECTOR_DOM_SNAPSHOT__ = function(type, selector) {{
-    const root = selector ? document.querySelector(selector) : document.body;
-    if (!root) return {{ error: 'Element not found: ' + selector }};
+  // === Unified Snapshot Engine ===
 
-    if (type === 'accessibility') {{
-      return buildAccessibilityTree(root, 0);
-    }} else {{
-      return buildStructureTree(root, 0);
-    }}
-  }};
+  // Outer-scope: cached React fiber key (undefined=not looked up, null=not React)
+  let fiberKey;
 
-  function buildAccessibilityTree(el, depth) {{
-    const indent = '  '.repeat(depth);
-    let lines = [];
-    const role = el.getAttribute('role') || getImplicitRole(el);
-    const name = getAccessibleName(el);
-    const tag = el.tagName.toLowerCase();
+  const GENERIC_WRAPPERS = new Set([
+    'App', 'Layout', 'ConfigProvider', 'ThemeProvider',
+    'Fragment', 'Suspense', 'ErrorBoundary', 'StrictMode'
+  ]);
 
-    let line = indent + '- ' + (role || tag);
-    if (name) line += ' "' + name.substring(0, 100) + '"';
-
-    const states = [];
-    if (el.getAttribute('aria-expanded')) states.push('expanded=' + el.getAttribute('aria-expanded'));
-    if (el.getAttribute('aria-selected')) states.push('selected=' + el.getAttribute('aria-selected'));
-    if (el.getAttribute('aria-checked')) states.push('checked=' + el.getAttribute('aria-checked'));
-    if (el.disabled) states.push('disabled');
-    if (states.length > 0) line += ' [' + states.join(', ') + ']';
-
-    lines.push(line);
-
-    for (const child of el.children) {{
-      const childLines = buildAccessibilityTree(child, depth + 1);
-      if (typeof childLines === 'string') {{
-        lines.push(childLines);
+  function findFiberKey(el) {{
+    if (fiberKey !== undefined) return fiberKey;
+    const keys = Object.keys(el);
+    for (let i = 0; i < keys.length; i++) {{
+      if (keys[i].startsWith('__reactFiber$')) {{
+        fiberKey = keys[i];
+        return fiberKey;
       }}
     }}
-
-    return lines.join('\n');
+    fiberKey = null;
+    return fiberKey;
   }}
 
-  function buildStructureTree(el, depth) {{
-    const indent = '  '.repeat(depth);
-    let lines = [];
-    const tag = el.tagName.toLowerCase();
-    let line = indent + '- ' + tag;
-    if (el.id) line += '#' + el.id;
-    if (el.className && typeof el.className === 'string') {{
-      const classes = el.className.trim().split(/\s+/).slice(0, 5);
-      if (classes.length > 0 && classes[0]) line += '.' + classes.join('.');
-    }}
-    const testId = el.getAttribute('data-testid');
-    if (testId) line += ' [data-testid="' + testId + '"]';
-
-    lines.push(line);
-
-    for (const child of el.children) {{
-      const childLines = buildStructureTree(child, depth + 1);
-      if (typeof childLines === 'string') {{
-        lines.push(childLines);
+  function getComponentName(el) {{
+    const key = findFiberKey(el);
+    if (!key) return null;
+    let fiber = el[key];
+    while (fiber) {{
+      const t = fiber.type;
+      if (t && typeof t === 'function') {{
+        const name = t.displayName || t.name || null;
+        if (name && !GENERIC_WRAPPERS.has(name)) return name;
       }}
+      fiber = fiber.return;
     }}
-
-    return lines.join('\n');
+    return null;
   }}
 
-  function getImplicitRole(el) {{
+  function getRole(el) {{
+    const explicit = el.getAttribute('role');
+    if (explicit) return explicit;
     const tag = el.tagName ? el.tagName.toLowerCase() : '';
-    if (tag === 'input') return getInputRole(el);
-    const roleMap = {{
-      'a': el.href ? 'link' : null,
-      'button': 'button',
-      'select': 'combobox',
-      'textarea': 'textbox',
-      'img': 'img',
-      'nav': 'navigation',
-      'main': 'main',
-      'header': 'banner',
-      'footer': 'contentinfo',
-      'aside': 'complementary',
-      'form': 'form',
-      'table': 'table',
-      'ul': 'list',
-      'ol': 'list',
-      'li': 'listitem',
-      'h1': 'heading',
-      'h2': 'heading',
-      'h3': 'heading',
-      'h4': 'heading',
-      'h5': 'heading',
-      'h6': 'heading',
+    if (tag === 'input') {{
+      const type = String(el.type || 'text').toLowerCase();
+      const inputMap = {{
+        'checkbox': 'checkbox',
+        'radio': 'radio',
+        'range': 'slider',
+        'search': 'searchbox',
+        'number': 'spinbutton'
+      }};
+      return inputMap[type] || 'textbox';
+    }}
+    if (tag === 'a' && el.hasAttribute('href')) return 'link';
+    const tagMap = {{
+      'button': 'button', 'select': 'combobox', 'textarea': 'textbox',
+      'img': 'img', 'nav': 'navigation', 'main': 'main',
+      'header': 'banner', 'footer': 'contentinfo', 'aside': 'complementary',
+      'form': 'form', 'table': 'table', 'ul': 'list', 'ol': 'list',
+      'li': 'listitem', 'h1': 'heading', 'h2': 'heading', 'h3': 'heading',
+      'h4': 'heading', 'h5': 'heading', 'h6': 'heading'
     }};
-    return roleMap[tag] || null;
+    return tagMap[tag] || null;
   }}
 
-  function getInputRole(el) {{
-    const type = String(el.type || 'text').toLowerCase();
-    const map = {{
-      'checkbox': 'checkbox',
-      'radio': 'radio',
-      'range': 'slider',
-      'search': 'searchbox',
-      'text': 'textbox',
-      'email': 'textbox',
-      'tel': 'textbox',
-      'url': 'textbox',
-      'number': 'spinbutton',
-    }};
-    return map[type] || 'textbox';
-  }}
-
-  function getAccessibleName(el) {{
+  function getName(el) {{
+    // 1. aria-label
     const ariaLabel = el.getAttribute('aria-label');
     if (ariaLabel) return ariaLabel;
+
+    // 2. aria-labelledby (multiple IDs)
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {{
-      const labelEl = document.getElementById(labelledBy);
-      if (labelEl) return labelEl.textContent.trim();
-    }}
-    if (el.tagName === 'IMG') return el.alt || '';
-    if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') {{
-      if (el.id) {{
-        const label = document.querySelector('label[for="' + el.id + '"]');
-        if (label) return label.textContent.trim();
+      const parts = labelledBy.split(/\s+/);
+      const texts = [];
+      for (let i = 0; i < parts.length; i++) {{
+        const ref = document.getElementById(parts[i]);
+        if (ref) texts.push(ref.textContent.trim());
       }}
-      return el.placeholder || '';
+      if (texts.length > 0) return texts.join(' ');
     }}
-    if (['BUTTON', 'A', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(el.tagName)) {{
-      return el.textContent.trim().substring(0, 100);
+
+    const tag = el.tagName;
+
+    // 3. IMG alt
+    if (tag === 'IMG') return el.getAttribute('alt') || '';
+
+    // 4. INPUT/SELECT/TEXTAREA: label[for], then placeholder
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {{
+      if (el.id) {{
+        const lbl = document.querySelector('label[for="' + el.id + '"]');
+        if (lbl) return lbl.textContent.trim();
+      }}
+      return el.getAttribute('placeholder') || '';
     }}
+
+    // 5. BUTTON/A/H1-H6: visible textContent
+    if (tag === 'BUTTON' || tag === 'A' ||
+        tag === 'H1' || tag === 'H2' || tag === 'H3' ||
+        tag === 'H4' || tag === 'H5' || tag === 'H6') {{
+      return (el.textContent || '').trim().substring(0, 100);
+    }}
+
+    // 6. INPUT submit/reset: value attribute
+    if (tag === 'INPUT') {{
+      const itype = (el.type || '').toLowerCase();
+      if (itype === 'submit' || itype === 'reset') {{
+        return el.getAttribute('value') || '';
+      }}
+    }}
+
+    // 7. FIELDSET: first LEGEND child
+    if (tag === 'FIELDSET') {{
+      const legend = el.querySelector('legend');
+      if (legend) return legend.textContent.trim();
+    }}
+
+    // 8. FIGURE: first FIGCAPTION child
+    if (tag === 'FIGURE') {{
+      const cap = el.querySelector('figcaption');
+      if (cap) return cap.textContent.trim();
+    }}
+
+    // 9. TABLE: first CAPTION child
+    if (tag === 'TABLE') {{
+      const cap = el.querySelector('caption');
+      if (cap) return cap.textContent.trim();
+    }}
+
+    // 10. title attribute (last resort)
+    const title = el.getAttribute('title');
+    if (title) return title;
+
+    // 11. ::before / ::after content
+    try {{
+      const before = getComputedStyle(el, '::before').content;
+      if (before && before !== 'none' && before !== 'normal') {{
+        return before.replace(/^"|"$/g, '');
+      }}
+      const after = getComputedStyle(el, '::after').content;
+      if (after && after !== 'none' && after !== 'normal') {{
+        return after.replace(/^"|"$/g, '');
+      }}
+    }} catch (_) {{}}
+
     return '';
   }}
+
+  // Interactive roles that get ref= attributes in ai mode
+  const INTERACTIVE_ROLES = new Set([
+    'button', 'link', 'textbox', 'checkbox', 'radio', 'combobox',
+    'listbox', 'option', 'menuitem', 'tab', 'switch', 'slider',
+    'spinbutton', 'searchbox', 'menuitemcheckbox', 'menuitemradio'
+  ]);
+
+  window.__CONNECTOR_SNAPSHOT__ = function(options) {{
+    const opts = options || {{}};
+    const mode = opts.mode || 'ai';
+    const maxDepth = opts.maxDepth || 0;
+    const maxElements = opts.maxElements || 0;
+    const reactEnrich = opts.reactEnrich !== false;
+    const followPortals = opts.followPortals !== false;
+    const shadowDom = opts.shadowDom === true;
+
+    const rootEl = opts.selector
+      ? document.querySelector(opts.selector)
+      : document.body;
+    if (!rootEl) return {{ snapshot: '', refs: {{}}, meta: {{ elementCount: 0, truncated: false, portalCount: 0, virtualScrollContainers: 0 }} }};
+
+    // State
+    let elementCount = 0;
+    let truncated = false;
+    let refCounter = 0;
+    let portalCount = 0;
+    let virtualScrollCount = 0;
+    const refs = {{}};
+    const portalLinks = [];
+    const claimedPortalIds = new Set();
+    const depthMap = new WeakMap();
+    const treeNodeMap = new WeakMap();
+
+    // TreeWalker filter
+    function nodeFilter(node) {{
+      const tag = node.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEMPLATE')
+        return NodeFilter.FILTER_REJECT;
+      if (node.getAttribute('aria-hidden') === 'true')
+        return NodeFilter.FILTER_REJECT;
+      try {{
+        const cs = getComputedStyle(node);
+        if (cs.display === 'none') return NodeFilter.FILTER_REJECT;
+        if (cs.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
+      }} catch (_) {{}}
+      const role = node.getAttribute('role');
+      if (role === 'presentation' || role === 'none')
+        return NodeFilter.FILTER_SKIP;
+      return NodeFilter.FILTER_ACCEPT;
+    }}
+
+    // Build a tree node for one element
+    function buildNode(el, depth) {{
+      const role = getRole(el);
+      const name = getName(el);
+      const tag = el.tagName.toLowerCase();
+      const attrs = [];
+      let refId = null;
+
+      if (mode === 'ai') {{
+        // Assign ref to interactive elements
+        const isInteractive = (role && INTERACTIVE_ROLES.has(role)) ||
+          el.hasAttribute('onclick') ||
+          el.hasAttribute('tabindex') ||
+          (function() {{ try {{ return getComputedStyle(el).cursor === 'pointer'; }} catch(_) {{ return false; }} }})();
+        if (isInteractive) {{
+          refId = 'e' + (refCounter++);
+          attrs.push('ref=' + refId);
+          const rect = el.getBoundingClientRect();
+          refs[refId] = {{
+            selector: buildSelector(el),
+            role: role || tag,
+            name: name || '',
+            rect: {{ x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) }}
+          }};
+        }}
+        // React component enrichment
+        if (reactEnrich) {{
+          const comp = getComponentName(el);
+          if (comp) attrs.push('component=' + comp);
+        }}
+      }}
+
+      // ARIA states
+      const checked = el.getAttribute('aria-checked') || (el.checked === true ? 'true' : null);
+      if (checked) attrs.push('checked=' + checked);
+      const disabled = el.getAttribute('aria-disabled') || (el.disabled === true ? 'true' : null);
+      if (disabled === 'true') attrs.push('disabled');
+      const expanded = el.getAttribute('aria-expanded');
+      if (expanded) attrs.push('expanded=' + expanded);
+      const selected = el.getAttribute('aria-selected');
+      if (selected) attrs.push('selected=' + selected);
+      const pressed = el.getAttribute('aria-pressed');
+      if (pressed) attrs.push('pressed=' + pressed);
+      const level = el.getAttribute('aria-level') ||
+        (/^H([1-6])$/.test(el.tagName) ? el.tagName.charAt(1) : null);
+      if (level) attrs.push('level=' + level);
+      const required = el.getAttribute('aria-required') || (el.required === true ? 'true' : null);
+      if (required === 'true') attrs.push('required');
+      const readonly = el.getAttribute('aria-readonly') || (el.readOnly === true ? 'true' : null);
+      if (readonly === 'true') attrs.push('readonly');
+
+      // Virtual scroll detection
+      if (el.classList && el.classList.contains('rc-virtual-list-holder')) {{
+        virtualScrollCount++;
+        const inner = el.querySelector('.rc-virtual-list-holder-inner');
+        const visibleCount = inner ? inner.children.length : 0;
+        attrs.push('virtual-scroll');
+        attrs.push('visible=' + visibleCount);
+      }}
+
+      // Portal links (aria-controls / aria-owns)
+      if (followPortals) {{
+        const controls = el.getAttribute('aria-controls');
+        const owns = el.getAttribute('aria-owns');
+        var linkedIds = [];
+        if (controls) linkedIds = linkedIds.concat(controls.split(/\s+/));
+        if (owns) linkedIds = linkedIds.concat(owns.split(/\s+/));
+        // store for pass 2; treeNode will be attached after creation
+        if (linkedIds.length > 0) {{
+          for (var li = 0; li < linkedIds.length; li++) {{
+            if (linkedIds[li]) {{
+              portalLinks.push({{ targetId: linkedIds[li], depth: depth, treeNode: null }});
+              claimedPortalIds.add(linkedIds[li]);
+            }}
+          }}
+        }}
+      }}
+
+      // Structure mode: tag, id, classes, data-testid
+      if (mode === 'structure') {{
+        var structAttrs = [];
+        if (el.id) structAttrs.push('id=' + el.id);
+        if (el.className && typeof el.className === 'string') {{
+          var cls = el.className.trim().split(/\s+/).slice(0, 5).filter(Boolean);
+          if (cls.length > 0) structAttrs.push('class=' + cls.join('.'));
+        }}
+        var testId = el.getAttribute('data-testid');
+        if (testId) structAttrs.push('data-testid=' + testId);
+        return {{
+          label: tag,
+          name: '',
+          attrs: structAttrs,
+          children: [],
+          depth: depth,
+          el: el
+        }};
+      }}
+
+      return {{
+        label: role || tag,
+        name: name || '',
+        attrs: attrs,
+        children: [],
+        depth: depth,
+        el: el
+      }};
+    }}
+
+    // Build a minimal CSS selector for ref lookup
+    function buildSelector(el) {{
+      if (el.id) return '#' + el.id;
+      var tag = el.tagName.toLowerCase();
+      var sel = tag;
+      var testId = el.getAttribute('data-testid');
+      if (testId) return tag + '[data-testid="' + testId + '"]';
+      if (el.className && typeof el.className === 'string') {{
+        var cls = el.className.trim().split(/\s+/).slice(0, 2).filter(Boolean);
+        if (cls.length > 0) sel += '.' + cls.join('.');
+      }}
+      // nth-child disambiguation
+      if (el.parentElement) {{
+        var siblings = el.parentElement.children;
+        var idx = 0;
+        for (var s = 0; s < siblings.length; s++) {{
+          if (siblings[s] === el) {{ idx = s + 1; break; }}
+        }}
+        if (siblings.length > 1) sel += ':nth-child(' + idx + ')';
+      }}
+      return sel;
+    }}
+
+    // === Pass 1: Main DOM walk ===
+    var rootNode = {{ label: 'root', name: '', attrs: [], children: [], depth: -1, el: rootEl }};
+    var walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_ELEMENT, {{
+      acceptNode: nodeFilter
+    }});
+
+    depthMap.set(rootEl, 0);
+    var currentEl = walker.currentNode;
+    if (currentEl === rootEl && currentEl.nodeType === 1) {{
+      // Process root element itself if it's an element
+      var rn = buildNode(currentEl, 0);
+      elementCount++;
+      treeNodeMap.set(currentEl, rn);
+      rootNode.children.push(rn);
+      // Back-link portal links
+      for (var pi = portalLinks.length - 1; pi >= 0; pi--) {{
+        if (portalLinks[pi].treeNode === null && portalLinks[pi].depth === 0) {{
+          portalLinks[pi].treeNode = rn;
+        }}
+      }}
+    }}
+
+    while (true) {{
+      currentEl = walker.nextNode();
+      if (!currentEl) break;
+
+      if (maxElements > 0 && elementCount >= maxElements) {{
+        truncated = true;
+        break;
+      }}
+
+      // Compute depth from parent
+      var parentEl = currentEl.parentElement;
+      var parentDepth = depthMap.has(parentEl) ? depthMap.get(parentEl) : 0;
+      var myDepth = parentDepth + 1;
+      depthMap.set(currentEl, myDepth);
+
+      if (maxDepth > 0 && myDepth > maxDepth) continue;
+
+      var node = buildNode(currentEl, myDepth);
+      elementCount++;
+      treeNodeMap.set(currentEl, node);
+
+      // Attach to parent tree node
+      var parentNode = treeNodeMap.has(parentEl) ? treeNodeMap.get(parentEl) : rootNode;
+      parentNode.children.push(node);
+
+      // Back-link latest portal links to their treeNode
+      for (var pj = portalLinks.length - 1; pj >= 0; pj--) {{
+        if (portalLinks[pj].treeNode === null) {{
+          portalLinks[pj].treeNode = node;
+        }} else {{
+          break;
+        }}
+      }}
+
+      // Shadow DOM opt-in
+      if (shadowDom && currentEl.shadowRoot) {{
+        var shadowWalker = document.createTreeWalker(currentEl.shadowRoot, NodeFilter.SHOW_ELEMENT, {{
+          acceptNode: nodeFilter
+        }});
+        var sEl = shadowWalker.nextNode();
+        while (sEl) {{
+          if (maxElements > 0 && elementCount >= maxElements) {{ truncated = true; break; }}
+          var sDepth = myDepth + 1;
+          depthMap.set(sEl, sDepth);
+          if (maxDepth === 0 || sDepth <= maxDepth) {{
+            var sNode = buildNode(sEl, sDepth);
+            elementCount++;
+            treeNodeMap.set(sEl, sNode);
+            var sParent = treeNodeMap.has(sEl.parentElement) ? treeNodeMap.get(sEl.parentElement) : node;
+            sParent.children.push(sNode);
+          }}
+          sEl = shadowWalker.nextNode();
+        }}
+      }}
+    }}
+
+    // === Pass 2: Portal stitching ===
+    if (followPortals) {{
+      for (var pk = 0; pk < portalLinks.length; pk++) {{
+        var link = portalLinks[pk];
+        var targetEl = document.getElementById(link.targetId);
+        if (!targetEl || !link.treeNode) continue;
+
+        portalCount++;
+        var baseDepth = link.depth + 1;
+        var portalWalker = document.createTreeWalker(targetEl, NodeFilter.SHOW_ELEMENT, {{
+          acceptNode: nodeFilter
+        }});
+        var portalDepthMap = new WeakMap();
+        portalDepthMap.set(targetEl, baseDepth);
+
+        // Process target root
+        var targetNode = buildNode(targetEl, baseDepth);
+        targetNode.attrs.push('portal');
+        elementCount++;
+        link.treeNode.children.push(targetNode);
+
+        var pEl = portalWalker.nextNode();
+        while (pEl) {{
+          if (maxElements > 0 && elementCount >= maxElements) {{ truncated = true; break; }}
+          var pParent = pEl.parentElement;
+          var pParentDepth = portalDepthMap.has(pParent) ? portalDepthMap.get(pParent) : baseDepth;
+          var pDepth = pParentDepth + 1;
+          portalDepthMap.set(pEl, pDepth);
+          if (maxDepth === 0 || pDepth <= maxDepth) {{
+            var pNode = buildNode(pEl, pDepth);
+            elementCount++;
+            // Attach to portal parent
+            var pParentNode = treeNodeMap.has(pParent) ? treeNodeMap.get(pParent) : targetNode;
+            pParentNode.children.push(pNode);
+            treeNodeMap.set(pEl, pNode);
+          }}
+          pEl = portalWalker.nextNode();
+        }}
+      }}
+
+      // Orphan portals: body direct children with ant-/rc- class not claimed
+      var bodyChildren = document.body.children;
+      for (var oi = 0; oi < bodyChildren.length; oi++) {{
+        var orphan = bodyChildren[oi];
+        if (orphan.id && claimedPortalIds.has(orphan.id)) continue;
+        if (treeNodeMap.has(orphan)) continue;
+        var oClass = typeof orphan.className === 'string' ? orphan.className : '';
+        if (!/\b(ant-|rc-)/.test(oClass)) continue;
+        // Treat as orphan portal
+        portalCount++;
+        var oNode = buildNode(orphan, 1);
+        oNode.attrs.push('orphan-portal');
+        elementCount++;
+        rootNode.children.push(oNode);
+        // Walk children of orphan portal
+        var orphanWalker = document.createTreeWalker(orphan, NodeFilter.SHOW_ELEMENT, {{
+          acceptNode: nodeFilter
+        }});
+        var oDepthMap = new WeakMap();
+        oDepthMap.set(orphan, 1);
+        var oEl = orphanWalker.nextNode();
+        while (oEl) {{
+          if (maxElements > 0 && elementCount >= maxElements) {{ truncated = true; break; }}
+          var oParent = oEl.parentElement;
+          var oParentD = oDepthMap.has(oParent) ? oDepthMap.get(oParent) : 1;
+          var oDep = oParentD + 1;
+          oDepthMap.set(oEl, oDep);
+          if (maxDepth === 0 || oDep <= maxDepth) {{
+            var oChild = buildNode(oEl, oDep);
+            elementCount++;
+            var oParNode = treeNodeMap.has(oParent) ? treeNodeMap.get(oParent) : oNode;
+            oParNode.children.push(oChild);
+            treeNodeMap.set(oEl, oChild);
+          }}
+          oEl = orphanWalker.nextNode();
+        }}
+      }}
+    }}
+
+    // === Render: recursive stringify ===
+    function renderNode(node, depth) {{
+      var line = '  '.repeat(depth) + '- ' + node.label;
+      if (node.name) line += ' "' + node.name.replace(/"/g, '\\"') + '"';
+      if (node.attrs.length > 0) line += ' [' + node.attrs.join(', ') + ']';
+      var lines = [line];
+      for (var ci = 0; ci < node.children.length; ci++) {{
+        lines.push(renderNode(node.children[ci], depth + 1));
+      }}
+      return lines.join('\n');
+    }}
+
+    var snapshotLines = [];
+    for (var ri = 0; ri < rootNode.children.length; ri++) {{
+      snapshotLines.push(renderNode(rootNode.children[ri], 0));
+    }}
+    var snapshot = snapshotLines.join('\n');
+    if (truncated) {{
+      snapshot += '\n# ... truncated (' + maxElements + ' of ' + elementCount + '+ elements shown)';
+    }}
+
+    return {{
+      snapshot: snapshot,
+      refs: refs,
+      meta: {{
+        elementCount: elementCount,
+        truncated: truncated,
+        portalCount: portalCount,
+        virtualScrollContainers: virtualScrollCount
+      }}
+    }};
+  }};
 
   // === Auto-push DOM via Tauri IPC (when available) ===
   function autoPushDom() {{
@@ -501,15 +888,23 @@ pub fn bridge_init_script(port: u16) -> String {
     if (!ipc || !ipc.invoke) return;
 
     try {{
-      const a11y = buildAccessibilityTree(document.body, 0);
-      const structure = buildStructureTree(document.body, 0);
+      const result = window.__CONNECTOR_SNAPSHOT__({{
+        mode: 'ai',
+        maxDepth: 0,
+        maxElements: 5000,
+        reactEnrich: true,
+        followPortals: true,
+        shadowDom: false
+      }});
       ipc.invoke('plugin:connector|push_dom', {{
         payload: {{
           windowId: 'main',
           html: document.body.innerHTML.substring(0, 500000),
           textContent: document.body.innerText.substring(0, 200000),
-          accessibilityTree: typeof a11y === 'string' ? a11y : '',
-          structureTree: typeof structure === 'string' ? structure : '',
+          snapshot: result.snapshot || '',
+          snapshotMode: 'ai',
+          refs: JSON.stringify(result.refs || {{}}),
+          meta: JSON.stringify(result.meta || {{}})
         }}
       }}).catch(function() {{}});
     }} catch (_) {{}}
