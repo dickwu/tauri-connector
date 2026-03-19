@@ -53,12 +53,24 @@ enum Commands {
         /// Compact (remove structural wrappers)
         #[arg(short, long)]
         compact: bool,
-        /// Max depth
+        /// Max depth (0 = unlimited)
         #[arg(short, long, default_value_t = 0)]
         depth: usize,
+        /// Max elements (0 = unlimited)
+        #[arg(long, default_value_t = 0)]
+        max_elements: usize,
         /// Scope to CSS selector
         #[arg(short, long)]
         selector: Option<String>,
+        /// Snapshot mode: ai, accessibility, structure
+        #[arg(long)]
+        mode: Option<String>,
+        /// Disable React component name enrichment
+        #[arg(long)]
+        no_react: bool,
+        /// Disable portal stitching
+        #[arg(long)]
+        no_portals: bool,
     },
     /// Click an element
     Click {
@@ -284,9 +296,16 @@ async fn main() {
             interactive,
             compact,
             depth,
+            max_elements,
             selector,
+            mode,
+            no_react,
+            no_portals,
         } => {
-            match commands::snapshot(&client, interactive, compact, depth, selector).await {
+            match commands::snapshot(
+                &client, interactive, compact, depth, max_elements,
+                selector, mode, !no_react, !no_portals,
+            ).await {
                 Ok(new_refs) => {
                     refs = new_refs;
                     save_refs(&refs);

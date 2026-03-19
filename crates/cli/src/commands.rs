@@ -21,13 +21,21 @@ pub async fn snapshot(
     interactive: bool,
     compact: bool,
     max_depth: usize,
+    max_elements: usize,
     selector: Option<String>,
+    mode: Option<String>,
+    react_enrich: bool,
+    follow_portals: bool,
 ) -> Result<RefMap, String> {
     let opts = SnapshotOptions {
         interactive,
         compact,
         max_depth,
+        max_elements,
         selector,
+        mode,
+        react_enrich,
+        follow_portals,
     };
     let script = build_snapshot_script(&opts);
     let result = exec_js(client, &script, 30_000).await?;
