@@ -45,15 +45,19 @@ pub fn tool_definitions() -> Value {
                 })
             ),
             tool_def("webview_dom_snapshot",
-                "Get structured DOM snapshot (accessibility or structure tree) via JS bridge",
+                "Get structured DOM snapshot. Mode 'ai' (default) includes ref IDs for interaction, React component names, and stitches portals. Mode 'accessibility' shows ARIA roles/names. Mode 'structure' shows tags/classes.",
                 json!({
                     "type": "object",
                     "properties": {
-                        "type": { "type": "string", "enum": ["accessibility", "structure"] },
-                        "selector": { "type": "string" },
+                        "mode": { "type": "string", "enum": ["ai", "accessibility", "structure"], "default": "ai" },
+                        "selector": { "type": "string", "description": "CSS selector to scope snapshot to a subtree" },
+                        "maxDepth": { "type": "number", "description": "Maximum tree depth (0 = unlimited)" },
+                        "maxElements": { "type": "number", "description": "Maximum elements to include (0 = unlimited)" },
+                        "reactEnrich": { "type": "boolean", "description": "Include React component names (default: true)" },
+                        "followPortals": { "type": "boolean", "description": "Stitch portals to their triggers (default: true)" },
+                        "shadowDom": { "type": "boolean", "description": "Traverse shadow DOM (default: false)" },
                         "windowId": { "type": "string" }
-                    },
-                    "required": ["type"]
+                    }
                 })
             ),
             tool_def("get_cached_dom",
@@ -353,17 +357,32 @@ async fn handle_screenshot(client: &mut ConnectorClient, args: &Value) -> Result
 }
 
 async fn handle_dom_snapshot(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
-    let snapshot_type = str_arg(args, "type").unwrap_or_else(|| "accessibility".to_string());
-    let selector = str_arg(args, "selector");
+    let mode = args.get("mode").or_else(|| args.get("type"))
+        .and_then(|v| v.as_str()).unwrap_or("ai");
     let wid = window_id(args);
 
     let mut cmd = json!({
         "type": "dom_snapshot",
-        "snapshot_type": snapshot_type,
+        "mode": mode,
         "window_id": wid,
     });
-    if let Some(s) = selector {
+    if let Some(s) = str_arg(args, "selector") {
         cmd["selector"] = json!(s);
+    }
+    if let Some(v) = num_arg(args, "maxDepth") {
+        cmd["max_depth"] = json!(v as u64);
+    }
+    if let Some(v) = num_arg(args, "maxElements") {
+        cmd["max_elements"] = json!(v as u64);
+    }
+    if let Some(v) = args.get("reactEnrich").and_then(|v| v.as_bool()) {
+        cmd["react_enrich"] = json!(v);
+    }
+    if let Some(v) = args.get("followPortals").and_then(|v| v.as_bool()) {
+        cmd["follow_portals"] = json!(v);
+    }
+    if let Some(v) = args.get("shadowDom").and_then(|v| v.as_bool()) {
+        cmd["shadow_dom"] = json!(v);
     }
     client.send(cmd).await
 }
