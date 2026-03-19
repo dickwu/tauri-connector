@@ -51,7 +51,7 @@ CLI (Rust) -------- WebSocket ws://host:9555 -----> Plugin WS server
 
 ## Features
 
-### 20 Tools (MCP + CLI)
+### 25 Tools (MCP + CLI)
 
 Every tool is available via both the embedded MCP server (for Claude Code) and the Rust CLI (for terminal use). The CLI uses ref-based element addressing inspired by [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser).
 
@@ -75,6 +75,11 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Captured | `ipc_get_captured` | `ipc captured [-f filter]` |
 | Events | `ipc_emit_event` | `emit <event> [-p '{...}']` |
 | Logs | `read_logs` | `logs [-n 20] [-f filter]` |
+| Logs | `clear_logs` | `clear logs\|ipc\|events\|all` |
+| Logs | `read_log_file` | *(via MCP only)* |
+| Events | `ipc_listen` | `events listen\|captured\|stop` |
+| Events | `event_get_captured` | `events captured [-p regex]` |
+| DOM | `webview_search_snapshot` | *(via MCP only)* |
 | Setup | `get_setup_instructions` | `examples` |
 | Devices | `list_devices` | *(info only)* |
 
@@ -319,9 +324,14 @@ All commands use `{ id, type, ...params }` with snake_case types:
 | `backend_state` | -- |
 | `ipc_execute_command` | `command`, `args` |
 | `ipc_monitor` | `action` |
-| `ipc_get_captured` | `filter`, `limit` |
+| `ipc_get_captured` | `filter`, `limit`, `pattern`, `since` |
 | `ipc_emit_event` | `event_name`, `payload` |
-| `console_logs` | `lines`, `filter`, `window_id` |
+| `console_logs` | `lines`, `filter`, `level`, `pattern`, `since`, `window_id` |
+| `clear_logs` | `source` |
+| `read_log_file` | `source`, `lines`, `level`, `pattern`, `since`, `window_id` |
+| `ipc_listen` | `action`, `events` |
+| `event_get_captured` | `event`, `pattern`, `limit`, `since` |
+| `search_snapshot` | `pattern`, `context`, `mode`, `window_id` |
 
 ## Rust CLI (Alternative)
 
@@ -357,6 +367,12 @@ tauri-connector ipc monitor          # Start IPC monitoring
 tauri-connector ipc captured -f greet              # Get captured IPC
 tauri-connector emit my-event -p '{"foo":42}'      # Emit event
 tauri-connector pointed              # Alt+Shift+Click element info
+tauri-connector logs -n 10 -l error              # Error logs only
+tauri-connector logs -p "user_\\d+"              # Regex filter
+tauri-connector events listen user:login         # Listen for events
+tauri-connector events captured                  # Get captured events
+tauri-connector events stop                      # Stop listening
+tauri-connector clear all                        # Clear all log files
 ```
 
 Environment: `TAURI_CONNECTOR_HOST` (default `127.0.0.1`), `TAURI_CONNECTOR_PORT` (default `9555`).
@@ -557,7 +573,7 @@ The bun scripts in `skill/scripts/` auto-discover this file, verify the PID is a
 
 ### Console Log Capture
 
-The bridge intercepts `console.log/warn/error/info/debug`, storing entries in a ring buffer (500 max). Accessible via `read_logs` or auto-pushed to Rust via `invoke()`.
+The bridge intercepts `console.log/warn/error/info/debug`, storing entries in file-backed JSONL storage at `{app_data_dir}/.tauri-connector/console.log`. Logs persist across app restarts. Accessible via `read_logs`, `read_log_file`, or auto-pushed to Rust via `invoke()`.
 
 ### Ref System
 

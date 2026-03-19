@@ -87,8 +87,19 @@ tauri-connector emit my-event -p '{"foo":42}'  # Emit custom event
 # Logs & Windows
 tauri-connector logs -n 50                     # Last 50 console logs
 tauri-connector logs -n 20 -f error            # Filtered logs
+tauri-connector logs -n 10 -l error            # Error logs only (level filter)
+tauri-connector logs -p "user_\\d+"            # Regex filter
 tauri-connector windows                        # List windows
 tauri-connector resize 1024 768                # Resize window
+
+# Events
+tauri-connector events listen user:login       # Listen for events
+tauri-connector events captured                # Get captured events
+tauri-connector events stop                    # Stop listening
+
+# Clear
+tauri-connector clear all                      # Clear all log files
+tauri-connector clear logs                     # Clear console logs only
 
 # Other
 tauri-connector eval "document.title"          # Execute JavaScript
@@ -145,7 +156,89 @@ The embedded MCP server starts automatically. Configure in `.mcp.json`:
 }
 ```
 
-20 MCP tools with full CLI parity: `webview_execute_js`, `webview_screenshot`, `webview_dom_snapshot` (modes: ai/accessibility/structure, with portal stitching, React enrichment, and ref IDs), `get_cached_dom`, `webview_find_element`, `webview_get_styles`, `webview_get_pointed_element`, `webview_select_element`, `webview_interact`, `webview_keyboard`, `webview_wait_for`, `manage_window`, `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured`, `ipc_emit_event`, `read_logs`, `get_setup_instructions`, `list_devices`.
+25 MCP tools with full CLI parity: `webview_execute_js`, `webview_screenshot`, `webview_dom_snapshot` (modes: ai/accessibility/structure, with portal stitching, React enrichment, and ref IDs), `get_cached_dom`, `webview_find_element` (strategies: css/xpath/text/regex; optional `target` window), `webview_search_snapshot`, `webview_get_styles`, `webview_get_pointed_element`, `webview_select_element`, `webview_interact`, `webview_keyboard`, `webview_wait_for`, `manage_window`, `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured` (supports `pattern` regex and `since` timestamp filters), `ipc_listen`, `ipc_emit_event`, `event_get_captured`, `read_logs` (supports `level` and `pattern` filters), `read_log_file`, `clear_logs`, `get_setup_instructions`, `list_devices`.
+
+### Tool Parameter Details
+
+#### `read_logs`
+
+| Param | Type | Description |
+|---|---|---|
+| `lines` | number | Number of recent log entries to return (default 20) |
+| `filter` | string | Legacy text filter on log messages |
+| `level` | string | Filter by log level: `error`, `warn`, `info`, `debug` |
+| `pattern` | string | Regex pattern to match against log messages |
+| `window_id` | string | Target window (default `main`) |
+
+#### `ipc_get_captured`
+
+| Param | Type | Description |
+|---|---|---|
+| `filter` | string | Filter by IPC command name |
+| `limit` | number | Max entries to return |
+| `pattern` | string | Regex pattern to match against IPC payloads |
+| `since` | string | ISO 8601 timestamp -- only return entries after this time |
+
+#### `webview_find_element`
+
+| Param | Type | Description |
+|---|---|---|
+| `selector` | string | CSS selector, XPath, text content, or regex pattern |
+| `strategy` | string | One of: `css` (default), `xpath`, `text`, `regex` |
+| `target` | string | Target window label (default `main`) |
+| `window_id` | string | Alias for `target` |
+
+#### `clear_logs`
+
+Clears stored log data. Accepts a `source` param to target specific stores.
+
+| Param | Type | Description |
+|---|---|---|
+| `source` | string | What to clear: `logs` (console), `ipc` (captured IPC), `events` (captured events), `all` (everything) |
+
+#### `read_log_file`
+
+Reads directly from the JSONL log file on disk with server-side filtering.
+
+| Param | Type | Description |
+|---|---|---|
+| `source` | string | Log source file to read (default `console`) |
+| `lines` | number | Number of lines to read from end of file |
+| `level` | string | Filter by log level |
+| `pattern` | string | Regex pattern filter |
+| `since` | string | ISO 8601 timestamp -- only return entries after this time |
+| `window_id` | string | Target window (default `main`) |
+
+#### `ipc_listen`
+
+Starts or stops listening for specific Tauri events in real time.
+
+| Param | Type | Description |
+|---|---|---|
+| `action` | string | `start` to begin listening, `stop` to end |
+| `events` | string[] | List of event names to listen for (used with `start`) |
+
+#### `event_get_captured`
+
+Returns events captured by an active `ipc_listen` session.
+
+| Param | Type | Description |
+|---|---|---|
+| `event` | string | Filter by event name |
+| `pattern` | string | Regex pattern to match against event payloads |
+| `limit` | number | Max entries to return |
+| `since` | string | ISO 8601 timestamp -- only return entries after this time |
+
+#### `webview_search_snapshot`
+
+Searches the most recent DOM snapshot for matching text or patterns.
+
+| Param | Type | Description |
+|---|---|---|
+| `pattern` | string | Text or regex pattern to search for |
+| `context` | number | Number of surrounding lines to include (default 2) |
+| `mode` | string | Snapshot mode to search: `ai`, `accessibility`, `structure` |
+| `window_id` | string | Target window (default `main`) |
 
 ## Common Workflows
 
@@ -182,6 +275,39 @@ tauri-connector hover @e8                    # (Optional) hover-off to dismiss
 tauri-connector logs -n 50 -f error
 tauri-connector state
 tauri-connector eval "document.querySelector('.error')?.textContent"
+```
+
+### Debugging Workflow
+
+Step-by-step recipe for diagnosing a Tauri app issue:
+
+```bash
+# 1. Start IPC monitor to capture backend traffic
+tauri-connector ipc monitor
+
+# 2. Listen for specific frontend events
+tauri-connector events listen user:login app:error
+
+# 3. Trigger the action you want to debug (interact with the app)
+tauri-connector click @e5
+
+# 4. Check logs with level filter for errors/warnings
+tauri-connector logs -n 30 -l error
+tauri-connector logs -p "timeout|failed"
+
+# 5. Search the DOM snapshot for relevant state
+tauri-connector snapshot -i
+# then search within the snapshot:
+# (use webview_search_snapshot MCP tool with pattern)
+
+# 6. Review captured IPC and events
+tauri-connector ipc captured
+tauri-connector events captured
+
+# 7. Clean up when done
+tauri-connector ipc unmonitor
+tauri-connector events stop
+tauri-connector clear all
 ```
 
 ### Ant Design / React Apps
