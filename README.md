@@ -140,7 +140,7 @@ The plugin also auto-pushes DOM snapshots via Tauri IPC. The `get_cached_dom` to
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.5"
+tauri-plugin-connector = "0.6"
 ```
 
 ### 2. Register it (debug-only)

@@ -515,7 +515,7 @@ const SETUP_INSTRUCTIONS: &str = r#"## tauri-plugin-connector Setup
 In your Tauri app's `src-tauri/Cargo.toml`:
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.4"
+tauri-plugin-connector = "0.6"
 ```
 
 ### 2. Register the plugin (debug-only)
