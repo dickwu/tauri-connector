@@ -23,7 +23,7 @@ Check `src-tauri/Cargo.toml`. If `tauri-plugin-connector` is not present, add it
 
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.6"
+tauri-plugin-connector = "0.7"
 ```
 
 ## Step 2: Register the plugin

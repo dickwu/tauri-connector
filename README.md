@@ -51,7 +51,7 @@ CLI (Rust) -------- WebSocket ws://host:9555 -----> Plugin WS server
 
 ## Features
 
-### 25 Tools (MCP + CLI)
+### 25 Tools (MCP + CLI) with Drag and Drop
 
 Every tool is available via both the embedded MCP server (for Claude Code) and the Rust CLI (for terminal use). The CLI uses ref-based element addressing inspired by [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser).
 
@@ -64,7 +64,7 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Styles | `webview_get_styles` | `get styles <@ref\|selector>` |
 | Picker | `webview_get_pointed_element` | `pointed` |
 | Select | `webview_select_element` | *(visual picker, not yet implemented)* |
-| Interact | `webview_interact` | `click`, `dblclick`, `hover`, `focus`, `fill`, `type`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview` |
+| Interact | `webview_interact` | `click`, `dblclick`, `hover`, `drag`, `focus`, `fill`, `type`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview` |
 | Keyboard | `webview_keyboard` | `press <key>` |
 | Wait | `webview_wait_for` | `wait <selector> [--text] [--timeout]` |
 | Screenshot | `webview_screenshot` | `screenshot <path> [-f png\|jpeg\|webp] [-m maxWidth]` |
@@ -106,6 +106,7 @@ $ tauri-connector snapshot -i
 $ tauri-connector click @e51          # Click "Active" option in portal
 $ tauri-connector fill @e16 "aspirin" # Fill search box
 $ tauri-connector hover @e7           # Hover menu item
+$ tauri-connector drag @e51 @e52      # Drag element to target
 $ tauri-connector get text @e103      # Get "Task Centre"
 $ tauri-connector press Enter         # Press key
 $ tauri-connector logs -n 5           # Last 5 console logs
@@ -140,7 +141,7 @@ The plugin also auto-pushes DOM snapshots via Tauri IPC. The `get_cached_dom` to
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.6"
+tauri-plugin-connector = "0.7"
 ```
 
 ### 2. Register it (debug-only)
@@ -317,7 +318,7 @@ All commands use `{ id, type, ...params }` with snake_case types:
 | `dom_snapshot` | `mode` (ai/accessibility/structure), `selector`, `max_depth`, `max_elements`, `react_enrich`, `follow_portals`, `shadow_dom`, `window_id` |
 | `find_element` | `selector`, `strategy`, `window_id` |
 | `get_styles` | `selector`, `properties`, `window_id` |
-| `interact` | `action`, `selector`, `strategy`, `x`, `y`, `window_id` |
+| `interact` | `action`, `selector`, `strategy`, `x`, `y`, `target_selector`, `target_x`, `target_y`, `steps`, `duration_ms`, `drag_strategy`, `window_id` |
 | `keyboard` | `action`, `text`, `key`, `modifiers`, `window_id` |
 | `wait_for` | `selector`, `strategy`, `text`, `timeout`, `window_id` |
 | `window_list` / `window_info` / `window_resize` | `window_id`, `width`, `height` |
@@ -354,6 +355,8 @@ tauri-connector snapshot -i --no-portals          # Skip portal stitching
 tauri-connector snapshot -i --max-elements 2000   # Limit output size
 tauri-connector click @e5            # Click by ref
 tauri-connector fill @e3 "query"     # Fill input
+tauri-connector drag @e3 @e7         # Drag element to target
+tauri-connector drag @e5 "400,300" --strategy pointer  # Drag to coordinates
 tauri-connector get text @e7         # Get text
 tauri-connector press Enter          # Press key
 tauri-connector screenshot /tmp/s.png -m 1280  # Screenshot
@@ -381,7 +384,15 @@ Environment: `TAURI_CONNECTOR_HOST` (default `127.0.0.1`), `TAURI_CONNECTOR_PORT
 
 Install the included skill to let Claude Code automatically set up and use tauri-connector.
 
-### Install
+### Install via skills.sh (easiest)
+
+```bash
+npx skills add dickwu/tauri-connector
+```
+
+This installs the skill from the [skills.sh](https://skills.sh) agent skills directory. Works with Claude Code, Cursor, Windsurf, and 30+ agents.
+
+### Install manually
 
 ```bash
 mkdir -p ~/.claude/skills/tauri-connector
@@ -528,8 +539,8 @@ tauri-connector/
 |   '-- scripts/                # Bun scripts for WS interaction
 |       |-- connector.ts        # Shared helper (auto-discovers ports via PID file)
 |       |-- state.ts, eval.ts, screenshot.ts, snapshot.ts
-|       |-- click.ts, fill.ts, find.ts, wait.ts
-|       '-- logs.ts, windows.ts
+|       |-- click.ts, drag.ts, fill.ts, find.ts, hover.ts, wait.ts
+|       '-- logs.ts, events.ts, windows.ts
 |-- LICENSE
 '-- README.md
 ```

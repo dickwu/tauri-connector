@@ -107,6 +107,120 @@ pub async fn hover(client: &ConnectorClient, refs: &RefMap, target: &str) -> Res
     Ok(())
 }
 
+/// Drag an element to a target.
+pub async fn drag(
+    client: &ConnectorClient,
+    refs: &RefMap,
+    source: &str,
+    target: &str,
+    steps: u32,
+    duration_ms: u32,
+    drag_strategy: &str,
+) -> Result<(), String> {
+    let source_selector = resolve_to_selector(source, refs)?;
+    let target_resolve = resolve_target_js(target, refs)?;
+
+    let escaped_src = source_selector.replace('"', "\\\"");
+    let script = format!(
+        r#"new Promise((resolve) => {{
+            const el = document.querySelector("{escaped_src}");
+            if (!el) {{ resolve({{ error: 'Source element not found: {escaped_src}' }}); return; }}
+            {target_resolve}
+            const srcRect = el.getBoundingClientRect();
+            const startX = srcRect.x + srcRect.width / 2;
+            const startY = srcRect.y + srcRect.height / 2;
+            const dragStrat = '{drag_strategy}';
+            const useHtml5 = dragStrat === 'html5dnd' || (dragStrat === 'auto' && (el.draggable === true || el.getAttribute('draggable') === 'true'));
+            const totalSteps = {steps};
+            const stepDelay = {duration_ms} / totalSteps;
+            const opts = {{ bubbles: true, cancelable: true, view: window }};
+            if (useHtml5) {{
+                const dt = new DataTransfer();
+                el.dispatchEvent(new DragEvent('dragstart', {{ ...opts, dataTransfer: dt, clientX: startX, clientY: startY }}));
+                let step = 0;
+                const doStep = () => {{
+                    step++;
+                    const t = step / totalSteps;
+                    const mx = startX + (endX - startX) * t;
+                    const my = startY + (endY - startY) * t;
+                    const cur = document.elementFromPoint(mx, my) || document.body;
+                    cur.dispatchEvent(new DragEvent('dragenter', {{ ...opts, dataTransfer: dt, clientX: mx, clientY: my }}));
+                    cur.dispatchEvent(new DragEvent('dragover', {{ ...opts, dataTransfer: dt, clientX: mx, clientY: my }}));
+                    if (step < totalSteps) {{
+                        setTimeout(doStep, stepDelay);
+                    }} else {{
+                        const dropEl = document.elementFromPoint(endX, endY) || document.body;
+                        dropEl.dispatchEvent(new DragEvent('drop', {{ ...opts, dataTransfer: dt, clientX: endX, clientY: endY }}));
+                        el.dispatchEvent(new DragEvent('dragend', {{ ...opts, dataTransfer: dt, clientX: endX, clientY: endY }}));
+                        resolve({{ action: 'drag', strategy: 'html5dnd', from: {{ x: startX, y: startY }}, to: {{ x: endX, y: endY }}, steps: totalSteps, sourceTag: el.tagName.toLowerCase(), targetTag: dropEl.tagName.toLowerCase() }});
+                    }}
+                }};
+                setTimeout(doStep, stepDelay);
+            }} else {{
+                el.dispatchEvent(new PointerEvent('pointerdown', {{ ...opts, clientX: startX, clientY: startY, button: 0, pointerId: 1 }}));
+                el.dispatchEvent(new MouseEvent('mousedown', {{ ...opts, clientX: startX, clientY: startY, button: 0 }}));
+                let step = 0;
+                const doStep = () => {{
+                    step++;
+                    const t = step / totalSteps;
+                    const mx = startX + (endX - startX) * t;
+                    const my = startY + (endY - startY) * t;
+                    const cur = document.elementFromPoint(mx, my) || document.body;
+                    cur.dispatchEvent(new PointerEvent('pointermove', {{ ...opts, clientX: mx, clientY: my, pointerId: 1 }}));
+                    cur.dispatchEvent(new MouseEvent('mousemove', {{ ...opts, clientX: mx, clientY: my }}));
+                    if (step < totalSteps) {{
+                        setTimeout(doStep, stepDelay);
+                    }} else {{
+                        const dropEl = document.elementFromPoint(endX, endY) || document.body;
+                        dropEl.dispatchEvent(new PointerEvent('pointerup', {{ ...opts, clientX: endX, clientY: endY, button: 0, pointerId: 1 }}));
+                        dropEl.dispatchEvent(new MouseEvent('mouseup', {{ ...opts, clientX: endX, clientY: endY, button: 0 }}));
+                        resolve({{ action: 'drag', strategy: 'pointer', from: {{ x: startX, y: startY }}, to: {{ x: endX, y: endY }}, steps: totalSteps, sourceTag: el.tagName.toLowerCase(), targetTag: dropEl.tagName.toLowerCase() }});
+                    }}
+                }};
+                setTimeout(doStep, stepDelay);
+            }}
+        }})"#
+    );
+
+    let timeout = duration_ms as u64 + 10_000;
+    let result = exec_js(client, &script, timeout).await?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(())
+}
+
+/// Resolve a @ref or CSS selector to a CSS selector string.
+fn resolve_to_selector(target: &str, refs: &RefMap) -> Result<String, String> {
+    match crate::snapshot::parse_ref(target) {
+        Some(ref_id) => {
+            let entry = refs.get(&ref_id).ok_or_else(|| {
+                format!("Unknown ref: {ref_id}. Run snapshot first.")
+            })?;
+            Ok(entry.selector.clone())
+        }
+        None => Ok(target.to_string()),
+    }
+}
+
+/// Build JS that resolves a drag target to endX/endY variables.
+/// Accepts @ref, CSS selector, or "x,y" coordinates.
+fn resolve_target_js(target: &str, refs: &RefMap) -> Result<String, String> {
+    // Check for coordinate pair like "300,400"
+    if let Some((x_str, y_str)) = target.split_once(',') {
+        if let (Ok(x), Ok(y)) = (x_str.trim().parse::<f64>(), y_str.trim().parse::<f64>()) {
+            return Ok(format!("const endX = {x}; const endY = {y};"));
+        }
+    }
+
+    let selector = resolve_to_selector(target, refs)?;
+    let escaped = selector.replace('"', "\\\"");
+    Ok(format!(
+        "const tgt = document.querySelector(\"{escaped}\"); \
+         if (!tgt) {{ resolve({{ error: 'Target not found: {escaped}' }}); return; }} \
+         const tRect = tgt.getBoundingClientRect(); \
+         const endX = tRect.x + tRect.width/2; const endY = tRect.y + tRect.height/2;"
+    ))
+}
+
 /// Focus an element.
 pub async fn focus(client: &ConnectorClient, refs: &RefMap, target: &str) -> Result<(), String> {
     let script = build_resolve_and_act_script(

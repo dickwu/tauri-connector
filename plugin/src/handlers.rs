@@ -347,7 +347,7 @@ pub async fn interact(
         _ => {
             return Response::error(
                 id.to_string(),
-                format!("Unknown action: {action}. Use: click, double-click, focus, scroll, hover, hover-off"),
+                format!("Unknown action: {action}. Use: click, double-click, focus, scroll, hover, hover-off, drag"),
             );
         }
     };
@@ -364,6 +364,137 @@ pub async fn interact(
     match bridge.execute_js(&script, 5_000).await {
         Ok(result) => Response::success(id.to_string(), result),
         Err(e) => Response::error(id.to_string(), format!("Interact failed: {e}")),
+    }
+}
+
+// ============ Drag and Drop ============
+
+#[allow(clippy::too_many_arguments)]
+pub async fn drag(
+    id: &str,
+    selector: Option<&str>,
+    strategy: &str,
+    x: Option<f64>,
+    y: Option<f64>,
+    target_selector: Option<&str>,
+    target_x: Option<f64>,
+    target_y: Option<f64>,
+    steps: u32,
+    duration_ms: u32,
+    drag_strategy: &str,
+    _window_id: &str,
+    bridge: &Bridge,
+) -> Response {
+    // Resolve source element
+    let source_js = match (selector, x, y) {
+        (Some(sel), _, _) => {
+            let query = match strategy {
+                "xpath" => format!(
+                    "document.evaluate(\"{}\", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue",
+                    sel.replace('"', r#"\""#)
+                ),
+                "text" => format!(
+                    "Array.from(document.querySelectorAll('*')).find(el => el.textContent.includes(\"{}\"))",
+                    sel.replace('"', r#"\""#)
+                ),
+                _ => format!("document.querySelector(\"{}\")", sel.replace('"', r#"\""#)),
+            };
+            format!("const el = {query}; if (!el) {{ resolve({{ error: 'Source element not found' }}); return; }}")
+        }
+        (None, Some(px), Some(py)) => {
+            format!("const el = document.elementFromPoint({px}, {py}); if (!el) {{ resolve({{ error: 'No element at ({px}, {py})' }}); return; }}")
+        }
+        _ => {
+            return Response::error(id.to_string(), "Provide source selector or x/y coordinates");
+        }
+    };
+
+    // Resolve target
+    let target_js = match (target_selector, target_x, target_y) {
+        (Some(sel), _, _) => {
+            let escaped = sel.replace('"', r#"\""#);
+            format!(
+                "const tgt = document.querySelector(\"{escaped}\"); \
+                 if (!tgt) {{ resolve({{ error: 'Target element not found: {escaped}' }}); return; }} \
+                 const tRect = tgt.getBoundingClientRect(); \
+                 const endX = tRect.x + tRect.width/2; const endY = tRect.y + tRect.height/2;"
+            )
+        }
+        (_, Some(tx), Some(ty)) => {
+            format!("const endX = {tx}; const endY = {ty};")
+        }
+        _ => {
+            return Response::error(
+                id.to_string(),
+                "Provide target_selector or target_x/target_y coordinates",
+            );
+        }
+    };
+
+    let script = format!(
+        r#"new Promise((resolve) => {{
+            {source_js}
+            {target_js}
+            const srcRect = el.getBoundingClientRect();
+            const startX = srcRect.x + srcRect.width / 2;
+            const startY = srcRect.y + srcRect.height / 2;
+            const dragStrat = '{drag_strategy}';
+            const useHtml5 = dragStrat === 'html5dnd' || (dragStrat === 'auto' && (el.draggable === true || el.getAttribute('draggable') === 'true'));
+            const totalSteps = {steps};
+            const stepDelay = {duration_ms} / totalSteps;
+            const opts = {{ bubbles: true, cancelable: true, view: window }};
+            if (useHtml5) {{
+                const dt = new DataTransfer();
+                el.dispatchEvent(new DragEvent('dragstart', {{ ...opts, dataTransfer: dt, clientX: startX, clientY: startY }}));
+                let step = 0;
+                const doStep = () => {{
+                    step++;
+                    const t = step / totalSteps;
+                    const mx = startX + (endX - startX) * t;
+                    const my = startY + (endY - startY) * t;
+                    const cur = document.elementFromPoint(mx, my) || document.body;
+                    cur.dispatchEvent(new DragEvent('dragenter', {{ ...opts, dataTransfer: dt, clientX: mx, clientY: my }}));
+                    cur.dispatchEvent(new DragEvent('dragover', {{ ...opts, dataTransfer: dt, clientX: mx, clientY: my }}));
+                    if (step < totalSteps) {{
+                        setTimeout(doStep, stepDelay);
+                    }} else {{
+                        const dropEl = document.elementFromPoint(endX, endY) || document.body;
+                        dropEl.dispatchEvent(new DragEvent('drop', {{ ...opts, dataTransfer: dt, clientX: endX, clientY: endY }}));
+                        el.dispatchEvent(new DragEvent('dragend', {{ ...opts, dataTransfer: dt, clientX: endX, clientY: endY }}));
+                        resolve({{ action: 'drag', strategy: 'html5dnd', from: {{ x: startX, y: startY }}, to: {{ x: endX, y: endY }}, steps: totalSteps, sourceTag: el.tagName.toLowerCase(), targetTag: dropEl.tagName.toLowerCase() }});
+                    }}
+                }};
+                setTimeout(doStep, stepDelay);
+            }} else {{
+                el.dispatchEvent(new PointerEvent('pointerdown', {{ ...opts, clientX: startX, clientY: startY, button: 0, pointerId: 1 }}));
+                el.dispatchEvent(new MouseEvent('mousedown', {{ ...opts, clientX: startX, clientY: startY, button: 0 }}));
+                let step = 0;
+                const doStep = () => {{
+                    step++;
+                    const t = step / totalSteps;
+                    const mx = startX + (endX - startX) * t;
+                    const my = startY + (endY - startY) * t;
+                    const cur = document.elementFromPoint(mx, my) || document.body;
+                    cur.dispatchEvent(new PointerEvent('pointermove', {{ ...opts, clientX: mx, clientY: my, pointerId: 1 }}));
+                    cur.dispatchEvent(new MouseEvent('mousemove', {{ ...opts, clientX: mx, clientY: my }}));
+                    if (step < totalSteps) {{
+                        setTimeout(doStep, stepDelay);
+                    }} else {{
+                        const dropEl = document.elementFromPoint(endX, endY) || document.body;
+                        dropEl.dispatchEvent(new PointerEvent('pointerup', {{ ...opts, clientX: endX, clientY: endY, button: 0, pointerId: 1 }}));
+                        dropEl.dispatchEvent(new MouseEvent('mouseup', {{ ...opts, clientX: endX, clientY: endY, button: 0 }}));
+                        resolve({{ action: 'drag', strategy: 'pointer', from: {{ x: startX, y: startY }}, to: {{ x: endX, y: endY }}, steps: totalSteps, sourceTag: el.tagName.toLowerCase(), targetTag: dropEl.tagName.toLowerCase() }});
+                    }}
+                }};
+                setTimeout(doStep, stepDelay);
+            }}
+        }})"#
+    );
+
+    let timeout = duration_ms as u64 + 5000;
+    match bridge.execute_js(&script, timeout).await {
+        Ok(result) => Response::success(id.to_string(), result),
+        Err(e) => Response::error(id.to_string(), format!("Drag failed: {e}")),
     }
 }
 

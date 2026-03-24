@@ -85,6 +85,22 @@ enum Commands {
     Hover {
         target: String,
     },
+    /// Drag element to target
+    Drag {
+        /// Source: @ref or CSS selector
+        source: String,
+        /// Target: @ref, CSS selector, or "x,y" coordinates
+        target: String,
+        /// Number of intermediate move events (default 10)
+        #[arg(short, long, default_value_t = 10)]
+        steps: u32,
+        /// Total drag duration in ms (default 300)
+        #[arg(short, long, default_value_t = 300)]
+        duration: u32,
+        /// Drag strategy: auto, pointer, html5dnd (default auto)
+        #[arg(long, default_value = "auto")]
+        strategy: String,
+    },
     /// Focus an element
     Focus {
         target: String,
@@ -362,6 +378,9 @@ async fn main() {
         Commands::Click { target } => commands::click(&client, &refs, &target).await,
         Commands::Dblclick { target } => commands::dblclick(&client, &refs, &target).await,
         Commands::Hover { target } => commands::hover(&client, &refs, &target).await,
+        Commands::Drag { source, target, steps, duration, strategy } => {
+            commands::drag(&client, &refs, &source, &target, steps, duration, &strategy).await
+        }
         Commands::Focus { target } => commands::focus(&client, &refs, &target).await,
         Commands::Fill { target, text } => {
             commands::fill(&client, &refs, &target, &text.join(" ")).await
@@ -486,6 +505,7 @@ INTERACTIONS (use @eN refs from snapshot):
   click <@ref|selector>              Click an element
   dblclick <@ref|selector>           Double-click
   hover <@ref|selector>              Hover over element
+  drag <source> <target> [opts]      Drag element to target
   focus <@ref|selector>              Focus an element
   fill <@ref|selector> <text>        Clear and fill input
   type <@ref|selector> <text>        Type text character by character
@@ -548,6 +568,8 @@ EXAMPLES:
   tauri-connector click @e7
   tauri-connector fill @e5 "user@example.com"
   tauri-connector screenshot /tmp/shot.png -m 1280
+  tauri-connector drag @e3 @e7 --steps 15 --duration 500
+  tauri-connector drag "#item" ".drop-zone" --strategy pointer
   tauri-connector find "Submit" -s text
   tauri-connector ipc exec greet -a '{{"name":"world"}}'
   tauri-connector emit my-event -p '{{"foo":42}}'

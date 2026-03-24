@@ -1,111 +1,177 @@
 ---
 name: tauri-connector
-description: "Interact with Tauri v2 desktop apps via tauri-connector. Use this skill when the user wants to: test Tauri UI, automate webview interactions, take DOM snapshots, click/hover/fill elements, inspect app state, read console logs, execute JS in webviews, debug Tauri desktop apps, or SET UP tauri-connector in a project. Also use when the user mentions admin/, front/, or tool/ desktop apps, or asks about DOM inspection, element interaction, or app testing. Provides automated setup, embedded MCP server, Rust CLI with ref-based addressing, and bun scripts as fallback."
+description: "Deep inspection, interaction, and automation of Tauri v2 desktop apps. Use this skill whenever working with a Tauri app's UI -- clicking elements, filling forms, reading DOM state, taking screenshots, dragging elements, debugging console logs, testing user flows, or setting up tauri-connector in a new project. Also use when the user mentions admin/, front/, or tool/ desktop apps, asks about DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, or Tauri app testing. This skill is the bridge between Claude and any running Tauri desktop app."
 ---
 
 # Tauri Connector
 
-Deep inspection and interaction with Tauri v2 desktop apps. The **MCP server runs inside the plugin** -- starts automatically when the Tauri app runs.
+Inspect, interact with, and automate Tauri v2 desktop apps. The MCP server is embedded in the Tauri plugin -- it starts automatically when the app runs. No separate server process needed.
+
+## How It Works
+
+The plugin injects a JavaScript bridge into the Tauri webview. Claude sends commands (click, fill, snapshot, etc.) and the bridge executes them inside the running app's webview, returning results. There are three ways to send commands:
+
+| Path | When to use |
+|---|---|
+| **MCP tools** (preferred) | When Claude has MCP access via `.mcp.json` -- tools appear as `webview_*`, `ipc_*`, etc. |
+| **CLI** (`tauri-connector`) | When running shell commands -- supports `@eN` ref addressing from snapshots |
+| **Bun scripts** (fallback) | When neither MCP nor CLI binary is available |
+
+The app must be running for any of these to work. Verify with `lsof -i :9555 -P -n 2>/dev/null | grep LISTEN`.
+
+## The Core Workflow: Snapshot → Interact → Verify
+
+Almost every task follows this pattern:
+
+1. **Snapshot** the DOM to see what's on screen and get ref IDs
+2. **Interact** with elements using those refs (click, fill, drag, etc.)
+3. **Verify** the result (re-snapshot, read logs, wait for element, screenshot)
+
+Refs (like `@e5`, `@e12`) are stable handles assigned to interactive elements during a snapshot. They're the primary way to target elements -- more reliable than CSS selectors because the snapshot engine uses a multi-strategy fallback (CSS → ARIA role+name → tag+text) to re-resolve them even after DOM changes.
+
+**After any action that changes the DOM (navigation, form submit, dialog open), take a new snapshot** -- old refs may point to stale or removed elements.
+
+```bash
+# Example: fill a login form
+tauri-connector snapshot -i              # See refs: @e3=email, @e5=password, @e8=submit
+tauri-connector fill @e3 "user@test.com"
+tauri-connector fill @e5 "password123"
+tauri-connector click @e8
+tauri-connector wait --text "Welcome"    # Verify login succeeded
+tauri-connector snapshot -i              # Get fresh refs for the new page
+```
 
 ## Setup
 
-For first-time setup in a Tauri project, read `skill/SETUP.md` in the tauri-connector repo. Key steps: add `tauri-plugin-connector = "0.6"` to Cargo.toml, register plugin, add permissions, set `withGlobalTauri: true`, install `@zumer/snapdom` in frontend, add MCP URL to `.mcp.json`.
+For first-time setup in a Tauri project, read `skill/SETUP.md` in the tauri-connector repo. Key steps:
 
-## Checking if the App is Running
+1. `tauri-plugin-connector = "0.7"` in `src-tauri/Cargo.toml`
+2. Register plugin with `#[cfg(debug_assertions)]` guard
+3. Add `"connector:default"` permission
+4. Set `"withGlobalTauri": true` in `tauri.conf.json`
+5. Add MCP URL `http://127.0.0.1:9556/sse` to `.mcp.json`
 
-The plugin writes a PID file to `target/.connector.json` when it starts. To check:
+## CLI Reference
+
+Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-cli --release`
+
+### DOM & Inspection
 
 ```bash
-cat src-tauri/target/debug/.connector.json 2>/dev/null || cat target/debug/.connector.json 2>/dev/null
-lsof -i :9555 -P -n 2>/dev/null | grep LISTEN
+tauri-connector snapshot -i                   # Interactive elements with refs (most useful)
+tauri-connector snapshot -i -c                # Compact: only lines with refs
+tauri-connector snapshot -i -s ".ant-form"    # Scope to a subtree
+tauri-connector snapshot -i --mode accessibility   # ARIA roles/names
+tauri-connector snapshot -i --mode structure        # Tags/classes only
+tauri-connector snapshot -i --no-react --no-portals # Skip React/portal enrichment
+tauri-connector snapshot -i -d 5 --max-elements 500 # Limit depth/count
+tauri-connector dom                           # Cached DOM (pushed from frontend, no round-trip)
+tauri-connector find "button.submit"          # Find by CSS
+tauri-connector find "Submit" -s text         # Find by visible text
+tauri-connector get title                     # Page title
+tauri-connector get url                       # Current URL
+tauri-connector get text @e7                  # Element text content
+tauri-connector get html @e7                  # Element innerHTML
+tauri-connector get value @e3                 # Input value
+tauri-connector get attr @e5 href             # Attribute value
+tauri-connector get box @e5                   # Bounding box {x, y, width, height}
+tauri-connector get styles @e5                # All computed CSS styles
+tauri-connector get count ".list-item"        # Count matching elements
+tauri-connector pointed                       # Get Alt+Shift+Click captured element
 ```
 
-## CLI (Primary)
-
-The `tauri-connector` CLI is the recommended way to interact with Tauri apps from the terminal.
+### Interactions
 
 ```bash
-# Homebrew (macOS/Linux)
-brew install dickwu/tap/tauri-connector
-
-# Or self-update if already installed
-tauri-connector update
-
-# Or build from source
-cargo build -p connector-cli --release
+tauri-connector click @e5                     # Click
+tauri-connector click "button.submit"         # Click by CSS selector
+tauri-connector dblclick @e5                  # Double-click
+tauri-connector hover @e8                     # Hover (triggers dropdowns/tooltips)
+tauri-connector focus @e3                     # Focus
+tauri-connector fill @e3 "user@example.com"   # Clear input, set value, fire input+change
+tauri-connector type @e3 "hello"              # Type char-by-char (fires keydown/keypress/keyup per char)
+tauri-connector check @e10                    # Check checkbox
+tauri-connector uncheck @e10                  # Uncheck checkbox
+tauri-connector select @e6 "option1" "opt2"   # Select dropdown option(s)
+tauri-connector scroll down 300               # Scroll page
+tauri-connector scroll up 500 --selector ".list"  # Scroll element
+tauri-connector scrollintoview @e20           # Scroll element into view (smooth, centered)
+tauri-connector press Enter                   # Press key on focused element
+tauri-connector press Tab                     # Navigate focus
 ```
 
-### Quick Reference
+### Drag and Drop
+
+Simulates drag-and-drop with realistic paced intermediate events. Two strategies:
+
+- **pointer** (default): `pointerdown` → paced `pointermove` → `pointerup` with mouse event mirrors. Works with dnd-kit, SortableJS, framer-motion, custom sliders, resize handles.
+- **html5dnd**: `dragstart` → paced `dragenter`/`dragover` → `drop` + `dragend` with DataTransfer. Works with `draggable="true"` elements, react-beautiful-dnd.
+- **auto** (default): Checks `el.draggable` -- uses html5dnd if true, pointer otherwise.
 
 ```bash
-# DOM & Inspection
-tauri-connector snapshot -i                              # AI snapshot with refs (default)
-tauri-connector snapshot -i --mode accessibility          # Accessibility tree only
-tauri-connector snapshot -i --mode structure              # Structure tree only
-tauri-connector snapshot -i --no-react                    # Skip React component names
-tauri-connector snapshot -i --no-portals                  # Skip portal stitching
-tauri-connector snapshot -i --max-depth 5                 # Limit tree depth
-tauri-connector snapshot -i --max-elements 2000           # Limit element count
-tauri-connector dom                                       # Cached DOM (pushed from frontend)
-tauri-connector find "button"                             # Find elements by CSS
-tauri-connector find "Submit" -s text                     # Find by text content
-tauri-connector get text @e7                              # Get text content by ref
-tauri-connector get title                                 # Page title
-tauri-connector get url                                   # Current URL
-tauri-connector pointed                                   # Alt+Shift+Click element info
+tauri-connector drag @e3 @e7                              # Drag by refs
+tauri-connector drag "#item-3" "#item-1"                  # Drag by CSS selectors
+tauri-connector drag @e5 "400,300"                        # Drag to pixel coordinates
+tauri-connector drag @e3 @e7 --steps 20 --duration 500    # Slower, more intermediate events
+tauri-connector drag "#card" ".list" --strategy pointer    # Force pointer strategy
+tauri-connector drag "[draggable]" ".trash" --strategy html5dnd  # Force HTML5 DnD
+```
 
-# Interaction (use @eN refs from snapshot)
-tauri-connector click @e5                      # Click by ref
-tauri-connector click "button.submit"          # Click by CSS selector
-tauri-connector dblclick @e5                   # Double-click
-tauri-connector hover @e8                      # Hover (trigger dropdown/tooltip)
-tauri-connector focus @e3                      # Focus element
-tauri-connector fill @e3 "user@example.com"    # Clear and fill input
-tauri-connector type @e3 "hello"               # Type character by character
-tauri-connector check @e10                     # Check checkbox
-tauri-connector uncheck @e10                   # Uncheck checkbox
-tauri-connector select @e6 "option1" "option2" # Select options
-tauri-connector scroll down 300                # Scroll page
-tauri-connector scrollintoview @e20            # Scroll element into view
+| Flag | Default | Purpose |
+|---|---|---|
+| `--steps` | 10 | Intermediate move events (higher = smoother, some libs need >5 for threshold) |
+| `--duration` | 300 | Total drag time in ms |
+| `--strategy` | auto | `auto`, `pointer`, or `html5dnd` |
 
-# Keyboard
-tauri-connector press Enter                    # Press key
-tauri-connector press Tab                      # Press Tab
+### Screenshot
 
-# Screenshot
-tauri-connector screenshot /tmp/shot.png -m 1280   # PNG, max 1280px wide
-tauri-connector screenshot /tmp/s.webp -f webp     # WebP format
+```bash
+tauri-connector screenshot /tmp/shot.png -m 1280    # PNG, max 1280px wide
+tauri-connector screenshot /tmp/s.webp -f webp      # WebP format
+tauri-connector screenshot /tmp/s.jpg -f jpeg -q 60 # JPEG, quality 60
+```
 
-# IPC & Events
-tauri-connector state                          # App backend state
-tauri-connector ipc exec greet -a '{"name":"world"}'  # Execute IPC command
-tauri-connector ipc monitor                    # Start IPC monitoring
-tauri-connector ipc unmonitor                  # Stop IPC monitoring
-tauri-connector ipc captured -f greet          # Get captured IPC traffic
-tauri-connector emit my-event -p '{"foo":42}'  # Emit custom event
+Uses native `xcap` capture (pixel-accurate), falls back to `@zumer/snapdom` if unavailable.
 
-# Logs & Windows
-tauri-connector logs -n 50                     # Last 50 console logs
-tauri-connector logs -n 20 -f error            # Filtered logs
-tauri-connector logs -n 10 -l error            # Error logs only (level filter)
-tauri-connector logs -p "user_\\d+"            # Regex filter
-tauri-connector windows                        # List windows
-tauri-connector resize 1024 768                # Resize window
+### Logs & Debugging
 
-# Events
-tauri-connector events listen user:login       # Listen for events
-tauri-connector events captured                # Get captured events
-tauri-connector events stop                    # Stop listening
+```bash
+tauri-connector logs -n 50                    # Last 50 console logs
+tauri-connector logs -l error                 # Error level only
+tauri-connector logs -l error,warn            # Multiple levels
+tauri-connector logs -p "timeout|failed"      # Regex filter
+tauri-connector state                         # App metadata, version, environment, windows
+tauri-connector eval "document.title"         # Execute arbitrary JS
+tauri-connector wait ".loaded"                # Wait for CSS selector to appear (default 5s)
+tauri-connector wait --text "Success"         # Wait for text
+tauri-connector wait ".modal" --timeout 10000 # Custom timeout
+```
 
-# Clear
-tauri-connector clear all                      # Clear all log files
-tauri-connector clear logs                     # Clear console logs only
+### IPC & Events
 
-# Other
-tauri-connector eval "document.title"          # Execute JavaScript
-tauri-connector wait ".loaded"                 # Wait for element
-tauri-connector wait --text "Success"          # Wait for text
-tauri-connector --version                      # Show version
+```bash
+tauri-connector ipc exec greet -a '{"name":"world"}'   # Execute Tauri IPC command
+tauri-connector ipc monitor                   # Start capturing IPC traffic
+tauri-connector ipc captured                  # View captured IPC calls
+tauri-connector ipc captured -f greet         # Filter by command name
+tauri-connector ipc captured -p "user_\d+"    # Regex filter
+tauri-connector ipc unmonitor                 # Stop capturing
+
+tauri-connector emit my-event -p '{"foo":42}' # Emit custom Tauri event
+tauri-connector events listen user:login,app:error  # Listen for specific events
+tauri-connector events captured               # View captured events
+tauri-connector events stop                   # Stop listening
+
+tauri-connector clear all                     # Clear all log files
+tauri-connector clear logs                    # Console logs only
+```
+
+### Window Management
+
+```bash
+tauri-connector windows                       # List all windows
+tauri-connector resize 1024 768               # Resize window
+tauri-connector resize 800 600 --window-id settings  # Specific window
 ```
 
 ### Environment Variables
@@ -113,248 +179,195 @@ tauri-connector --version                      # Show version
 | Variable | Default | Description |
 |---|---|---|
 | `TAURI_CONNECTOR_HOST` | `127.0.0.1` | Plugin host |
-| `TAURI_CONNECTOR_PORT` | `9555` | Plugin WS port |
+| `TAURI_CONNECTOR_PORT` | `9555` | Plugin WebSocket port |
 
-## Bun Scripts (Fallback)
+## MCP Tools
 
-If the CLI binary is not available, use the bun scripts at `~/opensource/tauri-connector/skill/scripts/`. Bun runs TypeScript natively with built-in WebSocket. Scripts auto-discover ports from the PID file.
+25 tools. Configure in `.mcp.json`: `{ "mcpServers": { "tauri-connector": { "url": "http://127.0.0.1:9556/sse" } } }`
 
-```bash
-SCRIPTS=~/opensource/tauri-connector/skill/scripts
-```
+### Core Interaction Tools
 
-```bash
-bun run $SCRIPTS/state.ts                              # App metadata
-bun run $SCRIPTS/eval.ts "document.title"              # Execute JS
-bun run $SCRIPTS/screenshot.ts /tmp/shot.png 1280      # Screenshot
-bun run $SCRIPTS/snapshot.ts                           # AI mode snapshot (default)
-bun run $SCRIPTS/snapshot.ts accessibility                # Accessibility tree
-bun run $SCRIPTS/snapshot.ts ai ".form"                   # Scoped to selector
-bun run $SCRIPTS/find.ts "button"                      # Find elements by CSS
-bun run $SCRIPTS/click.ts "button.submit"              # Click element
-bun run $SCRIPTS/hover.ts ".menu-trigger"              # Hover
-bun run $SCRIPTS/hover.ts ".menu-trigger" --off        # Hover-off (dismiss)
-bun run $SCRIPTS/fill.ts "input.search" "query"        # Fill input
-bun run $SCRIPTS/logs.ts 50                            # Console logs
-bun run $SCRIPTS/windows.ts                            # List windows
-bun run $SCRIPTS/wait.ts ".loaded"                     # Wait for element
-```
+**`webview_interact`** -- Perform gestures on elements.
 
-Bun scripts also support `TAURI_CONNECTOR_HOST`, `TAURI_CONNECTOR_PORT`, and `TAURI_CONNECTOR_TIMEOUT` env vars, plus auto-discovery via PID file.
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | yes | `click`, `double-click`, `dblclick`, `focus`, `scroll`, `hover`, `hover-off`, `drag` |
+| `selector` | string | | Source element (CSS/XPath/text) |
+| `strategy` | string | | `css` (default), `xpath`, `text` |
+| `x`, `y` | number | | Source coordinates (alternative to selector) |
+| `direction` | string | | `up`/`down`/`left`/`right` (scroll only) |
+| `distance` | number | | Scroll px, default 300 |
+| `targetSelector` | string | | Drag target CSS selector |
+| `targetX`, `targetY` | number | | Drag target coordinates |
+| `steps` | number | | Drag intermediate events, default 10 |
+| `durationMs` | number | | Drag duration ms, default 300 |
+| `dragStrategy` | string | | `auto` (default), `pointer`, `html5dnd` |
 
-## MCP Server
+**`webview_keyboard`** -- Type text or press keys.
 
-The embedded MCP server starts automatically. Configure in `.mcp.json`:
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | yes | `type` or `press` |
+| `text` | string | | Text to type (for `type`) |
+| `key` | string | | Key name (for `press`): Enter, Tab, Escape, etc. |
+| `modifiers` | string[] | | `ctrl`, `shift`, `alt`, `meta` |
 
-```json
-{
-  "mcpServers": {
-    "tauri-connector": {
-      "url": "http://127.0.0.1:9556/sse"
-    }
-  }
-}
-```
-
-25 MCP tools with full CLI parity: `webview_execute_js`, `webview_screenshot`, `webview_dom_snapshot` (modes: ai/accessibility/structure, with portal stitching, React enrichment, and ref IDs), `get_cached_dom`, `webview_find_element` (strategies: css/xpath/text/regex; optional `target` window), `webview_search_snapshot`, `webview_get_styles`, `webview_get_pointed_element`, `webview_select_element`, `webview_interact`, `webview_keyboard`, `webview_wait_for`, `manage_window`, `ipc_get_backend_state`, `ipc_execute_command`, `ipc_monitor`, `ipc_get_captured` (supports `pattern` regex and `since` timestamp filters), `ipc_listen`, `ipc_emit_event`, `event_get_captured`, `read_logs` (supports `level` and `pattern` filters), `read_log_file`, `clear_logs`, `get_setup_instructions`, `list_devices`.
-
-### Tool Parameter Details
-
-#### `read_logs`
+**`webview_wait_for`** -- Wait for element or text to appear. Polls every 100ms.
 
 | Param | Type | Description |
 |---|---|---|
-| `lines` | number | Number of recent log entries to return (default 20) |
-| `filter` | string | Legacy text filter on log messages |
-| `level` | string | Filter by log level: `error`, `warn`, `info`, `debug` |
-| `pattern` | string | Regex pattern to match against log messages |
-| `window_id` | string | Target window (default `main`) |
+| `selector` | string | CSS/XPath/text to wait for |
+| `strategy` | string | `css`, `xpath`, `text` |
+| `text` | string | Text content to wait for |
+| `timeout` | number | Timeout ms, default 5000 |
 
-#### `ipc_get_captured`
+### DOM & Inspection Tools
 
-| Param | Type | Description |
-|---|---|---|
-| `filter` | string | Filter by IPC command name |
-| `limit` | number | Max entries to return |
-| `pattern` | string | Regex pattern to match against IPC payloads |
-| `since` | string | ISO 8601 timestamp -- only return entries after this time |
+**`webview_dom_snapshot`** -- Get structured DOM. Mode `ai` (default) includes ref IDs, React component names, portal stitching.
 
-#### `webview_find_element`
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `ai` | `ai`, `accessibility`, `structure` |
+| `selector` | string | | CSS selector to scope subtree |
+| `maxDepth` | number | unlimited | Max tree depth |
+| `maxElements` | number | unlimited | Max element count |
+| `reactEnrich` | boolean | true | Include React component names |
+| `followPortals` | boolean | true | Stitch portals to triggers |
+| `shadowDom` | boolean | false | Traverse shadow DOM |
 
-| Param | Type | Description |
-|---|---|---|
-| `selector` | string | CSS selector, XPath, text content, or regex pattern |
-| `strategy` | string | One of: `css` (default), `xpath`, `text`, `regex` |
-| `target` | string | Target window label (default `main`) |
-| `window_id` | string | Alias for `target` |
+**`webview_find_element`** -- Find elements by CSS, XPath, text, or regex.
 
-#### `clear_logs`
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `selector` | string | yes | Search query |
+| `strategy` | string | | `css` (default), `xpath`, `text`, `regex` |
+| `target` | string | | What regex matches: `text`, `class`, `id`, `attr`, `all` |
 
-Clears stored log data. Accepts a `source` param to target specific stores.
+**`webview_search_snapshot`** -- Regex search over DOM snapshot with context lines.
 
-| Param | Type | Description |
-|---|---|---|
-| `source` | string | What to clear: `logs` (console), `ipc` (captured IPC), `events` (captured events), `all` (everything) |
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `pattern` | string | yes | Regex pattern |
+| `context` | number | | Context lines, default 2, max 10 |
+| `mode` | string | | `ai`, `accessibility`, `structure` |
 
-#### `read_log_file`
+**`get_cached_dom`** -- Get pre-cached DOM pushed from frontend (faster, no round-trip).
 
-Reads directly from the JSONL log file on disk with server-side filtering.
+**`webview_get_styles`** -- Get computed CSS for a CSS-selected element. Pass `properties` array to filter.
 
-| Param | Type | Description |
-|---|---|---|
-| `source` | string | Log source file to read (default `console`) |
-| `lines` | number | Number of lines to read from end of file |
-| `level` | string | Filter by log level |
-| `pattern` | string | Regex pattern filter |
-| `since` | string | ISO 8601 timestamp -- only return entries after this time |
-| `window_id` | string | Target window (default `main`) |
+**`webview_execute_js`** -- Execute arbitrary JavaScript. Use IIFE for return values: `"(() => { return value; })()"`.
 
-#### `ipc_listen`
+**`webview_screenshot`** -- Native capture. Params: `format` (png/jpeg/webp), `quality` (0-100), `maxWidth`.
 
-Starts or stops listening for specific Tauri events in real time.
+### IPC & Monitoring Tools
 
-| Param | Type | Description |
-|---|---|---|
-| `action` | string | `start` to begin listening, `stop` to end |
-| `events` | string[] | List of event names to listen for (used with `start`) |
+**`ipc_get_backend_state`** -- App name, version, debug/release, OS, arch, window list.
 
-#### `event_get_captured`
+**`ipc_execute_command`** -- Call any Tauri IPC command: `{ "command": "greet", "args": {"name": "world"} }`.
 
-Returns events captured by an active `ipc_listen` session.
+**`ipc_monitor`** -- Start/stop IPC monitoring: `{ "action": "start" }` or `{ "action": "stop" }`.
 
-| Param | Type | Description |
-|---|---|---|
-| `event` | string | Filter by event name |
-| `pattern` | string | Regex pattern to match against event payloads |
-| `limit` | number | Max entries to return |
-| `since` | string | ISO 8601 timestamp -- only return entries after this time |
+**`ipc_get_captured`** -- Read captured IPC. Params: `filter` (substring), `pattern` (regex), `limit`, `since` (epoch ms).
 
-#### `webview_search_snapshot`
+**`ipc_emit_event`** -- Emit Tauri event: `{ "eventName": "my-event", "payload": {...} }`.
 
-Searches the most recent DOM snapshot for matching text or patterns.
+**`ipc_listen`** -- Start/stop event listeners: `{ "action": "start", "events": ["user:login", "app:error"] }`.
 
-| Param | Type | Description |
-|---|---|---|
-| `pattern` | string | Text or regex pattern to search for |
-| `context` | number | Number of surrounding lines to include (default 2) |
-| `mode` | string | Snapshot mode to search: `ai`, `accessibility`, `structure` |
-| `window_id` | string | Target window (default `main`) |
+**`event_get_captured`** -- Read captured events. Params: `event` (exact name), `pattern` (regex), `limit`, `since`.
+
+**`read_logs`** -- Console logs. Params: `lines` (default 50), `level` (comma-separated), `pattern` (regex).
+
+**`read_log_file`** -- Historical JSONL logs. Params: `source` (console/ipc/events), `lines`, `level`, `pattern`, `since`.
+
+**`clear_logs`** -- Clear log files. Param: `source` (console/ipc/events/all).
+
+**`manage_window`** -- `{ "action": "list" }`, `{ "action": "info" }`, `{ "action": "resize", "width": 1024, "height": 768 }`.
 
 ## Common Workflows
 
-### Understand Current Page
+### Explore an Unknown Page
 
-```bash
-tauri-connector state
-tauri-connector eval "(() => ({ title: document.title, url: location.href }))()"
-tauri-connector snapshot -i
-tauri-connector screenshot /tmp/page.png -m 1280
+```
+1. webview_dom_snapshot (mode: "ai")        → see full element tree with refs
+2. webview_screenshot                        → see what it looks like
+3. webview_find_element (strategy: "text")  → find specific text/buttons
 ```
 
-### Fill a Form
+### Fill and Submit a Form
 
-```bash
-tauri-connector snapshot -i -s ".form"
-tauri-connector fill @e3 "user@example.com"
-tauri-connector click @e5
-tauri-connector wait --text "Success"
+```
+1. webview_dom_snapshot (selector: ".form") → see form fields with refs
+2. webview_interact (action: "click", selector from snapshot) → focus field
+3. webview_keyboard (action: "type", text: "value")  → fill each field
+4. webview_interact (action: "click", selector: "submit button")
+5. webview_wait_for (text: "Success")       → verify submission
 ```
 
-### Hover to Reveal, Then Click
+### Drag to Reorder a List
 
-```bash
-tauri-connector hover @e8                    # Trigger dropdown/tooltip
-tauri-connector wait ".dropdown-menu"        # Wait for it to appear
-tauri-connector click ".dropdown-item"       # Click revealed item
-tauri-connector hover @e8                    # (Optional) hover-off to dismiss
+```
+1. webview_dom_snapshot → identify source and target refs
+2. webview_interact (action: "drag", selector: "#item-3", targetSelector: "#item-1", steps: 15)
+3. webview_dom_snapshot → verify new order
 ```
 
-### Debug
+### Debug an Error
 
-```bash
-tauri-connector logs -n 50 -f error
-tauri-connector state
-tauri-connector eval "document.querySelector('.error')?.textContent"
 ```
-
-### Debugging Workflow
-
-Step-by-step recipe for diagnosing a Tauri app issue:
-
-```bash
-# 1. Start IPC monitor to capture backend traffic
-tauri-connector ipc monitor
-
-# 2. Listen for specific frontend events
-tauri-connector events listen user:login app:error
-
-# 3. Trigger the action you want to debug (interact with the app)
-tauri-connector click @e5
-
-# 4. Check logs with level filter for errors/warnings
-tauri-connector logs -n 30 -l error
-tauri-connector logs -p "timeout|failed"
-
-# 5. Search the DOM snapshot for relevant state
-tauri-connector snapshot -i
-# then search within the snapshot:
-# (use webview_search_snapshot MCP tool with pattern)
-
-# 6. Review captured IPC and events
-tauri-connector ipc captured
-tauri-connector events captured
-
-# 7. Clean up when done
-tauri-connector ipc unmonitor
-tauri-connector events stop
-tauri-connector clear all
+1. read_logs (level: "error")               → check console errors
+2. ipc_monitor (action: "start")            → start capturing IPC
+3. webview_interact (trigger the action)
+4. ipc_get_captured                         → see what IPC calls happened
+5. webview_dom_snapshot                     → inspect DOM state
+6. read_logs (pattern: "specific-error")    → search for patterns
 ```
 
 ### Ant Design / React Apps
 
-```bash
-# Full AI snapshot — portals stitched, components named
-tauri-connector snapshot -i
-# Output shows portals as logical children of triggers:
-# - combobox "Status" [ref=e5, component=InternalSelect, expanded=true]:
-#   - listbox "Status options" [portal]:
-#     - option "Active" [selected]
-#     - option "Inactive"
+The snapshot engine understands React: it reads `__reactFiber$` internals to show component names, detects portals via `aria-controls`/`aria-owns` and stitches them to their triggers, and annotates virtual scroll containers. Example snapshot output:
 
-# Virtual scroll containers annotated:
-# - list [virtual-scroll, visible=8]:
-#   - option "Item 1" [ref=e10]
-
-# Scope snapshot to a specific form
-tauri-connector snapshot -i -s ".ant-form"
+```
+- combobox "Status" [ref=e5, component=InternalSelect, expanded=true]:
+  - listbox "Status options" [portal]:
+    - option "Active" [selected]
+    - option "Inactive"
+- list [virtual-scroll, visible=8]:
+  - option "Item 1" [ref=e10]
 ```
 
-### IPC Debugging
+Use `snapshot -i -s ".ant-form"` to scope to a specific form subtree.
+
+## Bun Scripts (Fallback)
+
+When neither MCP nor CLI is available. Requires `bun` runtime. Scripts at `~/opensource/tauri-connector/skill/scripts/`.
 
 ```bash
-tauri-connector ipc monitor                  # Start capturing
-# ... interact with the app ...
-tauri-connector ipc captured                 # See all captured IPC calls
-tauri-connector ipc captured -f greet        # Filter by command name
-tauri-connector ipc unmonitor                # Stop capturing
+SCRIPTS=~/opensource/tauri-connector/skill/scripts
+bun run $SCRIPTS/snapshot.ts                           # AI snapshot
+bun run $SCRIPTS/click.ts "button.submit"              # Click
+bun run $SCRIPTS/hover.ts ".menu-trigger"              # Hover
+bun run $SCRIPTS/hover.ts ".menu-trigger" --off        # Hover-off
+bun run $SCRIPTS/drag.ts "#item" ".drop-zone"          # Drag
+bun run $SCRIPTS/drag.ts "#item" "400,300" --steps 15  # Drag to coords
+bun run $SCRIPTS/fill.ts "input" "query"               # Fill input
+bun run $SCRIPTS/screenshot.ts /tmp/shot.png 1280      # Screenshot
+bun run $SCRIPTS/find.ts "button"                      # Find elements
+bun run $SCRIPTS/logs.ts 50                            # Console logs
+bun run $SCRIPTS/eval.ts "document.title"              # Execute JS
+bun run $SCRIPTS/wait.ts ".loaded"                     # Wait for element
+bun run $SCRIPTS/state.ts                              # App metadata
+bun run $SCRIPTS/windows.ts                            # List windows
+bun run $SCRIPTS/events.ts listen user:login           # Listen for events
 ```
-
-## Screenshot
-
-The `webview_screenshot` tool / `screenshot` CLI command uses a two-tier approach:
-
-1. **xcap** (primary): Native cross-platform window capture via the `xcap` crate.
-2. **snapdom** (fallback): Falls back to `@zumer/snapdom` in the frontend.
-
-Supported formats: `png` (default), `jpeg`, `webp`. Use `-m` / `maxWidth` to resize.
 
 ## Troubleshooting
 
-### Connection Refused
-App isn't running or plugin isn't loaded. Check: `lsof -i :9555 | grep LISTEN`. Start with `bun run tauri dev`.
+**Connection Refused** -- App isn't running or plugin isn't loaded. Check: `lsof -i :9555 | grep LISTEN`. Start with `bun run tauri dev`.
 
-### Stale PID File
-If the app crashed, the PID file may be stale. Delete manually: `rm target/debug/.connector.json`.
+**Stale PID File** -- If the app crashed: `rm target/debug/.connector.json`.
 
-### Port Conflict
-Use `ConnectorBuilder::new().port_range(9600, 9700)` or set `TAURI_CONNECTOR_PORT=9600`.
+**Port Conflict** -- Use `ConnectorBuilder::new().port_range(9600, 9700)` in Rust, or set `TAURI_CONNECTOR_PORT=9600`.
+
+**Refs Not Found** -- DOM changed since last snapshot. Re-run `snapshot -i` to get fresh refs.
+
+**Drag Not Working** -- Try explicit `--strategy pointer` or `--strategy html5dnd`. Increase `--steps` (some libs need >5px movement to trigger). Increase `--duration` for timing-sensitive implementations.

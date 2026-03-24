@@ -136,22 +136,42 @@ pub async fn call_tool(
             let strategy = str_arg(args, "strategy").unwrap_or_else(|| "css".to_string());
             let x = num_arg(args, "x");
             let y = num_arg(args, "y");
-            let direction = str_arg(args, "direction");
-            let distance = num_arg(args, "distance");
             let wid = window_id(args);
-            handlers::interact(
-                id,
-                &action,
-                selector.as_deref(),
-                &strategy,
-                x,
-                y,
-                direction.as_deref(),
-                distance,
-                &wid,
-                bridge,
-            )
-            .await
+
+            if action == "drag" {
+                let target_selector = str_arg(args, "targetSelector");
+                let target_x = num_arg(args, "targetX");
+                let target_y = num_arg(args, "targetY");
+                let steps = num_arg(args, "steps").unwrap_or(10.0) as u32;
+                let duration_ms = num_arg(args, "durationMs").unwrap_or(300.0) as u32;
+                let drag_strategy = str_arg(args, "dragStrategy").unwrap_or_else(|| "auto".to_string());
+                handlers::drag(
+                    id,
+                    selector.as_deref(),
+                    &strategy,
+                    x, y,
+                    target_selector.as_deref(),
+                    target_x, target_y,
+                    steps, duration_ms,
+                    &drag_strategy,
+                    &wid,
+                    bridge,
+                ).await
+            } else {
+                let direction = str_arg(args, "direction");
+                let distance = num_arg(args, "distance");
+                handlers::interact(
+                    id,
+                    &action,
+                    selector.as_deref(),
+                    &strategy,
+                    x, y,
+                    direction.as_deref(),
+                    distance,
+                    &wid,
+                    bridge,
+                ).await
+            }
         }
 
         "webview_keyboard" => {
@@ -360,14 +380,21 @@ pub fn tool_definitions() -> Value {
                 }, "required": ["selector"] })
             ),
             tool_def("webview_interact",
-                "Perform gestures on elements. hover fires full pointer+mouse event sequence; hover-off fires leave events to dismiss dropdowns/tooltips",
+                "Perform gestures on elements. drag simulates drag-and-drop (pointer-based or HTML5 DnD with auto-detection); hover fires full pointer+mouse event sequence; hover-off fires leave events to dismiss dropdowns/tooltips",
                 json!({ "type": "object", "properties": {
-                    "action": { "type": "string", "enum": ["click", "double-click", "dblclick", "focus", "scroll", "hover", "hover-off"] },
-                    "selector": { "type": "string" },
+                    "action": { "type": "string", "enum": ["click", "double-click", "dblclick", "focus", "scroll", "hover", "hover-off", "drag"] },
+                    "selector": { "type": "string", "description": "Source element (CSS selector, XPath, or text)" },
                     "strategy": { "type": "string", "enum": ["css", "xpath", "text"] },
-                    "x": { "type": "number" }, "y": { "type": "number" },
+                    "x": { "type": "number", "description": "Source x coordinate (alternative to selector)" },
+                    "y": { "type": "number", "description": "Source y coordinate (alternative to selector)" },
                     "direction": { "type": "string", "enum": ["up", "down", "left", "right"] },
                     "distance": { "type": "number" },
+                    "targetSelector": { "type": "string", "description": "Drag target element (CSS selector). Required for drag." },
+                    "targetX": { "type": "number", "description": "Drag target x coordinate (alternative to targetSelector)" },
+                    "targetY": { "type": "number", "description": "Drag target y coordinate (alternative to targetSelector)" },
+                    "steps": { "type": "number", "description": "Number of intermediate move events for drag (default 10)" },
+                    "durationMs": { "type": "number", "description": "Total drag duration in ms (default 300)" },
+                    "dragStrategy": { "type": "string", "enum": ["auto", "pointer", "html5dnd"], "description": "Drag strategy: auto detects from element draggable attribute (default auto)" },
                     "windowId": { "type": "string" }
                 }, "required": ["action"] })
             ),
