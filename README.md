@@ -382,7 +382,7 @@ Environment: `TAURI_CONNECTOR_HOST` (default `127.0.0.1`), `TAURI_CONNECTOR_PORT
 
 ## Claude Code Skill (Recommended)
 
-Install the included skill to let Claude Code automatically set up and use tauri-connector.
+Install the skill to give Claude Code (and 30+ other AI agents) full debug and code review capabilities for Tauri apps.
 
 ### Install via skills.sh (easiest)
 
@@ -390,25 +390,39 @@ Install the included skill to let Claude Code automatically set up and use tauri
 npx skills add dickwu/tauri-connector
 ```
 
-This installs the skill from the [skills.sh](https://skills.sh) agent skills directory. Works with Claude Code, Cursor, Windsurf, and 30+ agents.
+This installs from [skills.sh](https://skills.sh) -- the agent skills directory. Works with Claude Code, Cursor, Windsurf, Codex, Gemini CLI, and more.
 
 ### Install manually
 
 ```bash
 mkdir -p ~/.claude/skills/tauri-connector
-cp skill/SKILL.md ~/.claude/skills/tauri-connector/SKILL.md
-cp skill/SETUP.md ~/.claude/skills/tauri-connector/SETUP.md
-cp -r skill/scripts ~/.claude/skills/tauri-connector/scripts
+cp -r skill/SKILL.md skill/SETUP.md skill/scripts skill/references \
+  ~/.claude/skills/tauri-connector/
 ```
 
-### What It Does
+### What's Included
+
+The skill provides a **debug & code review suite** with progressive disclosure:
+
+| File | Purpose |
+|---|---|
+| `SKILL.md` | Main skill -- core workflow, debugging, code review, interaction reference |
+| `SETUP.md` | Step-by-step setup guide for new Tauri projects |
+| `scripts/` | 14 Bun TypeScript scripts for fallback WebSocket automation |
+| `references/mcp-tools.md` | All 25 MCP tool parameter tables |
+| `references/cli-commands.md` | Every CLI subcommand with flags and examples |
+| `references/debug-playbook.md` | 10 step-by-step debug recipes (blank screen, silent clicks, form failures, slow IPC, drag issues, memory leaks, multi-window) |
+| `references/code-review-playbook.md` | 9 code review workflows (visual regression, accessibility audit, component tree, IPC contract validation, DOM structure, event flow) |
+
+### What It Enables
 
 Once installed, Claude will automatically:
 
-- **Set up the plugin** in any Tauri project when asked
-- **Use the CLI** for DOM snapshots and element interactions
-- **Debug issues** using console logs, app state, and JS execution
-- **Automate testing** with snapshot -> click/fill/verify workflows
+- **Debug Tauri apps** -- console errors, IPC monitoring, event capture, runtime state inspection
+- **Review code changes** -- visual regression, accessibility audit, component tree review, IPC contract validation
+- **Interact with the UI** -- click, fill, drag, type, scroll using ref-based addressing
+- **Set up the plugin** in any Tauri v2 project when asked
+- **Automate testing** with snapshot -> act -> verify workflows
 
 > **For contributors:** The release workflow skill is at `.claude/skills/tauri-connector-release/SKILL.md` — it triggers automatically when you say "release" or "bump version" inside this repo.
 
@@ -533,14 +547,19 @@ tauri-connector/
 |           |-- main.rs         # Clap CLI entry point
 |           |-- commands.rs     # Command implementations
 |           '-- snapshot.rs     # Ref system + DOM snapshot builder
-|-- skill/                      # Claude Code skill + bun scripts
-|   |-- SKILL.md                # Usage guide (loaded by Claude Code)
-|   |-- SETUP.md                # Setup instructions
-|   '-- scripts/                # Bun scripts for WS interaction
-|       |-- connector.ts        # Shared helper (auto-discovers ports via PID file)
-|       |-- state.ts, eval.ts, screenshot.ts, snapshot.ts
-|       |-- click.ts, drag.ts, fill.ts, find.ts, hover.ts, wait.ts
-|       '-- logs.ts, events.ts, windows.ts
+|-- skill/                      # Claude Code skill -- debug & code review suite
+|   |-- SKILL.md                # Main skill (debug + code review + interaction)
+|   |-- SETUP.md                # Setup instructions for new projects
+|   |-- scripts/                # Bun scripts for WS interaction (fallback)
+|   |   |-- connector.ts        # Shared helper (auto-discovers ports via PID file)
+|   |   |-- state.ts, eval.ts, screenshot.ts, snapshot.ts
+|   |   |-- click.ts, drag.ts, fill.ts, find.ts, hover.ts, wait.ts
+|   |   '-- logs.ts, events.ts, windows.ts
+|   '-- references/             # Progressive disclosure reference files
+|       |-- mcp-tools.md        # All 25 MCP tool parameter tables
+|       |-- cli-commands.md     # Full CLI command reference
+|       |-- debug-playbook.md   # 10 debug recipes
+|       '-- code-review-playbook.md  # 9 code review workflows
 |-- LICENSE
 '-- README.md
 ```
