@@ -726,6 +726,86 @@ pub fn bridge_init_script(port: u16) -> String {
       return Math.ceil(text.length / 3.5);
     }}
 
+    // === Sibling run detection ===
+    function structHash(node) {{
+      var h = node.label;
+      // Include class fingerprint (not in ai-mode attrs but needed for differentiation)
+      if (node.el && node.el.className && typeof node.el.className === 'string') {{
+        var cls = node.el.className.trim().split(/\s+/).slice(0, 5).filter(Boolean);
+        if (cls.length > 0) h += '|cls=' + cls.join('.');
+      }}
+      for (var ai = 0; ai < node.attrs.length; ai++) {{
+        var a = node.attrs[ai];
+        if (a.indexOf('ref=') === 0 || a.indexOf('component=') === 0) continue;
+        h += '|' + a;
+      }}
+      return h;
+    }}
+
+    function collapseRepeats(children) {{
+      if (children.length < 5) return children;
+      var result = [];
+      var i = 0;
+      while (i < children.length) {{
+        var hash = structHash(children[i]);
+        var runEnd = i + 1;
+        while (runEnd < children.length && structHash(children[runEnd]) === hash) {{
+          runEnd++;
+        }}
+        var runLen = runEnd - i;
+        if (runLen >= 5) {{
+          result.push(children[i]);
+          result.push(children[i + 1]);
+          var collapsed = [];
+          for (var ci = i + 2; ci < runEnd; ci++) {{
+            collapsed.push(children[ci]);
+          }}
+          result.push({{
+            label: '... ' + (runLen - 2) + ' more ' + children[i].label + ' items',
+            name: '',
+            attrs: ['collapsed-run'],
+            children: [],
+            _collapsedNodes: collapsed,
+            depth: children[i].depth,
+            el: children[i].el
+          }});
+          i = runEnd;
+        }} else {{
+          for (var ri = i; ri < runEnd; ri++) {{
+            result.push(children[ri]);
+          }}
+          i = runEnd;
+        }}
+      }}
+      return result;
+    }}
+
+    function collapseTree(node) {{
+      for (var ci = 0; ci < node.children.length; ci++) {{
+        collapseTree(node.children[ci]);
+      }}
+      node.children = collapseRepeats(node.children);
+    }}
+
+    function collectCollapsed(node) {{
+      var parts = [];
+      for (var ci = 0; ci < node.children.length; ci++) {{
+        var child = node.children[ci];
+        if (child._collapsedNodes) {{
+          var lines = [];
+          for (var ni = 0; ni < child._collapsedNodes.length; ni++) {{
+            lines.push(renderNode(child._collapsedNodes[ni], 0));
+          }}
+          parts.push({{ label: child.label, content: lines.join('\n') }});
+        }}
+        var nested = collectCollapsed(child);
+        for (var pi = 0; pi < nested.length; pi++) {{
+          parts.push(nested[pi]);
+        }}
+      }}
+      return parts;
+    }}
+
     // === Pass 1: Main DOM walk ===
     var rootNode = {{ label: 'root', name: '', attrs: [], children: [], depth: -1, el: rootEl }};
     var walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_ELEMENT, {{
@@ -895,6 +975,9 @@ pub fn bridge_init_script(port: u16) -> String {
       return lines.join('\n');
     }}
 
+    // === Collapse repeating siblings before rendering ===
+    collapseTree(rootNode);
+
     // === Budget-aware section rendering ===
     var budgetActive = maxTokens > 0;
     var usedTokens = 0;
@@ -916,6 +999,14 @@ pub fn bridge_init_script(port: u16) -> String {
         snapshotLines.push('- [subtree: ' + sectionLabel + '] (' + sectionTokens + ' tokens, see subtrees[' + (subtrees.length - 1) + '])');
         // Charge placeholder line to budget (tracks total payload, not just content)
         usedTokens += estimateTokens(snapshotLines[snapshotLines.length - 1]);
+      }}
+    }}
+
+    // === Collect collapsed sibling content for subtree files ===
+    if (budgetActive) {{
+      var collapsedParts = collectCollapsed(rootNode);
+      for (var cpi = 0; cpi < collapsedParts.length; cpi++) {{
+        subtrees.push(collapsedParts[cpi]);
       }}
     }}
 
