@@ -318,6 +318,39 @@ tauri-connector resize 1024 768 --window-id settings
 
 ---
 
+## Snapshot Budget & Subtree Files
+
+For complex apps, DOM snapshots can exceed AI tool result limits. The snapshot engine automatically manages output size:
+
+- **Default behavior**: `maxTokens: 4000` -- large DOMs split into a layout skeleton (inline) + subtree files (on disk)
+- **Unlimited**: `maxTokens: 0` -- full output, no splitting (legacy behavior)
+- **Subtree files**: Written to `/tmp/tauri-connector-<pid>/snapshots/<uuid>/subtree-N.txt`
+- **Read subtrees**: Use the `Read` tool on file paths shown in the snapshot
+- **Repeating siblings**: Lists/tables with 5+ identical items auto-collapse to 2 examples + reference
+
+```bash
+# MCP -- default budget (splits if needed)
+webview_dom_snapshot(mode: "ai")
+
+# MCP -- unlimited (legacy)
+webview_dom_snapshot(mode: "ai", maxTokens: 0)
+
+# CLI -- with budget
+tauri-connector snapshot -i --max-tokens 4000
+
+# CLI -- full output
+tauri-connector snapshot -i --no-split
+
+# CLI -- list/read snapshot sessions
+tauri-connector snapshots list
+tauri-connector snapshots read <uuid> subtree-0.txt
+
+# Bun -- with budget
+bun run $SCRIPTS/snapshot.ts ai --max-tokens 4000
+```
+
+---
+
 ## Ant Design / React Apps
 
 The snapshot engine reads `__reactFiber$` internals to show component names, detects portals via `aria-controls`/`aria-owns` and stitches them to their triggers, and annotates virtual scroll containers.
