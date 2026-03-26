@@ -27,6 +27,8 @@ pub async fn snapshot(
     mode: Option<String>,
     react_enrich: bool,
     follow_portals: bool,
+    max_tokens: usize,
+    no_split: bool,
 ) -> Result<RefMap, String> {
     let opts = SnapshotOptions {
         interactive,
@@ -37,6 +39,8 @@ pub async fn snapshot(
         mode,
         react_enrich,
         follow_portals,
+        max_tokens,
+        no_split,
     };
     let script = build_snapshot_script(&opts);
     let result = exec_js(client, &script, 30_000).await?;
@@ -48,6 +52,23 @@ pub async fn snapshot(
 
     println!("{snapshot_text}");
 
+    // Print subtree info if split occurred
+    if let Some(meta) = result.get("meta") {
+        if meta.get("split").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if let Some(sid) = meta.get("snapshotId").and_then(|v| v.as_str()) {
+                eprintln!("\nSnapshot {sid}");
+            }
+            if let Some(files) = meta.get("subtreeFiles").and_then(|v| v.as_array()) {
+                for f in files {
+                    let label = f.get("label").and_then(|v| v.as_str()).unwrap_or("?");
+                    let tokens = f.get("estimatedTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let path = f.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    eprintln!("  {} ({} tokens) -> {}", label, tokens, path);
+                }
+            }
+        }
+    }
+
     let refs: RefMap = result
         .get("refs")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -57,6 +78,66 @@ pub async fn snapshot(
     eprintln!("\n{count} refs captured");
 
     Ok(refs)
+}
+
+/// List recent snapshot sessions from the temp directory.
+pub fn snapshots_list() -> Result<(), String> {
+    let pid = std::process::id();
+    let dir = std::env::temp_dir()
+        .join(format!("tauri-connector-{pid}"))
+        .join("snapshots");
+    if !dir.exists() {
+        println!("No snapshots found");
+        return Ok(());
+    }
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .collect();
+    entries.sort_by_key(|e| {
+        std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok()))
+    });
+    for entry in entries.iter().take(10) {
+        let name = entry.file_name();
+        let meta_path = entry.path().join("meta.json");
+        if let Ok(meta_str) = std::fs::read_to_string(&meta_path) {
+            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_str) {
+                let files = meta
+                    .get("files")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                println!("{} -- {} subtree files", name.to_string_lossy(), files);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Read a subtree file from a snapshot session.
+pub fn snapshots_read(uuid: &str, file: Option<&str>) -> Result<(), String> {
+    let pid = std::process::id();
+    let dir = std::env::temp_dir()
+        .join(format!("tauri-connector-{pid}"))
+        .join("snapshots")
+        .join(uuid);
+    if !dir.exists() {
+        return Err(format!("Snapshot {uuid} not found"));
+    }
+    let target = file.unwrap_or("layout.txt");
+    let path = dir.join(target);
+    // Canonical path verification (prevent traversal)
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("File not found: {e}"))?;
+    let canonical_dir = dir.canonicalize().map_err(|e| e.to_string())?;
+    if !canonical.starts_with(&canonical_dir) {
+        return Err("Invalid path".to_string());
+    }
+    let content = std::fs::read_to_string(canonical).map_err(|e| e.to_string())?;
+    println!("{content}");
+    Ok(())
 }
 
 /// Click an element by ref or selector.

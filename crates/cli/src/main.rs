@@ -72,6 +72,12 @@ enum Commands {
         /// Disable portal stitching
         #[arg(long)]
         no_portals: bool,
+        /// Max tokens for inline result (0 = unlimited, default 4000)
+        #[arg(long, default_value_t = 4000)]
+        max_tokens: usize,
+        /// Disable subtree file splitting (full output)
+        #[arg(long)]
+        no_split: bool,
     },
     /// Click an element
     Click {
@@ -269,6 +275,24 @@ enum Commands {
         #[command(subcommand)]
         action: HookCommands,
     },
+    /// Manage snapshot sessions
+    Snapshots {
+        #[command(subcommand)]
+        action: SnapshotActions,
+    },
+}
+
+#[derive(Subcommand)]
+enum SnapshotActions {
+    /// List recent snapshots
+    List,
+    /// Read a subtree file from a snapshot
+    Read {
+        /// Snapshot UUID
+        uuid: String,
+        /// Subtree filename (e.g. subtree-0.txt). Defaults to layout.txt
+        file: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -362,6 +386,18 @@ async fn main() {
         return;
     }
 
+    if let Commands::Snapshots { action } = &cli.command {
+        let result = match action {
+            SnapshotActions::List => commands::snapshots_list(),
+            SnapshotActions::Read { uuid, file } => commands::snapshots_read(uuid, file.as_deref()),
+        };
+        if let Err(e) = result {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let host = std::env::var("TAURI_CONNECTOR_HOST").unwrap_or_else(|_| DEFAULT_HOST.to_string());
     let port: u16 = std::env::var("TAURI_CONNECTOR_PORT")
         .ok()
@@ -388,10 +424,13 @@ async fn main() {
             mode,
             no_react,
             no_portals,
+            max_tokens,
+            no_split,
         } => {
             match commands::snapshot(
                 &client, interactive, compact, depth, max_elements,
                 selector, mode, !no_react, !no_portals,
+                max_tokens, no_split,
             ).await {
                 Ok(new_refs) => {
                     refs = new_refs;
@@ -497,6 +536,7 @@ async fn main() {
         },
         Commands::State => commands::state(&client).await,
         Commands::Windows => commands::windows(&client).await,
+        Commands::Snapshots { .. } => unreachable!(),
         Commands::Update { .. } => unreachable!(),
         Commands::Examples => unreachable!(),
         Commands::Hook { .. } => unreachable!(),
@@ -521,12 +561,18 @@ CONNECTION:
   $TAURI_CONNECTOR_HOST:$TAURI_CONNECTOR_PORT (default: 127.0.0.1:9555)
 
 SNAPSHOT:
-  snapshot [-i] [-c] [-d N] [-s "#selector"]
+  snapshot [-i] [-c] [-d N] [-s "#selector"] [--max-tokens N] [--no-split]
     Take DOM snapshot with ref IDs. Flags:
       -i  Interactive only (elements with refs)
       -c  Compact (remove structural wrappers)
       -d  Max depth
       -s  Scope to CSS selector
+      --max-tokens  Max tokens for inline result (0=unlimited, default 4000)
+      --no-split    Disable subtree file splitting (full output)
+
+SNAPSHOTS:
+  snapshots list                    List recent snapshot sessions
+  snapshots read <uuid> [file]      Read a subtree file (default: layout.txt)
 
 INTERACTIONS (use @eN refs from snapshot):
   click <@ref|selector>              Click an element

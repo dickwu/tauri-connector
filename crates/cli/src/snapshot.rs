@@ -29,6 +29,8 @@ pub struct SnapshotOptions {
     pub mode: Option<String>,
     pub react_enrich: bool,
     pub follow_portals: bool,
+    pub max_tokens: usize,
+    pub no_split: bool,
 }
 
 
@@ -46,9 +48,11 @@ pub fn build_snapshot_script(opts: &SnapshotOptions) -> String {
         None => "null".to_string(),
     };
 
+    let max_tokens_val = if opts.no_split { 0 } else { opts.max_tokens };
+
     let compact_block = if opts.compact {
         r#"
-    const compactLines = snapshot.split('\n').filter(l => l.includes('ref=') || l.includes('"'));
+    const compactLines = snapshot.split('\n').filter(l => l.includes('ref=') || l.includes('"') || l.includes('subtree:'));
     snapshot = compactLines.join('\n');
     "#
     } else {
@@ -62,6 +66,7 @@ pub fn build_snapshot_script(opts: &SnapshotOptions) -> String {
         selector: {root_selector},
         maxDepth: {max_depth},
         maxElements: {max_elements},
+        maxTokens: {max_tokens_val},
         reactEnrich: {react_enrich},
         followPortals: {follow_portals},
         shadowDom: false,
@@ -70,12 +75,13 @@ pub fn build_snapshot_script(opts: &SnapshotOptions) -> String {
     let snapshot = result.snapshot;
     {compact_block}
 
-    return {{ snapshot: snapshot, refs: result.refs }};
+    return {{ snapshot: snapshot, refs: result.refs, subtrees: result.subtrees || [], meta: result.meta || {{}} }};
 }})()"#,
         mode = mode,
         root_selector = root_selector,
         max_depth = opts.max_depth,
         max_elements = opts.max_elements,
+        max_tokens_val = max_tokens_val,
         react_enrich = opts.react_enrich,
         follow_portals = opts.follow_portals,
         compact_block = compact_block,
