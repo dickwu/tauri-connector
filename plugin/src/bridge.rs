@@ -553,11 +553,12 @@ pub fn bridge_init_script(port: u16) -> String {
     const reactEnrich = opts.reactEnrich !== false;
     const followPortals = opts.followPortals !== false;
     const shadowDom = opts.shadowDom === true;
+    const maxTokens = opts.maxTokens || 0;
 
     const rootEl = opts.selector
       ? document.querySelector(opts.selector)
       : document.body;
-    if (!rootEl) return {{ snapshot: '', refs: {{}}, meta: {{ elementCount: 0, truncated: false, portalCount: 0, virtualScrollContainers: 0 }} }};
+    if (!rootEl) return {{ snapshot: '', refs: {{}}, allRefs: null, subtrees: [], meta: {{ elementCount: 0, truncated: false, split: false, inlineComplete: true, portalCount: 0, virtualScrollContainers: 0, inlineTokens: 0 }} }};
 
     // State
     let elementCount = 0;
@@ -718,6 +719,11 @@ pub fn bridge_init_script(port: u16) -> String {
         if (siblings.length > 1) sel += ':nth-child(' + idx + ')';
       }}
       return sel;
+    }}
+
+    // ~3.5 chars per token for indented tree format (conservative estimate)
+    function estimateTokens(text) {{
+      return Math.ceil(text.length / 3.5);
     }}
 
     // === Pass 1: Main DOM walk ===
@@ -889,23 +895,60 @@ pub fn bridge_init_script(port: u16) -> String {
       return lines.join('\n');
     }}
 
+    // === Budget-aware section rendering ===
+    var budgetActive = maxTokens > 0;
+    var usedTokens = 0;
+    var split = false;
+    var subtrees = [];
     var snapshotLines = [];
+
     for (var ri = 0; ri < rootNode.children.length; ri++) {{
-      snapshotLines.push(renderNode(rootNode.children[ri], 0));
+      var sectionText = renderNode(rootNode.children[ri], 0);
+      var sectionTokens = budgetActive ? estimateTokens(sectionText) : 0;
+
+      if (!budgetActive || (usedTokens + sectionTokens) <= maxTokens) {{
+        snapshotLines.push(sectionText);
+        usedTokens += sectionTokens;
+      }} else {{
+        split = true;
+        var sectionLabel = rootNode.children[ri].label || ('section-' + ri);
+        subtrees.push({{ label: sectionLabel, content: sectionText }});
+        snapshotLines.push('- [subtree: ' + sectionLabel + '] (' + sectionTokens + ' tokens, see subtrees[' + (subtrees.length - 1) + '])');
+        // Charge placeholder line to budget (tracks total payload, not just content)
+        usedTokens += estimateTokens(snapshotLines[snapshotLines.length - 1]);
+      }}
     }}
+
     var snapshot = snapshotLines.join('\n');
     if (truncated) {{
       snapshot += '\n# ... truncated (' + maxElements + ' of ' + elementCount + '+ elements shown)';
     }}
 
+    // Extract only refs visible in the inline snapshot
+    var inlineRefs = {{}};
+    var refMatches = snapshot.match(/ref=(e\d+)/g);
+    if (refMatches) {{
+      for (var mi = 0; mi < refMatches.length; mi++) {{
+        var refId = refMatches[mi].replace('ref=', '');
+        if (refs[refId]) {{
+          inlineRefs[refId] = refs[refId];
+        }}
+      }}
+    }}
+
     return {{
       snapshot: snapshot,
-      refs: refs,
+      refs: inlineRefs,
+      allRefs: split ? refs : null,
+      subtrees: subtrees,
       meta: {{
         elementCount: elementCount,
         truncated: truncated,
+        split: split,
+        inlineComplete: !split,
         portalCount: portalCount,
-        virtualScrollContainers: virtualScrollCount
+        virtualScrollContainers: virtualScrollCount,
+        inlineTokens: usedTokens
       }}
     }};
   }};
