@@ -389,7 +389,7 @@ bun run $SCRIPTS/events.ts listen user:login  # Listen for events
 
 For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. Summary:
 
-1. `tauri-plugin-connector = "0.7"` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = "0.8"` in `src-tauri/Cargo.toml`
 2. Register plugin with `#[cfg(debug_assertions)]` guard
 3. Add `"connector:default"` permission in capabilities
 4. Set `"withGlobalTauri": true` in `tauri.conf.json`
