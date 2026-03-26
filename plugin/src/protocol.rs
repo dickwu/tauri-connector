@@ -39,6 +39,10 @@ pub enum Command {
         snapshot_type: String,
         #[serde(default)]
         selector: Option<String>,
+        #[serde(default)]
+        max_tokens: Option<u64>,
+        #[serde(default)]
+        no_split: Option<bool>,
         #[serde(default = "default_window")]
         window_id: String,
     },

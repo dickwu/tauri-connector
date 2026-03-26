@@ -47,6 +47,12 @@ pub async fn dom_snapshot(
     bridge: &Bridge,
     state: &PluginState,
 ) -> Response {
+    // Validate mode to prevent JS injection
+    let safe_mode = match mode {
+        "ai" | "accessibility" | "structure" => mode,
+        _ => return Response::error(id.to_string(), format!("Unknown snapshot mode: {mode}")),
+    };
+
     let selector_arg = match selector {
         Some(s) => format!("'{}'", s.replace('\'', "\\'")),
         None => "null".to_string(),
@@ -54,7 +60,7 @@ pub async fn dom_snapshot(
 
     let script = format!(
         "window.__CONNECTOR_SNAPSHOT__({{ mode: '{}', selector: {}, maxDepth: {}, maxElements: {}, maxTokens: {}, reactEnrich: {}, followPortals: {}, shadowDom: {} }})",
-        mode,
+        safe_mode,
         selector_arg,
         max_depth.unwrap_or(0),
         max_elements.unwrap_or(0),
@@ -152,15 +158,17 @@ pub async fn dom_snapshot(
     // Write layout.txt (copy of inline skeleton).
     let layout_path = session_dir.join("layout.txt");
     let layout_tmp = session_dir.join("layout.txt.tmp");
-    let _ = fs::write(&layout_tmp, skeleton);
-    let _ = fs::rename(&layout_tmp, &layout_path);
+    if fs::write(&layout_tmp, skeleton).and_then(|_| fs::rename(&layout_tmp, &layout_path)).is_err() {
+        eprintln!("[connector] Failed to write layout.txt for snapshot {snapshot_id}");
+    }
 
     // Write meta.json with snapshot metadata.
     let all_refs = result.get("allRefs").cloned().unwrap_or(serde_json::json!({}));
     let all_refs_path = session_dir.join("refs.json");
     let refs_tmp = session_dir.join("refs.json.tmp");
-    let _ = fs::write(&refs_tmp, serde_json::to_string_pretty(&all_refs).unwrap_or_default());
-    let _ = fs::rename(&refs_tmp, &all_refs_path);
+    if fs::write(&refs_tmp, serde_json::to_string_pretty(&all_refs).unwrap_or_default()).and_then(|_| fs::rename(&refs_tmp, &all_refs_path)).is_err() {
+        eprintln!("[connector] Failed to write refs.json for snapshot {snapshot_id}");
+    }
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -176,8 +184,9 @@ pub async fn dom_snapshot(
     });
     let meta_path = session_dir.join("meta.json");
     let meta_tmp = session_dir.join("meta.json.tmp");
-    let _ = fs::write(&meta_tmp, serde_json::to_string_pretty(&session_meta).unwrap_or_default());
-    let _ = fs::rename(&meta_tmp, &meta_path);
+    if fs::write(&meta_tmp, serde_json::to_string_pretty(&session_meta).unwrap_or_default()).and_then(|_| fs::rename(&meta_tmp, &meta_path)).is_err() {
+        eprintln!("[connector] Failed to write meta.json for snapshot {snapshot_id}");
+    }
 
     // Update search cache with merged full-text.
     {
@@ -221,16 +230,18 @@ fn prune_old_snapshots(snapshots_dir: &std::path::Path, lock: &std::sync::Mutex<
         Err(_) => return,
     };
 
-    let mut dirs: Vec<std::path::PathBuf> = entries
+    // Collect dirs with mtime for reliable ordering (UUID v4 is random)
+    let mut dirs: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .map(|e| e.path())
+        .filter_map(|e| {
+            e.metadata().ok().and_then(|m| m.modified().ok()).map(|t| (t, e.path()))
+        })
         .collect();
 
-    // Sort descending by path (UUID v4 names are not time-ordered, but
-    // filesystem metadata is unreliable across platforms; the caller creates
-    // directories sequentially so lexicographic order is sufficient for pruning).
-    dirs.sort_unstable_by(|a, b| b.cmp(a));
+    // Sort newest first by mtime
+    dirs.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    let dirs: Vec<std::path::PathBuf> = dirs.into_iter().map(|(_, p)| p).collect();
 
     if dirs.len() <= MAX_SESSIONS {
         return;
@@ -1590,7 +1601,12 @@ pub async fn search_snapshot(
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             if entry.snapshot_mode == mode && now - entry.timestamp < 10 {
-                Some(entry.snapshot.clone())
+                let text = if entry.search_text.is_empty() {
+                    entry.snapshot.clone()
+                } else {
+                    entry.search_text.clone()
+                };
+                Some(text)
             } else {
                 None
             }
@@ -1603,7 +1619,7 @@ pub async fn search_snapshot(
         Some(s) => s,
         None => {
             let script = format!(
-                "JSON.stringify(window.__CONNECTOR_SNAPSHOT__({{ mode: '{}' }}).snapshot)",
+                "JSON.stringify(window.__CONNECTOR_SNAPSHOT__({{ mode: '{}', maxTokens: 0 }}).snapshot)",
                 mode
             );
             match bridge.execute_js(&script, 15_000).await {

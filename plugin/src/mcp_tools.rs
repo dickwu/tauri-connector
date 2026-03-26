@@ -95,6 +95,11 @@ pub async fn call_tool(
             let selector = str_arg(args, "selector");
             let max_depth = num_arg(args, "max_depth").or_else(|| num_arg(args, "maxDepth")).map(|n| n as u64);
             let max_elements = num_arg(args, "max_elements").or_else(|| num_arg(args, "maxElements")).map(|n| n as u64);
+            // Default maxTokens to 4000 for MCP callers
+            let max_tokens = num_arg(args, "max_tokens")
+                .or_else(|| num_arg(args, "maxTokens"))
+                .map(|n| n as u64)
+                .or(Some(4000));
             let react_enrich = args.get("react_enrich").or_else(|| args.get("reactEnrich"))
                 .and_then(|v| v.as_bool()).unwrap_or(true);
             let follow_portals = args.get("follow_portals").or_else(|| args.get("followPortals"))
@@ -103,8 +108,8 @@ pub async fn call_tool(
                 .and_then(|v| v.as_bool()).unwrap_or(false);
             let wid = window_id(args);
             handlers::dom_snapshot(
-                id, &mode, selector.as_deref(), max_depth, max_elements,
-                react_enrich, follow_portals, shadow_dom, &wid, bridge,
+                id, &mode, selector.as_deref(), max_depth, max_elements, max_tokens,
+                react_enrich, follow_portals, shadow_dom, &wid, bridge, state,
             ).await
         }
 
@@ -355,6 +360,7 @@ pub fn tool_definitions() -> Value {
                     "reactEnrich": { "type": "boolean", "description": "Include React component names (default: true)" },
                     "followPortals": { "type": "boolean", "description": "Stitch portals to their triggers (default: true)" },
                     "shadowDom": { "type": "boolean", "description": "Traverse shadow DOM (default: false)" },
+                    "maxTokens": { "type": "number", "description": "Token budget for inline result (default 4000, 0 for unlimited)" },
                     "windowId": { "type": "string" }
                 } })
             ),

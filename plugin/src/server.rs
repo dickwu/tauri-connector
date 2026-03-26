@@ -136,8 +136,9 @@ async fn handle_command(
         }
 
         // DOM
-        Command::DomSnapshot { snapshot_type, selector, window_id } => {
-            handlers::dom_snapshot(&id, &snapshot_type, selector.as_deref(), None, None, true, true, false, &window_id, bridge).await
+        Command::DomSnapshot { snapshot_type, selector, max_tokens, no_split, window_id } => {
+            let mt = if no_split.unwrap_or(false) { Some(0) } else { max_tokens };
+            handlers::dom_snapshot(&id, &snapshot_type, selector.as_deref(), None, None, mt, true, true, false, &window_id, bridge, state).await
         }
         Command::GetCachedDom { window_id } => {
             handlers::get_cached_dom(&id, &window_id, state).await
