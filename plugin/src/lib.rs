@@ -97,6 +97,8 @@ async fn push_dom(
             refs,
             meta,
             timestamp,
+            search_text: String::new(),
+            snapshot_id: None,
         })
         .await;
 

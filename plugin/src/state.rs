@@ -43,6 +43,12 @@ pub struct DomEntry {
     pub refs: RefMap,
     pub meta: SnapshotMeta,
     pub timestamp: u64,
+    /// Merged full-text for search (skeleton + subtree content). Empty when no split.
+    #[serde(default)]
+    pub search_text: String,
+    /// Snapshot session UUID if subtrees were written.
+    #[serde(default)]
+    pub snapshot_id: Option<String>,
 }
 
 /// A captured console log entry.
@@ -84,6 +90,7 @@ pub struct PluginState {
     pub ipc_writer: Arc<Mutex<BufWriter<File>>>,
     pub event_writer: Arc<Mutex<BufWriter<File>>>,
     pub event_listeners: Arc<Mutex<Vec<String>>>,
+    pub snapshot_prune_lock: Arc<std::sync::Mutex<()>>,
 }
 
 impl PluginState {
@@ -113,6 +120,7 @@ impl PluginState {
             ipc_writer: Arc::new(Mutex::new(BufWriter::new(ipc_file))),
             event_writer: Arc::new(Mutex::new(BufWriter::new(event_file))),
             event_listeners: Arc::new(Mutex::new(Vec::new())),
+            snapshot_prune_lock: Arc::new(std::sync::Mutex::new(())),
         })
     }
 

@@ -2,10 +2,14 @@
 
 #[cfg(feature = "xcap")]
 use base64::Engine;
+use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 use std::sync::Arc;
 use regex::Regex;
 use tauri::{Emitter, Manager};
+
+#[cfg(unix)]
+use std::os::unix::fs::DirBuilderExt;
 
 use crate::bridge::Bridge;
 use crate::protocol::{AppInfo, BackendState, EnvInfo, Response, TauriInfo, WindowEntry};
@@ -35,11 +39,13 @@ pub async fn dom_snapshot(
     selector: Option<&str>,
     max_depth: Option<u64>,
     max_elements: Option<u64>,
+    max_tokens: Option<u64>,
     react_enrich: bool,
     follow_portals: bool,
     shadow_dom: bool,
-    _window_id: &str,
+    window_id: &str,
     bridge: &Bridge,
+    state: &PluginState,
 ) -> Response {
     let selector_arg = match selector {
         Some(s) => format!("'{}'", s.replace('\'', "\\'")),
@@ -47,19 +53,202 @@ pub async fn dom_snapshot(
     };
 
     let script = format!(
-        "window.__CONNECTOR_SNAPSHOT__({{ mode: '{}', selector: {}, maxDepth: {}, maxElements: {}, reactEnrich: {}, followPortals: {}, shadowDom: {} }})",
+        "window.__CONNECTOR_SNAPSHOT__({{ mode: '{}', selector: {}, maxDepth: {}, maxElements: {}, maxTokens: {}, reactEnrich: {}, followPortals: {}, shadowDom: {} }})",
         mode,
         selector_arg,
         max_depth.unwrap_or(0),
         max_elements.unwrap_or(0),
+        max_tokens.unwrap_or(0),
         react_enrich,
         follow_portals,
         shadow_dom,
     );
 
-    match bridge.execute_js(&script, 15_000).await {
-        Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), format!("DOM snapshot failed: {e}")),
+    let result = match bridge.execute_js(&script, 15_000).await {
+        Ok(r) => r,
+        Err(e) => return Response::error(id.to_string(), format!("DOM snapshot failed: {e}")),
+    };
+
+    // If the JS engine did not split into subtrees, return as-is (backward compat).
+    let subtrees = match result.get("subtrees").and_then(|v| v.as_array()) {
+        Some(arr) if !arr.is_empty() => arr.clone(),
+        _ => return Response::success(id.to_string(), result),
+    };
+
+    // --- Subtree file writing ---
+    let snapshot_id = uuid::Uuid::new_v4().to_string();
+    let snapshots_dir = std::env::temp_dir()
+        .join(format!("tauri-connector-{}", std::process::id()))
+        .join("snapshots");
+    let session_dir = snapshots_dir.join(&snapshot_id);
+
+    // Create secure directory (0700 on unix).
+    let dir_ok = {
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        builder.mode(0o700);
+        builder.create(&session_dir).is_ok()
+    };
+
+    if !dir_ok {
+        // Bounded fallback: return inline skeleton with splitFailed flag, NOT full content.
+        let mut fallback = result.clone();
+        if let Some(meta) = fallback.get_mut("meta").and_then(|m| m.as_object_mut()) {
+            meta.insert("splitFailed".to_string(), serde_json::json!(true));
+        }
+        return Response::success(id.to_string(), fallback);
+    }
+
+    let skeleton = result.get("snapshot").and_then(|v| v.as_str()).unwrap_or("");
+    let mut subtree_files: Vec<serde_json::Value> = Vec::with_capacity(subtrees.len());
+    let mut merged_search_text = String::from(skeleton);
+    let mut write_failed = false;
+
+    for (i, subtree) in subtrees.iter().enumerate() {
+        let label = subtree.get("label").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let content = subtree.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        let estimated_tokens = subtree.get("estimatedTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        let filename = format!("subtree-{i}.txt");
+        let final_path = session_dir.join(&filename);
+        let tmp_path = session_dir.join(format!("subtree-{i}.txt.tmp"));
+
+        // Atomic write: write to .tmp, then rename.
+        match fs::write(&tmp_path, content) {
+            Ok(()) => {
+                if fs::rename(&tmp_path, &final_path).is_err() {
+                    write_failed = true;
+                    break;
+                }
+            }
+            Err(_) => {
+                write_failed = true;
+                break;
+            }
+        }
+
+        subtree_files.push(serde_json::json!({
+            "name": filename,
+            "label": label,
+            "path": final_path.to_string_lossy(),
+            "estimatedTokens": estimated_tokens,
+        }));
+
+        merged_search_text.push('\n');
+        merged_search_text.push_str(content);
+    }
+
+    if write_failed {
+        // Clean up partial writes and return bounded fallback.
+        let _ = fs::remove_dir_all(&session_dir);
+        let mut fallback = result.clone();
+        if let Some(meta) = fallback.get_mut("meta").and_then(|m| m.as_object_mut()) {
+            meta.insert("splitFailed".to_string(), serde_json::json!(true));
+        }
+        return Response::success(id.to_string(), fallback);
+    }
+
+    // Write layout.txt (copy of inline skeleton).
+    let layout_path = session_dir.join("layout.txt");
+    let layout_tmp = session_dir.join("layout.txt.tmp");
+    let _ = fs::write(&layout_tmp, skeleton);
+    let _ = fs::rename(&layout_tmp, &layout_path);
+
+    // Write meta.json with snapshot metadata.
+    let all_refs = result.get("allRefs").cloned().unwrap_or(serde_json::json!({}));
+    let all_refs_path = session_dir.join("refs.json");
+    let refs_tmp = session_dir.join("refs.json.tmp");
+    let _ = fs::write(&refs_tmp, serde_json::to_string_pretty(&all_refs).unwrap_or_default());
+    let _ = fs::rename(&refs_tmp, &all_refs_path);
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
+    let session_meta = serde_json::json!({
+        "snapshotId": snapshot_id,
+        "timestamp": timestamp,
+        "windowId": window_id,
+        "refs": all_refs_path.to_string_lossy(),
+        "files": subtree_files,
+    });
+    let meta_path = session_dir.join("meta.json");
+    let meta_tmp = session_dir.join("meta.json.tmp");
+    let _ = fs::write(&meta_tmp, serde_json::to_string_pretty(&session_meta).unwrap_or_default());
+    let _ = fs::rename(&meta_tmp, &meta_path);
+
+    // Update search cache with merged full-text.
+    {
+        let mut cache = state.dom_cache.lock().await;
+        if let Some(entry) = cache.get_mut(window_id) {
+            entry.search_text = merged_search_text;
+            entry.snapshot_id = Some(snapshot_id.clone());
+        }
+    }
+
+    // Prune old snapshot sessions (keep newest 5).
+    prune_old_snapshots(&snapshots_dir, &state.snapshot_prune_lock);
+
+    // Enrich result: add file metadata, remove inline allRefs.
+    let mut enriched = result.clone();
+    if let Some(meta) = enriched.get_mut("meta").and_then(|m| m.as_object_mut()) {
+        meta.insert("snapshotId".to_string(), serde_json::json!(snapshot_id));
+        meta.insert("subtreeFiles".to_string(), serde_json::json!(subtree_files));
+        meta.insert("allRefsPath".to_string(), serde_json::json!(all_refs_path.to_string_lossy()));
+    }
+    if let Some(obj) = enriched.as_object_mut() {
+        obj.remove("allRefs");
+        obj.remove("subtrees");
+    }
+
+    Response::success(id.to_string(), enriched)
+}
+
+/// Prune old snapshot sessions, keeping the newest `MAX_SESSIONS`.
+/// Uses a std::sync::Mutex to serialize pruning across concurrent calls.
+fn prune_old_snapshots(snapshots_dir: &std::path::Path, lock: &std::sync::Mutex<()>) {
+    const MAX_SESSIONS: usize = 5;
+
+    let _guard = match lock.lock() {
+        Ok(g) => g,
+        Err(_) => return, // poisoned lock, skip pruning
+    };
+
+    let entries = match fs::read_dir(snapshots_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let mut dirs: Vec<std::path::PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .map(|e| e.path())
+        .collect();
+
+    // Sort descending by path (UUID v4 names are not time-ordered, but
+    // filesystem metadata is unreliable across platforms; the caller creates
+    // directories sequentially so lexicographic order is sufficient for pruning).
+    dirs.sort_unstable_by(|a, b| b.cmp(a));
+
+    if dirs.len() <= MAX_SESSIONS {
+        return;
+    }
+
+    // Canonicalize the snapshots_dir once for symlink protection.
+    let canonical_parent = match fs::canonicalize(snapshots_dir) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    for dir in dirs.into_iter().skip(MAX_SESSIONS) {
+        // Symlink protection: verify the resolved path lives under snapshots_dir.
+        if let Ok(canonical) = fs::canonicalize(&dir) {
+            if canonical.starts_with(&canonical_parent) {
+                let _ = fs::remove_dir_all(&canonical);
+            }
+        }
     }
 }
 
