@@ -118,6 +118,22 @@ Run the app with `bun run tauri dev` (or `cargo tauri dev`). Look for these log 
 
 The PID file enables bun scripts to auto-discover ports without configuration.
 
+## Step 8: Auto-detect hook (optional)
+
+Install a Claude Code hook that automatically detects when your Tauri app is running and signals available connector tools on every prompt:
+
+```bash
+tauri-connector hook install
+```
+
+This writes a lightweight `UserPromptSubmit` hook to `.claude/settings.local.json`. It checks for the `.connector.json` PID file and outputs available tools — zero noise when the app isn't running.
+
+To remove:
+
+```bash
+tauri-connector hook remove
+```
+
 ## Custom Configuration
 
 For localhost-only access, custom ports, or disabling the embedded MCP:

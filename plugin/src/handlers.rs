@@ -321,9 +321,9 @@ pub async fn interact(
             // Full hover sequence: pointer events + mouse events + CSS :hover workaround.
             // Fires the same event sequence as a real cursor move (Playwright/CDP approach).
             r#"
-            const rect = el.getBoundingClientRect();
-            const cx = rect.x + rect.width / 2;
-            const cy = rect.y + rect.height / 2;
+            const hoverRect = el.getBoundingClientRect();
+            const cx = hoverRect.x + hoverRect.width / 2;
+            const cy = hoverRect.y + hoverRect.height / 2;
             const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
             el.dispatchEvent(new PointerEvent('pointerover', opts));
             el.dispatchEvent(new PointerEvent('pointerenter', { ...opts, bubbles: false }));
@@ -336,7 +336,7 @@ pub async fn interact(
         "hover-off" => {
             // Reverse hover: fire pointer/mouse leave events to dismiss dropdowns/tooltips.
             r#"
-            const rect = el.getBoundingClientRect();
+            const hoverRect = el.getBoundingClientRect();
             const opts = { bubbles: true, cancelable: true, view: window, clientX: 0, clientY: 0 };
             el.dispatchEvent(new PointerEvent('pointerout', opts));
             el.dispatchEvent(new PointerEvent('pointerleave', { ...opts, bubbles: false }));
@@ -526,37 +526,47 @@ pub async fn keyboard(
     let script = match action {
         "type" => {
             let t = text.unwrap_or("");
+            let mods_str = if mod_opts.is_empty() {
+                String::new()
+            } else {
+                format!(", {}", mod_opts)
+            };
             format!(
                 r#"(() => {{
                     const el = document.activeElement;
                     if (!el) return {{ error: 'No focused element' }};
                     const chars = "{text}";
                     for (const ch of chars) {{
-                        el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch, {mods} }}));
-                        el.dispatchEvent(new KeyboardEvent('keypress', {{ key: ch, {mods} }}));
+                        el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch{mods} }}));
+                        el.dispatchEvent(new KeyboardEvent('keypress', {{ key: ch{mods} }}));
                         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
                             el.value += ch;
                             el.dispatchEvent(new Event('input', {{ bubbles: true }}));
                         }}
-                        el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch, {mods} }}));
+                        el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch{mods} }}));
                     }}
                     return {{ typed: "{text}", target: el.tagName.toLowerCase() }};
                 }})()"#,
                 text = t.replace('"', r#"\""#),
-                mods = mod_opts,
+                mods = mods_str,
             )
         }
         "press" => {
             let k = key.unwrap_or("Enter");
+            let mods_str = if mod_opts.is_empty() {
+                String::new()
+            } else {
+                format!(", {}", mod_opts)
+            };
             format!(
                 r#"(() => {{
                     const el = document.activeElement || document.body;
-                    el.dispatchEvent(new KeyboardEvent('keydown', {{ key: '{key}', {mods}, bubbles: true }}));
-                    el.dispatchEvent(new KeyboardEvent('keyup', {{ key: '{key}', {mods}, bubbles: true }}));
+                    el.dispatchEvent(new KeyboardEvent('keydown', {{ key: '{key}', bubbles: true{mods} }}));
+                    el.dispatchEvent(new KeyboardEvent('keyup', {{ key: '{key}', bubbles: true{mods} }}));
                     return {{ pressed: '{key}', target: el.tagName.toLowerCase() }};
                 }})()"#,
                 key = k,
-                mods = mod_opts,
+                mods = mods_str,
             )
         }
         _ => {

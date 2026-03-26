@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use connector_client::ConnectorClient;
 
 mod commands;
+mod hook;
 mod snapshot;
 mod update;
 
@@ -263,6 +264,19 @@ enum Commands {
     },
     /// Show detailed help with examples
     Examples,
+    /// Manage Claude Code auto-detect hook
+    Hook {
+        #[command(subcommand)]
+        action: HookCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookCommands {
+    /// Install auto-detect hook for Claude Code
+    Install,
+    /// Remove auto-detect hook
+    Remove,
 }
 
 #[derive(Subcommand)]
@@ -330,6 +344,18 @@ async fn main() {
 
     if let Commands::Update { check } = &cli.command {
         if let Err(e) = update::run(*check).await {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    if let Commands::Hook { action } = &cli.command {
+        let result = match action {
+            HookCommands::Install => hook::install(),
+            HookCommands::Remove => hook::remove(),
+        };
+        if let Err(e) = result {
             eprintln!("Error: {e}");
             std::process::exit(1);
         }
@@ -473,6 +499,7 @@ async fn main() {
         Commands::Windows => commands::windows(&client).await,
         Commands::Update { .. } => unreachable!(),
         Commands::Examples => unreachable!(),
+        Commands::Hook { .. } => unreachable!(),
     };
 
     if let Err(e) = result {
