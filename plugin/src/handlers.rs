@@ -255,10 +255,10 @@ fn prune_old_snapshots(snapshots_dir: &std::path::Path, lock: &std::sync::Mutex<
 
     for dir in dirs.into_iter().skip(MAX_SESSIONS) {
         // Symlink protection: verify the resolved path lives under snapshots_dir.
-        if let Ok(canonical) = fs::canonicalize(&dir) {
-            if canonical.starts_with(&canonical_parent) {
-                let _ = fs::remove_dir_all(&canonical);
-            }
+        if let Ok(canonical) = fs::canonicalize(&dir)
+            && canonical.starts_with(&canonical_parent)
+        {
+            let _ = fs::remove_dir_all(&canonical);
         }
     }
 }
