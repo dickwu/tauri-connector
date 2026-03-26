@@ -40,6 +40,52 @@ Claude Code -------- SSE http://host:9556/sse -----> Embedded MCP server
 CLI (Rust) -------- WebSocket ws://host:9555 -----> Plugin WS server
 ```
 
+## Claude Code Skill (Recommended)
+
+Install the skill to give Claude Code (and 30+ other AI agents) full debug and code review capabilities for Tauri apps.
+
+### Install via skills.sh (easiest)
+
+```bash
+npx skills add dickwu/tauri-connector
+```
+
+This installs from [skills.sh](https://skills.sh) -- the agent skills directory. Works with Claude Code, Cursor, Windsurf, Codex, Gemini CLI, and more.
+
+### Install manually
+
+```bash
+mkdir -p ~/.claude/skills/tauri-connector
+cp -r skill/SKILL.md skill/SETUP.md skill/scripts skill/references \
+  ~/.claude/skills/tauri-connector/
+```
+
+### What's Included
+
+The skill provides a **debug & code review suite** with progressive disclosure:
+
+| File | Purpose |
+|---|---|
+| `SKILL.md` | Main skill -- core workflow, debugging, code review, interaction reference |
+| `SETUP.md` | Step-by-step setup guide for new Tauri projects |
+| `scripts/` | 14 Bun TypeScript scripts for fallback WebSocket automation |
+| `references/mcp-tools.md` | All 25 MCP tool parameter tables |
+| `references/cli-commands.md` | Every CLI subcommand with flags and examples |
+| `references/debug-playbook.md` | 10 step-by-step debug recipes (blank screen, silent clicks, form failures, slow IPC, drag issues, memory leaks, multi-window) |
+| `references/code-review-playbook.md` | 9 code review workflows (visual regression, accessibility audit, component tree, IPC contract validation, DOM structure, event flow) |
+
+### What It Enables
+
+Once installed, Claude will automatically:
+
+- **Debug Tauri apps** -- console errors, IPC monitoring, event capture, runtime state inspection
+- **Review code changes** -- visual regression, accessibility audit, component tree review, IPC contract validation
+- **Interact with the UI** -- click, fill, drag, type, scroll using ref-based addressing
+- **Set up the plugin** in any Tauri v2 project when asked
+- **Automate testing** with snapshot -> act -> verify workflows
+
+> **For contributors:** The release workflow skill is at `.claude/skills/tauri-connector-release/SKILL.md` — it triggers automatically when you say "release" or "bump version" inside this repo.
+
 ## Components
 
 | Component | Description |
@@ -134,7 +180,7 @@ The plugin also auto-pushes DOM snapshots via Tauri IPC. The `get_cached_dom` to
 
 ## Quick Start
 
-> **Using Claude Code?** Install the skill for automated setup -- see [Claude Code Skill](#claude-code-skill-recommended) below.
+> **Using Claude Code?** Install the skill for automated setup -- see [Claude Code Skill](#claude-code-skill-recommended) above.
 
 ### 1. Add the plugin
 
@@ -379,52 +425,6 @@ tauri-connector clear all                        # Clear all log files
 ```
 
 Environment: `TAURI_CONNECTOR_HOST` (default `127.0.0.1`), `TAURI_CONNECTOR_PORT` (default `9555`).
-
-## Claude Code Skill (Recommended)
-
-Install the skill to give Claude Code (and 30+ other AI agents) full debug and code review capabilities for Tauri apps.
-
-### Install via skills.sh (easiest)
-
-```bash
-npx skills add dickwu/tauri-connector
-```
-
-This installs from [skills.sh](https://skills.sh) -- the agent skills directory. Works with Claude Code, Cursor, Windsurf, Codex, Gemini CLI, and more.
-
-### Install manually
-
-```bash
-mkdir -p ~/.claude/skills/tauri-connector
-cp -r skill/SKILL.md skill/SETUP.md skill/scripts skill/references \
-  ~/.claude/skills/tauri-connector/
-```
-
-### What's Included
-
-The skill provides a **debug & code review suite** with progressive disclosure:
-
-| File | Purpose |
-|---|---|
-| `SKILL.md` | Main skill -- core workflow, debugging, code review, interaction reference |
-| `SETUP.md` | Step-by-step setup guide for new Tauri projects |
-| `scripts/` | 14 Bun TypeScript scripts for fallback WebSocket automation |
-| `references/mcp-tools.md` | All 25 MCP tool parameter tables |
-| `references/cli-commands.md` | Every CLI subcommand with flags and examples |
-| `references/debug-playbook.md` | 10 step-by-step debug recipes (blank screen, silent clicks, form failures, slow IPC, drag issues, memory leaks, multi-window) |
-| `references/code-review-playbook.md` | 9 code review workflows (visual regression, accessibility audit, component tree, IPC contract validation, DOM structure, event flow) |
-
-### What It Enables
-
-Once installed, Claude will automatically:
-
-- **Debug Tauri apps** -- console errors, IPC monitoring, event capture, runtime state inspection
-- **Review code changes** -- visual regression, accessibility audit, component tree review, IPC contract validation
-- **Interact with the UI** -- click, fill, drag, type, scroll using ref-based addressing
-- **Set up the plugin** in any Tauri v2 project when asked
-- **Automate testing** with snapshot -> act -> verify workflows
-
-> **For contributors:** The release workflow skill is at `.claude/skills/tauri-connector-release/SKILL.md` — it triggers automatically when you say "release" or "bump version" inside this repo.
 
 ## MCP Server
 
