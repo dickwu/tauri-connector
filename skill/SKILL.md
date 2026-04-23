@@ -389,7 +389,7 @@ bun run $SCRIPTS/events.ts listen user:login  # Listen for events
 
 For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. Summary:
 
-1. `tauri-plugin-connector = "0.8"` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = "0.9"` in `src-tauri/Cargo.toml`
 2. Register plugin with `#[cfg(debug_assertions)]` guard
 3. Add `"connector:default"` permission in capabilities
 4. Set `"withGlobalTauri": true` in `tauri.conf.json`
@@ -397,6 +397,8 @@ For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. Summary:
 6. Add `"url": "http://127.0.0.1:9556/sse"` to `.mcp.json`
 
 CLI install: `brew install dickwu/tap/tauri-connector`
+
+Verify setup: `tauri-connector doctor` — walks the project and reports any missing piece (Cargo dep, plugin registration, permission, `withGlobalTauri`, snapdom, `.mcp.json`, runtime connectivity) with a concrete Fix line. Add `--json` for CI.
 
 ## Deep Reference
 

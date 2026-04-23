@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use connector_client::ConnectorClient;
 
 mod commands;
+mod doctor;
 mod hook;
 mod snapshot;
 mod update;
@@ -270,6 +271,15 @@ enum Commands {
     },
     /// Show detailed help with examples
     Examples,
+    /// Diagnose current project setup and report what is missing
+    Doctor {
+        /// Emit machine-readable JSON instead of the text checklist
+        #[arg(long)]
+        json: bool,
+        /// Skip live WebSocket/MCP reachability probes
+        #[arg(long)]
+        no_runtime: bool,
+    },
     /// Manage Claude Code auto-detect hook
     Hook {
         #[command(subcommand)]
@@ -369,6 +379,15 @@ async fn main() {
     if let Commands::Update { check } = &cli.command {
         if let Err(e) = update::run(*check).await {
             eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    if let Commands::Doctor { json, no_runtime } = &cli.command {
+        let opts = doctor::Options { json: *json, no_runtime: *no_runtime };
+        if let Err(e) = doctor::run(opts).await {
+            eprintln!("{e}");
             std::process::exit(1);
         }
         return;
@@ -539,6 +558,7 @@ async fn main() {
         Commands::Snapshots { .. } => unreachable!(),
         Commands::Update { .. } => unreachable!(),
         Commands::Examples => unreachable!(),
+        Commands::Doctor { .. } => unreachable!(),
         Commands::Hook { .. } => unreachable!(),
     };
 
@@ -634,6 +654,7 @@ OTHER:
   eval <js-expression>               Execute JavaScript
   logs [-n 20] [-f "filter"]         Console logs
   state                              App metadata
+  doctor [--json] [--no-runtime]     Diagnose current project setup
   help                               This help
 
 EXAMPLES:

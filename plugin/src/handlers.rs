@@ -240,7 +240,7 @@ fn prune_old_snapshots(snapshots_dir: &std::path::Path, lock: &std::sync::Mutex<
         .collect();
 
     // Sort newest first by mtime
-    dirs.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    dirs.sort_unstable_by_key(|(t, _)| std::cmp::Reverse(*t));
     let dirs: Vec<std::path::PathBuf> = dirs.into_iter().map(|(_, p)| p).collect();
 
     if dirs.len() <= MAX_SESSIONS {

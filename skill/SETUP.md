@@ -23,7 +23,7 @@ Check `src-tauri/Cargo.toml`. If `tauri-plugin-connector` is not present, add it
 
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.8"
+tauri-plugin-connector = "0.9"
 ```
 
 ## Step 2: Register the plugin
@@ -117,6 +117,8 @@ Run the app with `bun run tauri dev` (or `cargo tauri dev`). Look for these log 
 ```
 
 The PID file enables bun scripts to auto-discover ports without configuration.
+
+For a one-shot health check of the entire setup, run `tauri-connector doctor` in the project root. It walks every file above, probes the running WS/MCP ports, and prints a Fix line for anything missing. Use `--json` for CI, `--no-runtime` to skip the live probes.
 
 ## Step 8: Auto-detect hook (optional)
 

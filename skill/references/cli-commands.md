@@ -426,3 +426,27 @@ Print usage examples.
 ```bash
 tauri-connector examples
 ```
+
+### doctor
+
+Diagnose the current project's tauri-connector setup. Walks `src-tauri/`, the
+frontend `package.json`, `.mcp.json`, and the runtime `.connector.json` PID
+file, then probes the WebSocket + MCP ports. Each missing piece is reported
+with a concrete Fix line. Exits non-zero when one or more required checks
+fail, so it works in CI.
+
+```bash
+tauri-connector doctor                     # full checklist
+tauri-connector doctor --no-runtime        # skip live WS/MCP probes
+tauri-connector doctor --json              # machine-readable output
+```
+
+What it verifies:
+- `tauri-plugin-connector` in `src-tauri/Cargo.toml`
+- plugin registered via `tauri_plugin_connector::init()` (or `ConnectorBuilder`) in `lib.rs`/`main.rs`
+- `"connector:default"` permission in any file under `src-tauri/capabilities/`
+- `app.withGlobalTauri: true` in `src-tauri/tauri.conf.json`
+- `@zumer/snapdom` in root `package.json` (any dependency bucket)
+- `.mcp.json` registers `tauri-connector`
+- `.connector.json` PID file + live WS ping + MCP TCP probe
+- `.claude/` auto-detect hook installation (optional)

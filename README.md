@@ -127,6 +127,7 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Events | `event_get_captured` | `events captured [-p regex]` |
 | DOM | `webview_search_snapshot` | *(via MCP only)* |
 | Setup | `get_setup_instructions` | `examples` |
+| Diagnostics | *(CLI only)* | `doctor [--json] [--no-runtime]` |
 | Devices | `list_devices` | *(info only)* |
 
 ### CLI Ref-Based Addressing
@@ -187,7 +188,7 @@ The plugin also auto-pushes DOM snapshots via Tauri IPC. The `get_cached_dom` to
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.8"
+tauri-plugin-connector = "0.9"
 ```
 
 ### 2. Register it (debug-only)
