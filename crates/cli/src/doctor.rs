@@ -24,6 +24,40 @@ const DEFAULT_WS_PORT: u16 = 9555;
 const DEFAULT_MCP_PORT: u16 = 9556;
 const PROBE_HOST: &str = "127.0.0.1";
 
+// Canonical snippets used in Fix messages. Kept in one place so we render the
+// exact same text the README/SETUP doc ship with.
+const SNIPPET_PLUGIN_REGISTER: &str = r#"#[cfg(debug_assertions)]
+{
+    builder = builder.plugin(tauri_plugin_connector::init());
+}"#;
+
+const SNIPPET_CAPABILITY: &str = r#"{
+  "permissions": ["connector:default"]
+}"#;
+
+const SNIPPET_WITH_GLOBAL_TAURI: &str = r#""app": {
+  "withGlobalTauri": true
+}"#;
+
+const SNIPPET_MCP_JSON: &str = r#"{
+  "mcpServers": {
+    "tauri-connector": { "url": "http://127.0.0.1:9556/sse" }
+  }
+}"#;
+
+/// Short version hint used in Cargo.toml fix snippets (e.g. "0.9" from "0.9.0").
+fn cargo_version_hint() -> String {
+    let mut parts: Vec<&str> = CURRENT_VERSION.split('.').collect();
+    parts.truncate(2);
+    parts.join(".")
+}
+
+/// Indent every line of a snippet by two spaces so it nests cleanly under a
+/// Fix: header when rendered by `print_text`.
+fn indent_snippet(s: &str) -> String {
+    s.lines().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n")
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Status {
     Ok,
@@ -162,7 +196,7 @@ fn check_environment(cwd: &Path, project: Option<&PathBuf>) -> Section {
         None => checks.push(
             Check::warn(
                 "No Tauri project found near the working directory",
-                "run `tauri-connector doctor` from the directory that contains `src-tauri/`",
+                "run from the directory that contains `src-tauri/`:\n  $ cd path/to/your-tauri-app\n  $ tauri-connector doctor",
             )
             .with_detail(
                 "setup/runtime checks skipped — open a Tauri v2 project first".to_string(),
@@ -196,7 +230,7 @@ fn check_cargo_dependency(root: &Path) -> Check {
         Err(_) => {
             return Check::fail(
                 format!("Cargo dependency missing ({display} unreadable)"),
-                "ensure src-tauri/Cargo.toml exists and is readable",
+                format!("ensure {display} exists and is readable:\n  $ ls -l {display}"),
             )
         }
     };
@@ -207,9 +241,12 @@ fn check_cargo_dependency(root: &Path) -> Check {
         ))
         .with_detail(display)
     } else {
+        let v = cargo_version_hint();
         Check::fail(
             "Cargo dependency `tauri-plugin-connector` is missing",
-            format!("add `tauri-plugin-connector = \"0.8\"` under [dependencies] in {display}"),
+            format!(
+                "add it to {display}:\n  $ cd src-tauri && cargo add tauri-plugin-connector@{v}\nor append under [dependencies]:\n  tauri-plugin-connector = \"{v}\""
+            ),
         )
     }
 }
@@ -289,8 +326,10 @@ fn check_plugin_registration(root: &Path) -> Check {
 
     Check::fail(
         "Plugin not registered",
-        "add `#[cfg(debug_assertions)] { builder = builder.plugin(tauri_plugin_connector::init()); }` \
-         in src-tauri/src/lib.rs before `.invoke_handler(...)`",
+        format!(
+            "register the plugin in src-tauri/src/lib.rs (before `.invoke_handler(...)`):\n{}",
+            indent_snippet(SNIPPET_PLUGIN_REGISTER)
+        ),
     )
 }
 
@@ -301,14 +340,17 @@ fn check_capabilities(root: &Path) -> Check {
     if !dir.is_dir() {
         return Check::fail(
             "Capabilities directory missing",
-            "create src-tauri/capabilities/default.json and add `\"connector:default\"` to its permissions",
+            format!(
+                "create src-tauri/capabilities/default.json:\n{}",
+                indent_snippet(SNIPPET_CAPABILITY)
+            ),
         );
     }
 
     let Ok(entries) = fs::read_dir(&dir) else {
         return Check::fail(
             "Cannot read src-tauri/capabilities/",
-            "check filesystem permissions for the capabilities directory",
+            "check filesystem permissions on src-tauri/capabilities/:\n  $ ls -la src-tauri/capabilities/",
         );
     };
 
@@ -337,13 +379,17 @@ fn check_capabilities(root: &Path) -> Check {
         Some(p) => Check::ok(format!("Permission \"connector:default\" in {}", rel(root, &p))),
         None if !checked_any => Check::fail(
             "No capability JSON files in src-tauri/capabilities/",
-            "create default.json with `{ \"permissions\": [\"connector:default\"] }`",
+            format!(
+                "create src-tauri/capabilities/default.json:\n{}",
+                indent_snippet(SNIPPET_CAPABILITY)
+            ),
         ),
         None => Check::fail(
             "Permission `connector:default` missing",
             format!(
-                "add \"connector:default\" to the `permissions` array in a file under {}",
-                rel(root, &dir)
+                "add \"connector:default\" to the `permissions` array in src-tauri/capabilities/default.json (or any *.json under {}):\n{}",
+                rel(root, &dir),
+                indent_snippet(SNIPPET_CAPABILITY)
             ),
         ),
     }
@@ -375,14 +421,14 @@ fn check_with_global_tauri(root: &Path) -> Check {
         Err(_) => {
             return Check::fail(
                 "tauri.conf.json unreadable",
-                format!("make sure {display} exists and is valid JSON"),
+                format!("make sure {display} exists and is valid JSON:\n  $ ls -l {display}"),
             )
         }
     };
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
         return Check::fail(
             "tauri.conf.json is not valid JSON",
-            format!("fix the JSON in {display}"),
+            format!("fix the JSON in {display}:\n  $ jq . {display}"),
         );
     };
 
@@ -396,7 +442,10 @@ fn check_with_global_tauri(root: &Path) -> Check {
     } else {
         Check::fail(
             "app.withGlobalTauri is not true",
-            format!("set `\"withGlobalTauri\": true` under `\"app\"` in {display} (required for the eval+event fallback)"),
+            format!(
+                "set `\"withGlobalTauri\": true` under `\"app\"` in {display} (required for the eval+event fallback):\n{}",
+                indent_snippet(SNIPPET_WITH_GLOBAL_TAURI)
+            ),
         )
     }
 }
@@ -410,14 +459,14 @@ fn check_snapdom(root: &Path) -> Check {
         Err(_) => {
             return Check::warn(
                 "package.json not found at project root",
-                "if your frontend lives in a subdirectory, install @zumer/snapdom there (`npm install @zumer/snapdom`)",
+                "if your frontend lives in a subdirectory, install @zumer/snapdom there:\n  $ cd <frontend-dir>\n  $ npm install @zumer/snapdom\n  $ # or: bun add @zumer/snapdom",
             )
         }
     };
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
         return Check::warn(
             "package.json is not valid JSON",
-            format!("fix the JSON in {display}"),
+            format!("fix the JSON in {display}:\n  $ jq . {display}"),
         );
     };
 
@@ -427,7 +476,7 @@ fn check_snapdom(root: &Path) -> Check {
     } else {
         Check::fail(
             "Frontend dependency `@zumer/snapdom` is missing",
-            "run `npm install @zumer/snapdom` (or `bun add @zumer/snapdom`) — needed for the screenshot fallback",
+            "install the screenshot fallback library:\n  $ npm install @zumer/snapdom\n  $ # or: bun add @zumer/snapdom\n  $ # or: pnpm add @zumer/snapdom",
         )
     }
 }
@@ -458,10 +507,8 @@ fn check_mcp_json(root: &Path) -> Check {
             return Check::fail(
                 ".mcp.json missing",
                 format!(
-                    "create {display} with:\n         {}",
-                    indent_block(
-                        r#"{"mcpServers":{"tauri-connector":{"url":"http://127.0.0.1:9556/sse"}}}"#,
-                    )
+                    "create {display} at the project root:\n{}",
+                    indent_snippet(SNIPPET_MCP_JSON)
                 ),
             );
         }
@@ -470,7 +517,7 @@ fn check_mcp_json(root: &Path) -> Check {
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
         return Check::fail(
             ".mcp.json is not valid JSON",
-            format!("fix the JSON in {display}"),
+            format!("fix the JSON in {display}:\n  $ jq . {display}"),
         );
     };
 
@@ -481,7 +528,9 @@ fn check_mcp_json(root: &Path) -> Check {
             if url.is_empty() {
                 Check::warn(
                     ".mcp.json `tauri-connector` entry has no `url`",
-                    "set `\"url\": \"http://127.0.0.1:9556/sse\"`",
+                    format!(
+                        "set the url in {display}:\n  \"mcpServers\": {{\n    \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/sse\" }}\n  }}"
+                    ),
                 )
             } else {
                 Check::ok(format!(".mcp.json registers tauri-connector ({url})"))
@@ -491,7 +540,7 @@ fn check_mcp_json(root: &Path) -> Check {
         _ => Check::fail(
             ".mcp.json has no `tauri-connector` entry",
             format!(
-                "add `\"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/sse\" }}` to `mcpServers` in {display}"
+                "add a `tauri-connector` entry under `mcpServers` in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/sse\" }}"
             ),
         ),
     }
@@ -581,7 +630,7 @@ async fn check_runtime(
         (None, _) => {
             checks.push(Check::warn(
                 "PID file (.connector.json) not found",
-                "start the Tauri app in dev mode (`bun run tauri dev`) — the plugin writes the PID file at startup",
+                "start the Tauri app in dev mode — the plugin writes the PID file at startup:\n  $ bun run tauri dev\n  $ # or: cargo tauri dev",
             ));
             (DEFAULT_WS_PORT, DEFAULT_MCP_PORT)
         }
@@ -595,7 +644,7 @@ async fn check_runtime(
         Err(e) => checks.push(
             Check::fail(
                 format!("WebSocket ws://{PROBE_HOST}:{ws_port} unreachable"),
-                "start the Tauri app in dev mode so the plugin binds its WebSocket listener",
+                "start the Tauri app so the plugin binds its WebSocket listener:\n  $ bun run tauri dev\n  $ # or: cargo tauri dev",
             )
             .with_detail(e),
         ),
@@ -611,7 +660,9 @@ async fn check_runtime(
         Err(e) => checks.push(
             Check::fail(
                 format!("MCP server http://{PROBE_HOST}:{mcp_port}/sse unreachable"),
-                "confirm the embedded MCP server is enabled (it is on by default) and `.mcp.json` points at the same port",
+                format!(
+                    "start the Tauri app in dev mode — MCP is embedded and starts automatically. If custom ports are set via ConnectorBuilder.mcp_port_range(...), update .mcp.json to match port {mcp_port}:\n  $ bun run tauri dev"
+                ),
             )
             .with_detail(e),
         ),
@@ -668,15 +719,15 @@ fn check_integration(root: &Path) -> Section {
         ),
         (true, false) => checks.push(Check::warn(
             "Hook script present but not wired into settings.local.json",
-            "run `tauri-connector hook install` to finish wiring the hook",
+            "finish wiring the hook:\n  $ tauri-connector hook install",
         )),
         (false, true) => checks.push(Check::warn(
             "Hook entry in settings.local.json but script is missing",
-            "run `tauri-connector hook install` to regenerate the script",
+            "regenerate the script:\n  $ tauri-connector hook install",
         )),
         (false, false) => checks.push(Check::warn(
             "Claude Code auto-detect hook not installed (optional)",
-            "run `tauri-connector hook install` to enable per-prompt detection",
+            "enable per-prompt detection:\n  $ tauri-connector hook install",
         )),
     }
 
@@ -785,10 +836,6 @@ fn rel(root: &Path, path: &Path) -> String {
         .unwrap_or_else(|_| path.display().to_string())
 }
 
-fn indent_block(s: &str) -> String {
-    s.lines().collect::<Vec<_>>().join("\n         ")
-}
-
 // ----- tests ---------------------------------------------------------------
 
 #[cfg(test)]
@@ -891,6 +938,19 @@ tauri-plugin-connector = "0.8"
         )
         .unwrap();
         assert!(settings_has_connector_hook(&v));
+    }
+
+    #[test]
+    fn cargo_version_hint_is_major_minor() {
+        let v = cargo_version_hint();
+        // Expect "major.minor" from CARGO_PKG_VERSION.
+        assert_eq!(v.matches('.').count(), 1, "got {v}");
+        assert!(v.chars().next().unwrap().is_ascii_digit(), "got {v}");
+    }
+
+    #[test]
+    fn indent_snippet_prefixes_two_spaces() {
+        assert_eq!(indent_snippet("a\nb"), "  a\n  b");
     }
 
     #[test]
