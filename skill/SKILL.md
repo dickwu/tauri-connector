@@ -322,31 +322,45 @@ tauri-connector resize 1024 768 --window-id settings
 
 For complex apps, DOM snapshots can exceed AI tool result limits. The snapshot engine automatically manages output size:
 
-- **Default behavior**: `maxTokens: 4000` -- large DOMs split into a layout skeleton (inline) + subtree files (on disk)
-- **Unlimited**: `maxTokens: 0` -- full output, no splitting (legacy behavior)
-- **Subtree files**: Written to `/tmp/tauri-connector-<pid>/snapshots/<uuid>/subtree-N.txt`
-- **Read subtrees**: Use the `Read` tool on file paths shown in the snapshot
-- **Repeating siblings**: Lists/tables with 5+ identical items auto-collapse to 2 examples + reference
+- **Default behavior**: `maxTokens: 4000` over MCP -- large DOMs return a layout skeleton (inline) plus `file=subtree-K.txt` markers pointing at on-disk subtree files.
+- **WebSocket / Bun / internal callers**: default `maxTokens: 0` (full output) for backward compatibility. Pass `max_tokens` explicitly to opt in.
+- **Unlimited on MCP**: set `maxTokens: 0` or `noSplit: true` to restore legacy behavior.
+- **Subtree files**: written atomically to `$TMPDIR/tauri-connector-<pid>/snapshots/<uuid>/` (`0700` dir on unix). `meta.subtreeFiles[].path` gives the absolute path; `allRefsPath` points to `refs.json` when the ref map also spills.
+- **Reading subtrees**: use the `Read` tool on the `path` field, or the CLI's `snapshots read <uuid> <file>` (canonicalized -- rejects path traversal). Old sessions are auto-pruned by mtime (keeps newest 5).
+- **Search stays complete**: `webview_search_snapshot` matches against merged full text (skeleton + every subtree), so filters never hide inside spilled content.
+- **Repeating siblings**: runs of 5+ siblings with the same tag + role + ARIA state collapse to 2 examples + a marker; the collapsed rows are written to a subtree file whenever the budget is active.
+- **`--compact` / `-c`** on the CLI keeps lines containing refs _plus_ subtree markers, so you never lose a pointer to spilled content.
 
 ```bash
-# MCP -- default budget (splits if needed)
+# MCP -- default 4000-token budget (splits if needed)
 webview_dom_snapshot(mode: "ai")
 
-# MCP -- unlimited (legacy)
+# MCP -- raise the budget for a big page
+webview_dom_snapshot(mode: "ai", maxTokens: 8000)
+
+# MCP -- unlimited (legacy behavior)
 webview_dom_snapshot(mode: "ai", maxTokens: 0)
+webview_dom_snapshot(mode: "ai", noSplit: true)
 
-# CLI -- with budget
-tauri-connector snapshot -i --max-tokens 4000
+# MCP -- search across spilled subtrees (context=3 lines)
+webview_search_snapshot(pattern: "submit|confirm", context: 3)
 
-# CLI -- full output
+# CLI -- with default budget
+tauri-connector snapshot -i
+
+# CLI -- larger budget, or full output
+tauri-connector snapshot -i --max-tokens 8000
 tauri-connector snapshot -i --no-split
 
 # CLI -- list/read snapshot sessions
 tauri-connector snapshots list
+tauri-connector snapshots read <uuid>                 # layout.txt (default)
 tauri-connector snapshots read <uuid> subtree-0.txt
+tauri-connector snapshots read <uuid> refs.json
 
-# Bun -- with budget
+# Bun -- opt in to budgeting (default is unlimited over WS)
 bun run $SCRIPTS/snapshot.ts ai --max-tokens 4000
+bun run $SCRIPTS/snapshot.ts ai --no-split
 ```
 
 ---
@@ -398,7 +412,28 @@ For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. Summary:
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 
-Verify setup: `tauri-connector doctor` — walks the project and reports any missing piece (Cargo dep, plugin registration, permission, `withGlobalTauri`, snapdom, `.mcp.json`, runtime connectivity) with a concrete Fix line. Add `--json` for CI.
+### Verify setup with `doctor` (v0.9+)
+
+Before troubleshooting a broken connection, DOM bridge timeout, or missing MCP tools, run `tauri-connector doctor` from the project root. It validates every setup step in one pass and prints a concrete `Fix:` line for anything missing or misconfigured -- faster than walking `.mcp.json`, `tauri.conf.json`, capabilities, etc. by hand.
+
+```bash
+tauri-connector doctor                 # full checklist (text)
+tauri-connector doctor --no-runtime    # skip live WS/MCP probes (offline / CI)
+tauri-connector doctor --json          # machine-readable output (exit code 0/1)
+```
+
+What it verifies:
+
+| Section | Checks |
+|---|---|
+| Environment | CLI version, working directory, Tauri v2 project detection (walks up to find `src-tauri/tauri.conf.json`) |
+| Plugin Setup | `tauri-plugin-connector` in `src-tauri/Cargo.toml`, plugin registered via `init()` / `ConnectorBuilder` in `lib.rs`/`main.rs`, `"connector:default"` in any `src-tauri/capabilities/*.json`, `app.withGlobalTauri: true` in `tauri.conf.json`, `@zumer/snapdom` in `package.json`, `.mcp.json` registers `tauri-connector` |
+| Runtime | `.connector.json` PID file under `target/`, PID alive, WebSocket ping on `ws_port`, MCP TCP probe on `mcp_port` |
+| Integration | `.claude/` auto-detect hook install status (optional) |
+
+Exit code is non-zero when any required check fails, so `doctor --json` drops cleanly into CI or pre-commit. Use `--no-runtime` when the Tauri app isn't running (offline setup validation).
+
+First move when something looks wrong: `tauri-connector doctor`. Second move: read the `Fix:` line.
 
 ## Deep Reference
 
@@ -413,8 +448,11 @@ For full parameter tables and extended workflows:
 
 ## Troubleshooting
 
+Run `tauri-connector doctor` first -- it catches most of the issues below in one pass and prints the exact fix.
+
 | Problem | Fix |
 |---|---|
+| Any setup problem | `tauri-connector doctor` -- prints a `Fix:` line for each missing/misconfigured piece |
 | Connection refused | App not running or plugin not loaded. Check: `lsof -i :9555 \| grep LISTEN` |
 | Stale PID file | App crashed. Delete: `rm target/debug/.connector.json` |
 | Port conflict | Use `ConnectorBuilder::new().port_range(9600, 9700)` or set `TAURI_CONNECTOR_PORT=9600` |

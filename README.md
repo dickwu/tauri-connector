@@ -175,9 +175,20 @@ Key capabilities:
 - **React fiber enrichment** -- Component names (`component=AppointmentModal`) via `__reactFiber$` on DOM nodes
 - **Visibility pruning** -- `aria-hidden`, `display:none`, `visibility:hidden`, `role=presentation/none` automatically excluded
 - **Virtual scroll detection** -- `rc-virtual-list-holder` containers annotated with visible item count
-- **Token budgeting** -- `maxDepth` and `maxElements` for graceful truncation on large DOMs
+- **Token budgeting** -- `maxDepth`, `maxElements`, and token-aware splitting for graceful truncation on large DOMs
 
 The plugin also auto-pushes DOM snapshots via Tauri IPC. The `get_cached_dom` tool returns this pre-cached snapshot instantly.
+
+### Snapshot Budget Engine (v0.8+)
+
+Large DOMs routinely blow past LLM context windows. The snapshot engine now budgets output by estimated tokens and spills overflow to on-disk **subtree files** so the inline response stays compact while the full tree remains reachable on demand.
+
+- **Token estimation + section-atomic rendering** -- the walker estimates tokens per section and stops inlining once the budget is hit, emitting `{overflow: N subtrees, file=subtree-K.txt}` markers in place of the omitted content.
+- **Repeating sibling collapse** -- runs of 5+ structurally identical siblings (same tag + role + ARIA state hash) are collapsed to 2 examples + a marker; the collapsed rows are written to a subtree file.
+- **Subtree files** -- overflow content is written atomically to a PID-scoped session dir under the OS temp directory (`<tmp>/tauri-connector/<pid>/snapshots/<uuid>/subtree-N.txt`). Directories use `0700` permissions; writes are counter-based with `.tmp` + rename.
+- **Auto-prune** -- old sessions are pruned by mtime with a per-window `Mutex` to avoid concurrent cleanup races; prune failures fall back to a bounded policy.
+- **Search keeps full fidelity** -- `search_snapshot` / `webview_search_snapshot` match against the merged full-text (inline output plus all subtree contents), so filtered output never hides matches.
+- **Defaults** -- MCP callers default to `max_tokens: 4000`; WebSocket / internal callers default to `0` (unlimited) for backward compatibility. Set `no_split: true` (or `--no-split` on the CLI) to disable file splitting entirely.
 
 ## Quick Start
 
@@ -255,6 +266,45 @@ Look for:
 ```
 
 The MCP server is now live. Claude Code connects automatically via the URL in `.mcp.json`.
+
+### 8. Verify with `doctor` (v0.9+)
+
+`tauri-connector doctor` walks the current project and confirms every setup step above. It inspects `src-tauri/Cargo.toml`, the plugin registration in `lib.rs`/`main.rs`, `src-tauri/capabilities/*.json`, `src-tauri/tauri.conf.json`, the frontend `package.json`, the root `.mcp.json`, and the live `.connector.json` PID file (plus WS/MCP port probes) -- each missing piece is reported with a copy-pasteable `Fix:` snippet. It exits non-zero when any required check fails, so it drops straight into CI.
+
+```bash
+tauri-connector doctor                 # full checklist (text)
+tauri-connector doctor --no-runtime    # skip live WS/MCP probes (offline / CI)
+tauri-connector doctor --json          # machine-readable output
+```
+
+Sections reported:
+
+| Section | Checks |
+|---|---|
+| Environment | CLI version, working directory, Tauri v2 project detection |
+| Plugin Setup | `tauri-plugin-connector` Cargo dep, plugin registered, `connector:default` permission, `app.withGlobalTauri: true`, `@zumer/snapdom` in `package.json`, `.mcp.json` entry |
+| Runtime | `.connector.json` PID file, PID alive, WS ping on `ws_port`, MCP TCP probe on `mcp_port` |
+| Integration | `.claude/` auto-detect hook install status (optional) |
+
+Example output (one failing check):
+
+```
+tauri-connector doctor v0.9.1
+
+Plugin Setup
+  ✓ Cargo dependency: tauri-plugin-connector = "0.9"
+  ✓ Plugin registered in src-tauri/src/lib.rs
+  ✗ Permission `connector:default` missing
+      Fix: add "connector:default" to the `permissions` array in src-tauri/capabilities/default.json:
+        {
+          "permissions": ["connector:default"]
+        }
+  ✓ app.withGlobalTauri: true
+  ✓ Frontend dependency: @zumer/snapdom
+  ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/sse)
+
+Run the `Fix` commands above and re-run `tauri-connector doctor`.
+```
 
 ## WebSocket API via Bun
 
@@ -362,7 +412,7 @@ All commands use `{ id, type, ...params }` with snake_case types:
 | `ping` | -- |
 | `execute_js` | `script`, `window_id` |
 | `screenshot` | `format`, `quality`, `max_width`, `window_id` |
-| `dom_snapshot` | `mode` (ai/accessibility/structure), `selector`, `max_depth`, `max_elements`, `react_enrich`, `follow_portals`, `shadow_dom`, `window_id` |
+| `dom_snapshot` | `mode` (ai/accessibility/structure), `selector`, `max_depth`, `max_elements`, `max_tokens`, `no_split`, `react_enrich`, `follow_portals`, `shadow_dom`, `window_id` |
 | `find_element` | `selector`, `strategy`, `window_id` |
 | `get_styles` | `selector`, `properties`, `window_id` |
 | `interact` | `action`, `selector`, `strategy`, `x`, `y`, `target_selector`, `target_x`, `target_y`, `steps`, `duration_ms`, `drag_strategy`, `window_id` |
@@ -400,6 +450,11 @@ tauri-connector snapshot -i --mode accessibility  # Accessibility tree only
 tauri-connector snapshot -i --no-react            # Skip React enrichment
 tauri-connector snapshot -i --no-portals          # Skip portal stitching
 tauri-connector snapshot -i --max-elements 2000   # Limit output size
+tauri-connector snapshot -i --max-tokens 4000     # Token budget (default 4000, 0=unlimited)
+tauri-connector snapshot -i --no-split            # Disable subtree file splitting
+tauri-connector snapshots list                    # List recent snapshot sessions
+tauri-connector snapshots read <uuid>             # Read layout.txt from a session
+tauri-connector snapshots read <uuid> subtree-0.txt  # Read a specific subtree file
 tauri-connector click @e5            # Click by ref
 tauri-connector fill @e3 "query"     # Fill input
 tauri-connector drag @e3 @e7         # Drag element to target

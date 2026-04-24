@@ -68,10 +68,31 @@ Get a structured DOM tree. The `ai` mode includes ref IDs, React component names
 | `selector` | string | | CSS selector to scope to a subtree |
 | `maxDepth` | number | unlimited | Maximum tree depth |
 | `maxElements` | number | unlimited | Maximum element count |
+| `maxTokens` | number | 4000 (MCP), 0 elsewhere | Token budget for inline output. Overflow spills to on-disk subtree files. `0` = unlimited. |
+| `noSplit` | boolean | false | Disable subtree file splitting -- return full inline output regardless of budget |
 | `reactEnrich` | boolean | true | Include React component names from fiber internals |
 | `followPortals` | boolean | true | Stitch portals (detected via `aria-controls`/`aria-owns`) to their triggers |
 | `shadowDom` | boolean | false | Traverse shadow DOM boundaries |
 | `windowId` | string | | Target a specific window (from `manage_window(action: "list")`) |
+
+**Output when a split occurs** (`meta.split == true`):
+
+```jsonc
+{
+  "snapshot": "<inline layout skeleton with `file=subtree-K.txt` markers>",
+  "refs": { "e0": {...}, "e1": {...} },
+  "meta": {
+    "split": true,
+    "snapshotId": "<uuid>",
+    "allRefsPath": "<tmp>/tauri-connector-<pid>/snapshots/<uuid>/refs.json",
+    "subtreeFiles": [
+      { "name": "subtree-0.txt", "label": "main>ul", "path": "...", "estimatedTokens": 3200 }
+    ]
+  }
+}
+```
+
+Read spilled subtrees with the `Read` tool on the `path`, or via CLI: `tauri-connector snapshots read <uuid> subtree-0.txt`. `webview_search_snapshot` automatically matches against the merged full text (skeleton + all subtree contents), so searches never hide behind the budget.
 
 ### webview_find_element
 

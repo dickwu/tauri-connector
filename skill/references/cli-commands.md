@@ -26,9 +26,11 @@ tauri-connector snapshot [FLAGS]
 | Flag | Short | Default | Description |
 |---|---|---|---|
 | `--interactive` | `-i` | false | Assign `@eN` refs to interactive elements |
-| `--compact` | `-c` | false | Only show lines containing refs |
+| `--compact` | `-c` | false | Only show lines containing refs (subtree file markers are preserved) |
 | `--depth` | `-d` | unlimited | Max tree depth |
 | `--max-elements` | | unlimited | Max element count |
+| `--max-tokens` | | 4000 | Token budget for inline output. Overflow spills to subtree files. `0` = unlimited |
+| `--no-split` | | false | Disable subtree file splitting -- full inline output regardless of budget |
 | `--selector` | `-s` | | CSS selector to scope subtree |
 | `--mode` | | `ai` | `ai`, `accessibility`, `structure` |
 | `--no-react` | | false | Skip React fiber enrichment |
@@ -36,13 +38,32 @@ tauri-connector snapshot [FLAGS]
 
 Examples:
 ```bash
-tauri-connector snapshot -i                        # Interactive elements with refs
-tauri-connector snapshot -i -c                     # Compact: only ref lines
+tauri-connector snapshot -i                        # Interactive elements with refs (default 4000-token budget)
+tauri-connector snapshot -i -c                     # Compact: only ref lines + subtree markers
 tauri-connector snapshot -i -s ".ant-form"         # Scope to subtree
 tauri-connector snapshot -i --mode accessibility   # ARIA roles/names
 tauri-connector snapshot -i --mode structure       # Tags/classes only
 tauri-connector snapshot -i -d 5 --max-elements 500
+tauri-connector snapshot -i --max-tokens 8000      # Raise inline budget
+tauri-connector snapshot -i --max-tokens 0         # Unlimited (legacy behavior)
+tauri-connector snapshot -i --no-split             # Full output, never write subtree files
 ```
+
+When the budget fires, stderr prints the snapshot UUID plus each spilled subtree's label, estimated tokens, and absolute path under `$TMPDIR/tauri-connector-<pid>/snapshots/<uuid>/`.
+
+### snapshots
+
+Manage the snapshot session directory (subtree files from split snapshots).
+
+```bash
+tauri-connector snapshots list                     # Most recent 10 sessions (newest first)
+tauri-connector snapshots read <uuid>              # Print layout.txt (default)
+tauri-connector snapshots read <uuid> subtree-0.txt
+tauri-connector snapshots read <uuid> refs.json    # Full ref map when allRefs spills to disk
+tauri-connector snapshots read <uuid> meta.json    # Session metadata
+```
+
+`snapshots read` canonicalizes its path and refuses anything that escapes the session directory, so it is safe to drive from scripts.
 
 ### dom
 
