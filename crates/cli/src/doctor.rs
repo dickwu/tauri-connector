@@ -25,8 +25,10 @@ const DEFAULT_MCP_PORT: u16 = 9556;
 const PROBE_HOST: &str = "127.0.0.1";
 
 // Canonical snippets used in Fix messages. Kept in one place so we render the
-// exact same text the README/SETUP doc ship with.
-const SNIPPET_PLUGIN_REGISTER: &str = r#"#[cfg(debug_assertions)]
+// exact same text the README/SETUP doc ship with. The default snippet uses
+// the recommended feature-gated form; the legacy `cfg(debug_assertions)` form
+// is still accepted by the doctor — see README "Quick Start → Alternative".
+const SNIPPET_PLUGIN_REGISTER: &str = r#"#[cfg(feature = "dev-connector")]
 {
     builder = builder.plugin(tauri_plugin_connector::init());
 }"#;
@@ -34,6 +36,22 @@ const SNIPPET_PLUGIN_REGISTER: &str = r#"#[cfg(debug_assertions)]
 const SNIPPET_CAPABILITY: &str = r#"{
   "permissions": ["connector:default"]
 }"#;
+
+const SNIPPET_CAPABILITY_DEV: &str = r#"{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "dev-connector",
+  "description": "Permissions for tauri-plugin-connector dev tooling. Lives outside capabilities/ so tauri-build's default ./capabilities/**/* glob does NOT auto-load it. Registered at runtime via app.add_capability(include_str!(...)) gated on cfg(feature = \"dev-connector\").",
+  "windows": ["main"],
+  "permissions": ["connector:default"]
+}"#;
+
+const SNIPPET_FEATURES_BLOCK: &str = r#"[features]
+default = []
+dev-connector = ["dep:tauri-plugin-connector"]"#;
+
+const SNIPPET_RUNTIME_ADD_CAPABILITY: &str = r#"// in setup(|app| { ... })
+#[cfg(feature = "dev-connector")]
+app.add_capability(include_str!("../capabilities-dev/dev-connector.json"))?;"#;
 
 const SNIPPET_WITH_GLOBAL_TAURI: &str = r#""app": {
   "withGlobalTauri": true
@@ -55,7 +73,10 @@ fn cargo_version_hint() -> String {
 /// Indent every line of a snippet by two spaces so it nests cleanly under a
 /// Fix: header when rendered by `print_text`.
 fn indent_snippet(s: &str) -> String {
-    s.lines().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n")
+    s.lines()
+        .map(|l| format!("  {l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -91,13 +112,28 @@ struct Check {
 
 impl Check {
     fn ok(label: impl Into<String>) -> Self {
-        Self { label: label.into(), status: Status::Ok, detail: None, fix: None }
+        Self {
+            label: label.into(),
+            status: Status::Ok,
+            detail: None,
+            fix: None,
+        }
     }
     fn fail(label: impl Into<String>, fix: impl Into<String>) -> Self {
-        Self { label: label.into(), status: Status::Fail, detail: None, fix: Some(fix.into()) }
+        Self {
+            label: label.into(),
+            status: Status::Fail,
+            detail: None,
+            fix: Some(fix.into()),
+        }
     }
     fn warn(label: impl Into<String>, fix: impl Into<String>) -> Self {
-        Self { label: label.into(), status: Status::Warn, detail: None, fix: Some(fix.into()) }
+        Self {
+            label: label.into(),
+            status: Status::Warn,
+            detail: None,
+            fix: Some(fix.into()),
+        }
     }
     fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
@@ -128,8 +164,13 @@ pub async fn run(opts: Options) -> Result<(), String> {
 
     sections.push(check_environment(&cwd, project_root.as_ref()));
 
+    let pattern = project_root
+        .as_ref()
+        .map(|r| classify_setup(r))
+        .unwrap_or(SetupPattern::None);
+
     if let Some(root) = project_root.as_ref() {
-        sections.push(check_plugin_setup(root));
+        sections.push(check_plugin_setup(root, pattern));
     }
 
     if !opts.no_runtime {
@@ -145,7 +186,7 @@ pub async fn run(opts: Options) -> Result<(), String> {
     }
 
     if opts.json {
-        print_json(&sections);
+        print_json(&sections, pattern);
     } else {
         print_text(&sections);
     }
@@ -204,21 +245,230 @@ fn check_environment(cwd: &Path, project: Option<&PathBuf>) -> Section {
         ),
     }
 
-    Section { name: "Environment", checks }
+    Section {
+        name: "Environment",
+        checks,
+    }
+}
+
+// ----- setup pattern classification ----------------------------------------
+
+/// Which Tauri-side registration pattern is the project using for the
+/// connector plugin? Drives doctor's downstream checks (which capability
+/// directory to scan, which cfg gate is acceptable, whether to nudge the
+/// user toward migration).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SetupPattern {
+    /// Recommended layout: `optional = true` dep, a `[features] dev-connector
+    /// = [...]` declaration, a `cfg(feature = "dev-connector")` gate, and the
+    /// capability JSON under `capabilities-dev/` registered at runtime via
+    /// `app.add_capability(...)`. Release `tauri build` skips the dep entirely.
+    FeatureGated,
+    /// Legacy layout: plain (non-optional) dep, a `cfg(debug_assertions)`
+    /// gate, and the capability under `capabilities/`. Plugin is still
+    /// compiled in release; dead-code elimination strips it at link time.
+    Legacy,
+    /// Half-migrated: signals from both patterns are present, or neither
+    /// pattern matches cleanly even though the plugin is referenced.
+    Mixed,
+    /// Plugin not registered at all in the project's lib.rs/main.rs.
+    None,
+}
+
+impl SetupPattern {
+    fn as_str(self) -> &'static str {
+        match self {
+            SetupPattern::FeatureGated => "feature-gated",
+            SetupPattern::Legacy => "legacy",
+            SetupPattern::Mixed => "mixed",
+            SetupPattern::None => "none",
+        }
+    }
+}
+
+/// Read both `src-tauri/src/lib.rs` and `src-tauri/src/main.rs` (whichever
+/// exists) and return the concatenated text. Empty string when neither file
+/// is readable.
+fn read_plugin_source(root: &Path) -> String {
+    let candidates = [
+        root.join("src-tauri").join("src").join("lib.rs"),
+        root.join("src-tauri").join("src").join("main.rs"),
+    ];
+    let mut combined = String::new();
+    for p in &candidates {
+        if let Ok(t) = fs::read_to_string(p) {
+            combined.push_str(&t);
+            combined.push('\n');
+        }
+    }
+    combined
+}
+
+/// True when the source mentions the plugin crate in a way that looks like a
+/// real registration (init() / ConnectorBuilder).
+fn source_mentions_plugin(src: &str) -> bool {
+    src.contains("tauri_plugin_connector::init")
+        || src.contains("tauri_plugin_connector::ConnectorBuilder")
+        || (src.contains("tauri_plugin_connector") && src.contains("ConnectorBuilder"))
+}
+
+/// True when the source contains a `cfg(feature = "dev-connector")` attribute
+/// (tolerant to interior whitespace).
+fn source_has_feature_gate(src: &str) -> bool {
+    src.contains("cfg(feature = \"dev-connector\")")
+        || src.contains("cfg(feature=\"dev-connector\")")
+}
+
+/// True when the source contains a `cfg(debug_assertions)` attribute.
+fn source_has_debug_assertions_gate(src: &str) -> bool {
+    src.contains("cfg(debug_assertions)")
+}
+
+/// Pure classifier: takes the project's `src-tauri/Cargo.toml` text and the
+/// concatenated plugin-source text and returns the active pattern.
+fn classify_setup_from_inputs(cargo_text: &str, src_text: &str) -> SetupPattern {
+    if !source_mentions_plugin(src_text) {
+        return SetupPattern::None;
+    }
+
+    let optional = extract_cargo_dep(cargo_text, "tauri-plugin-connector")
+        .map(|(_, opt)| opt)
+        .unwrap_or(false);
+    let features_has_dev =
+        features_declares_dep(cargo_text, "dev-connector", "tauri-plugin-connector");
+    let cfg_feature = source_has_feature_gate(src_text);
+    let cfg_debug = source_has_debug_assertions_gate(src_text);
+
+    let feature_gated = optional && features_has_dev && cfg_feature;
+    let legacy = !optional && !features_has_dev && cfg_debug && !cfg_feature;
+
+    match (feature_gated, legacy) {
+        (true, false) => SetupPattern::FeatureGated,
+        (false, true) => SetupPattern::Legacy,
+        _ => SetupPattern::Mixed,
+    }
+}
+
+/// Disk-backed convenience wrapper around `classify_setup_from_inputs`.
+fn classify_setup(root: &Path) -> SetupPattern {
+    let cargo_text =
+        fs::read_to_string(root.join("src-tauri").join("Cargo.toml")).unwrap_or_default();
+    let src_text = read_plugin_source(root);
+    classify_setup_from_inputs(&cargo_text, &src_text)
 }
 
 // ----- section: plugin setup -----------------------------------------------
 
-fn check_plugin_setup(root: &Path) -> Section {
-    let checks = vec![
+fn check_plugin_setup(root: &Path, pattern: SetupPattern) -> Section {
+    let mut checks = vec![
         check_cargo_dependency(root),
         check_plugin_registration(root),
-        check_capabilities(root),
+        check_capabilities(root, pattern),
         check_with_global_tauri(root),
         check_snapdom(root),
         check_mcp_json(root),
     ];
-    Section { name: "Plugin Setup", checks }
+
+    // Feature-gated pattern requires two extra signals beyond the existing
+    // checks: a `[features]` block declaring the cargo feature, and a runtime
+    // `app.add_capability(include_str!(...))` call that registers the dev
+    // capability. We also run these under `Mixed` to give actionable feedback
+    // about what's missing.
+    if matches!(pattern, SetupPattern::FeatureGated | SetupPattern::Mixed) {
+        checks.push(check_features_block(root));
+        checks.push(check_runtime_add_capability(root));
+    }
+
+    // Legacy users get a non-blocking nudge to migrate.
+    if pattern == SetupPattern::Legacy {
+        checks.push(legacy_migration_warn());
+    }
+
+    Section {
+        name: "Plugin Setup",
+        checks,
+    }
+}
+
+/// `src-tauri/Cargo.toml` should declare a `dev-connector` cargo feature that
+/// activates the optional `tauri-plugin-connector` dependency. Only emitted
+/// under the FeatureGated/Mixed patterns.
+fn check_features_block(root: &Path) -> Check {
+    let path = root.join("src-tauri").join("Cargo.toml");
+    let display = rel(root, &path);
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => {
+            return Check::warn(
+                "Cannot read Cargo.toml for [features] check",
+                format!("ensure {display} is readable"),
+            )
+        }
+    };
+
+    if features_declares_dep(&text, "dev-connector", "tauri-plugin-connector") {
+        Check::ok("[features] dev-connector = [\"dep:tauri-plugin-connector\"]")
+            .with_detail(display)
+    } else {
+        Check::fail(
+            "[features] block missing or does not declare `dev-connector`",
+            format!(
+                "add a [features] block to src-tauri/Cargo.toml so the plugin dep is opt-in:\n{}",
+                indent_snippet(SNIPPET_FEATURES_BLOCK)
+            ),
+        )
+    }
+}
+
+/// The dev capability JSON should be registered at runtime via
+/// `app.add_capability(include_str!("../capabilities-dev/<file>.json"))`. We
+/// look for the three substrings (`add_capability(`, `include_str!`,
+/// `capabilities-dev`) anywhere in the source — the words project keeps the
+/// `include_str!` in a module-level const, so requiring adjacency would miss it.
+fn check_runtime_add_capability(root: &Path) -> Check {
+    let src = read_plugin_source(root);
+    if src.is_empty() {
+        return Check::warn(
+            "Cannot read lib.rs/main.rs for runtime add_capability check",
+            "ensure src-tauri/src/lib.rs or main.rs is readable",
+        );
+    }
+    if has_runtime_add_capability(&src) {
+        Check::ok(
+            "Capability loaded at runtime via app.add_capability(include_str!(\"../capabilities-dev/...\"))",
+        )
+    } else {
+        Check::warn(
+            "Runtime app.add_capability(include_str!(\"../capabilities-dev/...\")) not detected",
+            format!(
+                "register the dev capability inside `setup(|app| {{ ... }})` so plain `tauri build` does not need to load it:\n{}",
+                indent_snippet(SNIPPET_RUNTIME_ADD_CAPABILITY)
+            ),
+        )
+    }
+}
+
+/// Three-substring heuristic: a project that contains all three substrings
+/// in unrelated contexts could produce a false-positive Ok on this Warn-only
+/// check. We accept that risk because the check is non-blocking and the
+/// alternative (parsing the whole source for an exact `add_capability(include_str!("../capabilities-dev/..."))`
+/// call) is brittle against the words project's module-level-const layout
+/// where `include_str!` is bound to a `const DEV_CONNECTOR_CAPABILITY` and
+/// then passed by name to `add_capability(DEV_CONNECTOR_CAPABILITY)`.
+fn has_runtime_add_capability(src: &str) -> bool {
+    src.contains("add_capability(")
+        && src.contains("include_str!")
+        && src.contains("capabilities-dev")
+}
+
+/// Non-blocking nudge for projects still on the legacy `cfg(debug_assertions)`
+/// pattern. Emitted after the per-check helpers so the migration tip appears
+/// at the bottom of the Plugin Setup section.
+fn legacy_migration_warn() -> Check {
+    Check::warn(
+        "Using legacy debug_assertions gate — consider migrating to --features dev-connector",
+        "the feature-gated pattern keeps the plugin dep (and its xcap / aws-sdk-s3 transitive deps) out of release builds. Migration:\n  1. src-tauri/Cargo.toml dep: tauri-plugin-connector = { version = \"0.9\", optional = true }\n  2. add to Cargo.toml:\n     [features]\n     dev-connector = [\"dep:tauri-plugin-connector\"]\n  3. replace `#[cfg(debug_assertions)]` with `#[cfg(feature = \"dev-connector\")]` in lib.rs/main.rs\n  4. move `connector:default` permission to src-tauri/capabilities-dev/dev-connector.json\n  5. register at runtime in setup():\n       #[cfg(feature = \"dev-connector\")]\n       app.add_capability(include_str!(\"../capabilities-dev/dev-connector.json\"))?;\n  6. add to package.json: \"tauri:dev\": \"tauri dev --features dev-connector\"\nSee README \"Quick Start\" / skill/SETUP.md for the full guide.",
+    )
 }
 
 /// `src-tauri/Cargo.toml` must depend on `tauri-plugin-connector`.
@@ -235,11 +485,15 @@ fn check_cargo_dependency(root: &Path) -> Check {
         }
     };
 
-    if let Some(version) = extract_cargo_version(&text, "tauri-plugin-connector") {
-        Check::ok(format!(
-            "Cargo dependency: tauri-plugin-connector = \"{version}\""
-        ))
-        .with_detail(display)
+    if let Some((version, optional)) = extract_cargo_dep(&text, "tauri-plugin-connector") {
+        let label = if optional {
+            format!(
+                "Cargo dependency: tauri-plugin-connector = \"{version}\" (optional, feature-gated)"
+            )
+        } else {
+            format!("Cargo dependency: tauri-plugin-connector = \"{version}\"")
+        };
+        Check::ok(label).with_detail(display)
     } else {
         let v = cargo_version_hint();
         Check::fail(
@@ -251,48 +505,13 @@ fn check_cargo_dependency(root: &Path) -> Check {
     }
 }
 
-/// Parse a Cargo.toml entry for `name`. Accepts both `name = "x.y"` and
-/// `name = { version = "x.y", ... }` forms. Returns the version string if found.
+/// Backwards-compatible thin wrapper over [`extract_cargo_dep`] that returns
+/// only the version string (drops the `optional` flag). Production callers
+/// use `extract_cargo_dep` directly; this wrapper exists so the legacy unit
+/// tests keep compiling without rewrites.
+#[cfg(test)]
 fn extract_cargo_version(text: &str, name: &str) -> Option<String> {
-    let mut in_section = false;
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.starts_with('#') || line.is_empty() {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            // Accept any `dependencies`-flavored table: [dependencies],
-            // [dev-dependencies], [build-dependencies], [target.*.dependencies].
-            in_section = line.contains("dependencies");
-            continue;
-        }
-        if !in_section {
-            continue;
-        }
-
-        // Match "name = ..." (tolerate spaces).
-        let Some(rest) = line.strip_prefix(name) else { continue };
-        let rest = rest.trim_start();
-        let Some(rest) = rest.strip_prefix('=') else { continue };
-        let rest = rest.trim_start();
-
-        // Inline table: { version = "...", ... }
-        if rest.starts_with('{') {
-            if let Some(v) = extract_quoted_field(rest, "version") {
-                return Some(v);
-            }
-            // Version could be implied by path/git; treat as "present (unversioned)".
-            return Some("path|git".to_string());
-        }
-
-        // Plain string: "x.y"
-        if let Some(inner) = rest.strip_prefix('"') {
-            if let Some(end) = inner.find('"') {
-                return Some(inner[..end].to_string());
-            }
-        }
-    }
-    None
+    extract_cargo_dep(text, name).map(|(v, _)| v)
 }
 
 /// Return the value of `key = "..."` inside an inline table string.
@@ -306,8 +525,125 @@ fn extract_quoted_field(inline: &str, key: &str) -> Option<String> {
     Some(tail[..end].to_string())
 }
 
+/// Return the value of `key = true|false` inside an inline table string.
+/// Single-line form only — multi-line inline tables (closing `}` on a separate
+/// line) are not parsed; the Cargo convention is single-line inline tables or
+/// dotted-key tables (`[dep.tauri-plugin-connector]`), so this is fine in
+/// practice for the dependency forms doctor cares about.
+fn extract_bool_field(inline: &str, key: &str) -> Option<bool> {
+    let needle = format!("{key} =");
+    let idx = inline.find(&needle)?;
+    let tail = inline[idx + needle.len()..].trim_start();
+    if tail.starts_with("true") {
+        Some(true)
+    } else if tail.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Like `extract_cargo_version`, but also returns whether the dependency is
+/// marked `optional = true` (only meaningful for the inline-table form).
+/// Returns `Some((version, optional))` when the dep is found in any
+/// dependencies-flavored table; `None` otherwise.
+fn extract_cargo_dep(text: &str, name: &str) -> Option<(String, bool)> {
+    let mut in_section = false;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_section = line.contains("dependencies");
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+
+        let Some(rest) = line.strip_prefix(name) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        let rest = rest.trim_start();
+
+        // Inline table: { version = "...", optional = true, ... }
+        if rest.starts_with('{') {
+            let version =
+                extract_quoted_field(rest, "version").unwrap_or_else(|| "path|git".to_string());
+            let optional = extract_bool_field(rest, "optional").unwrap_or(false);
+            return Some((version, optional));
+        }
+
+        // Plain string: "x.y" — never optional in this form.
+        if let Some(inner) = rest.strip_prefix('"') {
+            if let Some(end) = inner.find('"') {
+                return Some((inner[..end].to_string(), false));
+            }
+        }
+    }
+    None
+}
+
+/// True if `[features]` declares `feature_name` with at least one entry that
+/// references `dep_name` — accepts both the canonical `"dep:<name>"` form and
+/// the legacy bare `"<name>"` form. Single-line array form only (multi-line
+/// arrays are not parsed, but the standard Cargo idiom is single-line).
+///
+/// The section-header detection tolerates trailing inline comments
+/// (`[features] # generated`) but does NOT match nested sub-tables like
+/// `[features.foo]`, since those define `features.foo`, not `features`.
+fn features_declares_dep(text: &str, feature_name: &str, dep_name: &str) -> bool {
+    let mut in_features = false;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') {
+            // Strip anything after the first `]` so trailing inline comments
+            // (`[features] # comment`) still match. `find(']')` is safe because
+            // `line.starts_with('[')` already guarantees there is a `[`.
+            if let Some(end) = line.find(']') {
+                let header = line[..=end].trim();
+                in_features = header == "[features]";
+                continue;
+            }
+            // No closing `]` on this line — treat as not a section header.
+            continue;
+        }
+        if !in_features {
+            continue;
+        }
+
+        let Some(rest) = line.strip_prefix(feature_name) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        if !rest.starts_with('[') {
+            continue;
+        }
+        let needle_dep = format!("\"dep:{dep_name}\"");
+        let needle_bare = format!("\"{dep_name}\"");
+        if rest.contains(&needle_dep) || rest.contains(&needle_bare) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Plugin must be registered via `tauri_plugin_connector::init()` or
-/// `ConnectorBuilder::new()...build()` in lib.rs or main.rs.
+/// `ConnectorBuilder::new()...build()` in lib.rs or main.rs. Accepts either
+/// the feature-gated (`cfg(feature = "dev-connector")`) or legacy
+/// (`cfg(debug_assertions)`) cfg gate; surfaces which one was matched.
 fn check_plugin_registration(root: &Path) -> Check {
     let candidates = [
         root.join("src-tauri").join("src").join("lib.rs"),
@@ -315,13 +651,37 @@ fn check_plugin_registration(root: &Path) -> Check {
     ];
 
     for path in &candidates {
-        let Ok(text) = fs::read_to_string(path) else { continue };
-        let mentions_init = text.contains("tauri_plugin_connector::init")
-            || text.contains("tauri_plugin_connector::ConnectorBuilder")
-            || (text.contains("tauri_plugin_connector") && text.contains("ConnectorBuilder"));
-        if mentions_init {
-            return Check::ok(format!("Plugin registered in {}", rel(root, path)));
+        let Ok(text) = fs::read_to_string(path) else {
+            continue;
+        };
+        if !source_mentions_plugin(&text) {
+            continue;
         }
+        let gate = if source_has_feature_gate(&text) {
+            Some("cfg(feature = \"dev-connector\")")
+        } else if source_has_debug_assertions_gate(&text) {
+            Some("cfg(debug_assertions)")
+        } else {
+            None
+        };
+        let label = match gate {
+            Some(g) => format!("Plugin registered in {} ({g})", rel(root, path)),
+            None => format!(
+                "Plugin registered in {} (no cfg gate detected)",
+                rel(root, path)
+            ),
+        };
+        return if gate.is_some() {
+            Check::ok(label)
+        } else {
+            Check::warn(
+                label,
+                format!(
+                    "wrap the plugin registration in a cfg gate so release builds skip it:\n{}",
+                    indent_snippet(SNIPPET_PLUGIN_REGISTER)
+                ),
+            )
+        };
     }
 
     Check::fail(
@@ -333,65 +693,108 @@ fn check_plugin_registration(root: &Path) -> Check {
     )
 }
 
-/// At least one JSON file under `src-tauri/capabilities/` must list
-/// `"connector:default"` in its `permissions` array.
-fn check_capabilities(root: &Path) -> Check {
-    let dir = root.join("src-tauri").join("capabilities");
-    if !dir.is_dir() {
-        return Check::fail(
-            "Capabilities directory missing",
-            format!(
-                "create src-tauri/capabilities/default.json:\n{}",
-                indent_snippet(SNIPPET_CAPABILITY)
-            ),
-        );
-    }
+/// Scan `src-tauri/capabilities/` and (when applicable) `capabilities-dev/`
+/// for any `*.json` listing `"connector:default"` in its `permissions` array.
+/// Pattern controls which directories are required:
+/// - `FeatureGated`/`Mixed`: `capabilities-dev/dev-connector.json` is the
+///   canonical home; we still accept matches in `capabilities/` for migration.
+/// - `Legacy`/`None`: `capabilities/` is canonical.
+fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
+    let dirs: &[(&str, _)] = &[
+        ("capabilities", root.join("src-tauri").join("capabilities")),
+        (
+            "capabilities-dev",
+            root.join("src-tauri").join("capabilities-dev"),
+        ),
+    ];
 
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Check::fail(
-            "Cannot read src-tauri/capabilities/",
-            "check filesystem permissions on src-tauri/capabilities/:\n  $ ls -la src-tauri/capabilities/",
-        );
-    };
-
-    let mut found_in: Option<PathBuf> = None;
     let mut checked_any = false;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let is_json = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.eq_ignore_ascii_case("json"))
-            .unwrap_or(false);
-        if !is_json {
+    let mut found_in: Option<(&str, PathBuf)> = None;
+    for (label, dir) in dirs {
+        if !dir.is_dir() {
             continue;
         }
-        checked_any = true;
-        let Ok(text) = fs::read_to_string(&path) else { continue };
-        let Ok(value) = serde_json::from_str::<Value>(&text) else { continue };
-        if permissions_contain(&value, "connector:default") {
-            found_in = Some(path);
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_json = path
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|s| s.eq_ignore_ascii_case("json"))
+                .unwrap_or(false);
+            if !is_json {
+                continue;
+            }
+            checked_any = true;
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_str::<Value>(&text) else {
+                continue;
+            };
+            if permissions_contain(&value, "connector:default") {
+                found_in = Some((label, path));
+                break;
+            }
+        }
+        if found_in.is_some() {
             break;
         }
     }
 
     match found_in {
-        Some(p) => Check::ok(format!("Permission \"connector:default\" in {}", rel(root, &p))),
-        None if !checked_any => Check::fail(
-            "No capability JSON files in src-tauri/capabilities/",
-            format!(
-                "create src-tauri/capabilities/default.json:\n{}",
-                indent_snippet(SNIPPET_CAPABILITY)
+        Some((dir_label, p)) => {
+            let label_text = format!("Permission \"connector:default\" in {}", rel(root, &p));
+            // Surface a Warn when the location does not match the active pattern.
+            match (pattern, dir_label) {
+                (SetupPattern::FeatureGated, "capabilities") => Check::warn(
+                    format!("{label_text} (expected under capabilities-dev/)"),
+                    format!(
+                        "feature-gated setups should keep the capability outside the default tauri-build glob — move it to src-tauri/capabilities-dev/dev-connector.json:\n{}",
+                        indent_snippet(SNIPPET_CAPABILITY_DEV)
+                    ),
+                ),
+                (SetupPattern::Legacy, "capabilities-dev") => Check::warn(
+                    format!("{label_text} (expected under capabilities/)"),
+                    "legacy setups load capabilities from src-tauri/capabilities/ — either move the JSON back, or migrate to the feature-gated pattern (see README \"Quick Start\")",
+                ),
+                _ => Check::ok(label_text),
+            }
+        }
+        None if !checked_any => match pattern {
+            SetupPattern::FeatureGated | SetupPattern::Mixed => Check::fail(
+                "No capability JSON files found (expected capabilities-dev/dev-connector.json)",
+                format!(
+                    "create src-tauri/capabilities-dev/dev-connector.json:\n{}",
+                    indent_snippet(SNIPPET_CAPABILITY_DEV)
+                ),
             ),
-        ),
-        None => Check::fail(
-            "Permission `connector:default` missing",
-            format!(
-                "add \"connector:default\" to the `permissions` array in src-tauri/capabilities/default.json (or any *.json under {}):\n{}",
-                rel(root, &dir),
-                indent_snippet(SNIPPET_CAPABILITY)
+            _ => Check::fail(
+                "No capability JSON files in src-tauri/capabilities/",
+                format!(
+                    "create src-tauri/capabilities/default.json:\n{}",
+                    indent_snippet(SNIPPET_CAPABILITY)
+                ),
             ),
-        ),
+        },
+        None => match pattern {
+            SetupPattern::FeatureGated | SetupPattern::Mixed => Check::fail(
+                "Permission `connector:default` missing in capabilities-dev/",
+                format!(
+                    "create or update src-tauri/capabilities-dev/dev-connector.json:\n{}",
+                    indent_snippet(SNIPPET_CAPABILITY_DEV)
+                ),
+            ),
+            _ => Check::fail(
+                "Permission `connector:default` missing",
+                format!(
+                    "add \"connector:default\" to the `permissions` array in src-tauri/capabilities/default.json:\n{}",
+                    indent_snippet(SNIPPET_CAPABILITY)
+                ),
+            ),
+        },
     }
 }
 
@@ -560,11 +963,19 @@ fn find_pid_file(root: &Path) -> Option<PathBuf> {
     // The plugin writes the PID file next to the dev binary, so it moves between
     // `target/` and `target/debug|release/`. Scan common spots relative to the project.
     let candidates = [
-        root.join("src-tauri").join("target").join("debug").join(".connector.json"),
-        root.join("src-tauri").join("target").join(".connector.json"),
+        root.join("src-tauri")
+            .join("target")
+            .join("debug")
+            .join(".connector.json"),
+        root.join("src-tauri")
+            .join("target")
+            .join(".connector.json"),
         root.join("target").join("debug").join(".connector.json"),
         root.join("target").join(".connector.json"),
-        root.join("src-tauri").join("target").join("release").join(".connector.json"),
+        root.join("src-tauri")
+            .join("target")
+            .join("release")
+            .join(".connector.json"),
     ];
     candidates.into_iter().find(|p| p.is_file())
 }
@@ -593,25 +1004,23 @@ fn read_pid_file(path: &Path) -> Option<PidInfo> {
     })
 }
 
-async fn check_runtime(
-    project: Option<&PathBuf>,
-    pid: Option<(PathBuf, PidInfo)>,
-) -> Section {
+async fn check_runtime(project: Option<&PathBuf>, pid: Option<(PathBuf, PidInfo)>) -> Section {
     let mut checks = Vec::new();
 
     // PID file presence
     let (ws_port, mcp_port) = match (&pid, project) {
         (Some((path, info)), Some(root)) => {
-            let mut detail = format!("app: {}", info.app_name.clone().unwrap_or_else(|| "?".into()));
+            let mut detail = format!(
+                "app: {}",
+                info.app_name.clone().unwrap_or_else(|| "?".into())
+            );
             if let Some(id) = &info.app_id {
                 detail.push_str(&format!(" ({id})"));
             }
             if let Some(pid) = info.pid {
                 detail.push_str(&format!(", pid {pid}"));
             }
-            checks.push(
-                Check::ok(format!("PID file: {}", rel(root, path))).with_detail(detail),
-            );
+            checks.push(Check::ok(format!("PID file: {}", rel(root, path))).with_detail(detail));
             (
                 info.ws_port.unwrap_or(DEFAULT_WS_PORT),
                 info.mcp_port.unwrap_or(DEFAULT_MCP_PORT),
@@ -619,8 +1028,10 @@ async fn check_runtime(
         }
         (Some((path, info)), None) => {
             checks.push(
-                Check::ok(format!("PID file: {}", path.display()))
-                    .with_detail(format!("app: {}", info.app_name.clone().unwrap_or_else(|| "?".into()))),
+                Check::ok(format!("PID file: {}", path.display())).with_detail(format!(
+                    "app: {}",
+                    info.app_name.clone().unwrap_or_else(|| "?".into())
+                )),
             );
             (
                 info.ws_port.unwrap_or(DEFAULT_WS_PORT),
@@ -668,7 +1079,10 @@ async fn check_runtime(
         ),
     }
 
-    Section { name: "Runtime", checks }
+    Section {
+        name: "Runtime",
+        checks,
+    }
 }
 
 async fn probe_ws(host: &str, port: u16) -> Result<(), String> {
@@ -686,13 +1100,10 @@ async fn probe_ws(host: &str, port: u16) -> Result<(), String> {
 
 async fn probe_tcp(host: &str, port: u16) -> Result<(), String> {
     let addr = (host, port);
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        tokio::net::TcpStream::connect(addr),
-    )
-    .await
-    .map_err(|_| "connect timed out after 2s".to_string())?
-    .map_err(|e| format!("tcp connect failed: {e}"))?;
+    tokio::time::timeout(Duration::from_secs(2), tokio::net::TcpStream::connect(addr))
+        .await
+        .map_err(|_| "connect timed out after 2s".to_string())?
+        .map_err(|e| format!("tcp connect failed: {e}"))?;
     Ok(())
 }
 
@@ -701,7 +1112,10 @@ async fn probe_tcp(host: &str, port: u16) -> Result<(), String> {
 fn check_integration(root: &Path) -> Section {
     let mut checks = Vec::new();
 
-    let hook_script = root.join(".claude").join("hooks").join("tauri-connector-detect.sh");
+    let hook_script = root
+        .join(".claude")
+        .join("hooks")
+        .join("tauri-connector-detect.sh");
     let settings = root.join(".claude").join("settings.local.json");
 
     let script_exists = hook_script.is_file();
@@ -731,11 +1145,17 @@ fn check_integration(root: &Path) -> Section {
         )),
     }
 
-    Section { name: "Integration", checks }
+    Section {
+        name: "Integration",
+        checks,
+    }
 }
 
 fn settings_has_connector_hook(settings: &Value) -> bool {
-    let Some(arr) = settings.pointer("/hooks/UserPromptSubmit").and_then(|v| v.as_array()) else {
+    let Some(arr) = settings
+        .pointer("/hooks/UserPromptSubmit")
+        .and_then(|v| v.as_array())
+    else {
         return false;
     };
     arr.iter().any(|entry| {
@@ -787,10 +1207,11 @@ fn print_text(sections: &[Section]) {
     }
 }
 
-fn print_json(sections: &[Section]) {
+fn print_json(sections: &[Section], pattern: SetupPattern) {
     let (ok, fail, warn) = tally(sections);
     let payload = json!({
         "cli_version": CURRENT_VERSION,
+        "setup_pattern": pattern.as_str(),
         "summary": { "ok": ok, "fail": fail, "warn": warn, "passed": fail == 0 },
         "sections": sections.iter().map(|s| json!({
             "name": s.name,
@@ -825,7 +1246,9 @@ fn tally(sections: &[Section]) -> (usize, usize, usize) {
 }
 
 fn any_fail(sections: &[Section]) -> bool {
-    sections.iter().any(|s| s.checks.iter().any(|c| c.status == Status::Fail))
+    sections
+        .iter()
+        .any(|s| s.checks.iter().any(|c| c.status == Status::Fail))
 }
 
 // ----- small helpers -------------------------------------------------------
@@ -850,7 +1273,10 @@ serde = "1"
 tauri-plugin-connector = "0.8"
 reqwest = "0.12"
 "#;
-        assert_eq!(extract_cargo_version(toml, "tauri-plugin-connector"), Some("0.8".into()));
+        assert_eq!(
+            extract_cargo_version(toml, "tauri-plugin-connector"),
+            Some("0.8".into())
+        );
     }
 
     #[test]
@@ -859,7 +1285,10 @@ reqwest = "0.12"
 [dependencies]
 tauri-plugin-connector = { version = "0.8.0", features = ["foo"] }
 "#;
-        assert_eq!(extract_cargo_version(toml, "tauri-plugin-connector"), Some("0.8.0".into()));
+        assert_eq!(
+            extract_cargo_version(toml, "tauri-plugin-connector"),
+            Some("0.8.0".into())
+        );
     }
 
     #[test]
@@ -900,12 +1329,17 @@ default = []
 [dev-dependencies]
 tauri-plugin-connector = "0.8"
 "#;
-        assert_eq!(extract_cargo_version(toml, "tauri-plugin-connector"), Some("0.8".into()));
+        assert_eq!(
+            extract_cargo_version(toml, "tauri-plugin-connector"),
+            Some("0.8".into())
+        );
     }
 
     #[test]
     fn permissions_string_form() {
-        let caps: Value = serde_json::from_str(r#"{ "permissions": ["connector:default", "fs:default"] }"#).unwrap();
+        let caps: Value =
+            serde_json::from_str(r#"{ "permissions": ["connector:default", "fs:default"] }"#)
+                .unwrap();
         assert!(permissions_contain(&caps, "connector:default"));
         assert!(!permissions_contain(&caps, "missing:perm"));
     }
@@ -921,10 +1355,9 @@ tauri-plugin-connector = "0.8"
 
     #[test]
     fn package_deps_found_across_sections() {
-        let pkg: Value = serde_json::from_str(
-            r#"{ "devDependencies": { "@zumer/snapdom": "^1.0.0" } }"#,
-        )
-        .unwrap();
+        let pkg: Value =
+            serde_json::from_str(r#"{ "devDependencies": { "@zumer/snapdom": "^1.0.0" } }"#)
+                .unwrap();
         assert!(package_has_dep(&pkg, "@zumer/snapdom"));
         assert!(!package_has_dep(&pkg, "missing-pkg"));
     }
@@ -962,5 +1395,293 @@ tauri-plugin-connector = "0.8"
         )
         .unwrap();
         assert!(!settings_has_connector_hook(&v));
+    }
+
+    #[test]
+    fn extract_cargo_dep_inline_table_optional_true() {
+        let toml = r#"
+[dependencies]
+tauri-plugin-connector = { version = "0.9", optional = true }
+"#;
+        assert_eq!(
+            extract_cargo_dep(toml, "tauri-plugin-connector"),
+            Some(("0.9".into(), true))
+        );
+    }
+
+    #[test]
+    fn extract_cargo_dep_plain_string_is_not_optional() {
+        let toml = r#"
+[dependencies]
+tauri-plugin-connector = "0.9"
+"#;
+        assert_eq!(
+            extract_cargo_dep(toml, "tauri-plugin-connector"),
+            Some(("0.9".into(), false))
+        );
+    }
+
+    #[test]
+    fn extract_cargo_dep_inline_table_without_optional_flag() {
+        let toml = r#"
+[dependencies]
+tauri-plugin-connector = { version = "0.9", features = ["foo"] }
+"#;
+        assert_eq!(
+            extract_cargo_dep(toml, "tauri-plugin-connector"),
+            Some(("0.9".into(), false))
+        );
+    }
+
+    #[test]
+    fn extract_cargo_dep_target_specific_table() {
+        // The WordBrain layout puts the optional dep under a target-cfg table.
+        let toml = r#"
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-connector = { version = "0.9", optional = true }
+"#;
+        assert_eq!(
+            extract_cargo_dep(toml, "tauri-plugin-connector"),
+            Some(("0.9".into(), true))
+        );
+    }
+
+    #[test]
+    fn extract_cargo_dep_absent() {
+        let toml = r#"
+[dependencies]
+serde = "1"
+"#;
+        assert_eq!(extract_cargo_dep(toml, "tauri-plugin-connector"), None);
+    }
+
+    #[test]
+    fn extract_bool_field_true_and_false() {
+        assert_eq!(
+            extract_bool_field("{ optional = true }", "optional"),
+            Some(true)
+        );
+        assert_eq!(
+            extract_bool_field("{ optional = false }", "optional"),
+            Some(false)
+        );
+        assert_eq!(extract_bool_field("{ version = \"1\" }", "optional"), None);
+    }
+
+    #[test]
+    fn features_declares_dep_form() {
+        let toml = r#"
+[features]
+default = []
+dev-connector = ["dep:tauri-plugin-connector"]
+"#;
+        assert!(features_declares_dep(
+            toml,
+            "dev-connector",
+            "tauri-plugin-connector"
+        ));
+    }
+
+    #[test]
+    fn features_declares_bare_form() {
+        let toml = r#"
+[features]
+dev-connector = ["tauri-plugin-connector"]
+"#;
+        assert!(features_declares_dep(
+            toml,
+            "dev-connector",
+            "tauri-plugin-connector"
+        ));
+    }
+
+    #[test]
+    fn features_missing_returns_false() {
+        let toml = r#"
+[dependencies]
+serde = "1"
+"#;
+        assert!(!features_declares_dep(
+            toml,
+            "dev-connector",
+            "tauri-plugin-connector"
+        ));
+    }
+
+    #[test]
+    fn features_different_dep_returns_false() {
+        let toml = r#"
+[features]
+some-feat = ["dep:other-crate"]
+"#;
+        assert!(!features_declares_dep(
+            toml,
+            "dev-connector",
+            "tauri-plugin-connector"
+        ));
+    }
+
+    #[test]
+    fn features_only_inside_features_section() {
+        // A `dev-connector` line in a different section must not match.
+        let toml = r#"
+[dependencies]
+dev-connector = ["dep:tauri-plugin-connector"]
+"#;
+        assert!(!features_declares_dep(
+            toml,
+            "dev-connector",
+            "tauri-plugin-connector"
+        ));
+    }
+
+    #[test]
+    fn features_section_tolerates_trailing_comment() {
+        // `[features] # generated` should still match the [features] header.
+        let toml = r#"
+[features] # auto-generated by tooling
+default = []
+dev-connector = ["dep:tauri-plugin-connector"]
+"#;
+        assert!(features_declares_dep(
+            toml,
+            "dev-connector",
+            "tauri-plugin-connector"
+        ));
+    }
+
+    #[test]
+    fn features_does_not_match_subtable_header() {
+        // `[features.foo]` defines `features.foo`, not `[features]`, so any
+        // entries inside it must not be picked up as members of `[features]`.
+        let toml = r#"
+[features.foo]
+dev-connector = ["dep:tauri-plugin-connector"]
+"#;
+        assert!(!features_declares_dep(
+            toml,
+            "dev-connector",
+            "tauri-plugin-connector"
+        ));
+    }
+
+    // ----- classify_setup_from_inputs ---------------------------------------
+
+    const FEATURE_GATED_CARGO: &str = r#"
+[dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-connector = { version = "0.9", optional = true }
+
+[features]
+default = []
+dev-connector = ["dep:tauri-plugin-connector"]
+"#;
+
+    const FEATURE_GATED_SRC: &str = r#"
+#[cfg(feature = "dev-connector")]
+const DEV_CONNECTOR_CAPABILITY: &str =
+    include_str!("../capabilities-dev/dev-connector.json");
+
+pub fn run() {
+    let mut builder = tauri::Builder::default();
+    #[cfg(feature = "dev-connector")]
+    {
+        builder = builder.plugin(tauri_plugin_connector::init());
+    }
+}
+"#;
+
+    const LEGACY_CARGO: &str = r#"
+[dependencies]
+tauri-plugin-connector = "0.9"
+"#;
+
+    const LEGACY_SRC: &str = r#"
+pub fn run() {
+    let mut builder = tauri::Builder::default();
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_connector::init());
+    }
+}
+"#;
+
+    #[test]
+    fn classify_feature_gated_layout() {
+        assert_eq!(
+            classify_setup_from_inputs(FEATURE_GATED_CARGO, FEATURE_GATED_SRC),
+            SetupPattern::FeatureGated
+        );
+    }
+
+    #[test]
+    fn classify_legacy_layout() {
+        assert_eq!(
+            classify_setup_from_inputs(LEGACY_CARGO, LEGACY_SRC),
+            SetupPattern::Legacy
+        );
+    }
+
+    #[test]
+    fn classify_mixed_capability_moved_but_dep_not_optional() {
+        // src uses cfg(feature = "dev-connector"), Cargo dep is plain string.
+        assert_eq!(
+            classify_setup_from_inputs(LEGACY_CARGO, FEATURE_GATED_SRC),
+            SetupPattern::Mixed
+        );
+    }
+
+    #[test]
+    fn classify_mixed_optional_dep_but_no_features_block() {
+        let cargo = r#"
+[dependencies]
+tauri-plugin-connector = { version = "0.9", optional = true }
+"#;
+        assert_eq!(
+            classify_setup_from_inputs(cargo, FEATURE_GATED_SRC),
+            SetupPattern::Mixed
+        );
+    }
+
+    #[test]
+    fn classify_mixed_both_gates_present() {
+        // Hybrid src with both cfg gates — explicitly Mixed.
+        let src = r#"
+#[cfg(debug_assertions)]
+#[cfg(feature = "dev-connector")]
+{
+    builder = builder.plugin(tauri_plugin_connector::init());
+}
+"#;
+        assert_eq!(
+            classify_setup_from_inputs(LEGACY_CARGO, src),
+            SetupPattern::Mixed
+        );
+    }
+
+    #[test]
+    fn classify_none_when_plugin_not_referenced() {
+        let src = r#"
+pub fn run() {
+    let mut builder = tauri::Builder::default();
+}
+"#;
+        assert_eq!(
+            classify_setup_from_inputs(LEGACY_CARGO, src),
+            SetupPattern::None
+        );
+    }
+
+    #[test]
+    fn classify_none_for_empty_inputs() {
+        assert_eq!(classify_setup_from_inputs("", ""), SetupPattern::None);
+    }
+
+    #[test]
+    fn setup_pattern_as_str_round_trip() {
+        assert_eq!(SetupPattern::FeatureGated.as_str(), "feature-gated");
+        assert_eq!(SetupPattern::Legacy.as_str(), "legacy");
+        assert_eq!(SetupPattern::Mixed.as_str(), "mixed");
+        assert_eq!(SetupPattern::None.as_str(), "none");
     }
 }

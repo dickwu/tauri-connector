@@ -401,14 +401,18 @@ bun run $SCRIPTS/events.ts listen user:login  # Listen for events
 
 ## Setup
 
-For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. Summary:
+For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
 
-1. `tauri-plugin-connector = "0.9"` in `src-tauri/Cargo.toml`
-2. Register plugin with `#[cfg(debug_assertions)]` guard
-3. Add `"connector:default"` permission in capabilities
-4. Set `"withGlobalTauri": true` in `tauri.conf.json`
-5. Install `@zumer/snapdom` for screenshot fallback
-6. Add `"url": "http://127.0.0.1:9556/sse"` to `.mcp.json`
+1. `tauri-plugin-connector = { version = "0.10", optional = true }` in `src-tauri/Cargo.toml`
+2. Declare the cargo feature: `[features] dev-connector = ["dep:tauri-plugin-connector"]`
+3. Register the plugin with `#[cfg(feature = "dev-connector")]` guard
+4. Drop the dev capability JSON at `src-tauri/capabilities-dev/dev-connector.json` (outside the default `capabilities/` glob), and register it at runtime via `app.add_capability(include_str!("../capabilities-dev/dev-connector.json"))` inside the same `cfg(feature = "dev-connector")`
+5. Set `"withGlobalTauri": true` in `tauri.conf.json`
+6. Install `@zumer/snapdom` for screenshot fallback
+7. Add `"tauri:dev": "tauri dev --features dev-connector"` to `package.json`
+8. Add `"url": "http://127.0.0.1:9556/sse"` to `.mcp.json`
+
+For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.10"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 
@@ -422,12 +426,14 @@ tauri-connector doctor --no-runtime    # skip live WS/MCP probes (offline / CI)
 tauri-connector doctor --json          # machine-readable output (exit code 0/1)
 ```
 
+The `--json` payload includes a top-level `setup_pattern` field with one of `"feature-gated" | "legacy" | "mixed" | "none"` — branch on this in CI to apply pattern-specific gates without re-parsing the section list.
+
 What it verifies:
 
 | Section | Checks |
 |---|---|
 | Environment | CLI version, working directory, Tauri v2 project detection (walks up to find `src-tauri/tauri.conf.json`) |
-| Plugin Setup | `tauri-plugin-connector` in `src-tauri/Cargo.toml`, plugin registered via `init()` / `ConnectorBuilder` in `lib.rs`/`main.rs`, `"connector:default"` in any `src-tauri/capabilities/*.json`, `app.withGlobalTauri: true` in `tauri.conf.json`, `@zumer/snapdom` in `package.json`, `.mcp.json` registers `tauri-connector` |
+| Plugin Setup | `tauri-plugin-connector` in `src-tauri/Cargo.toml` (with `(optional, feature-gated)` tag when applicable); plugin registered via `init()` / `ConnectorBuilder` in `lib.rs`/`main.rs` (cites the matched cfg gate); `"connector:default"` in `src-tauri/capabilities/*.json` **or** `src-tauri/capabilities-dev/*.json`; `app.withGlobalTauri: true`; `@zumer/snapdom` in `package.json`; `.mcp.json` registers `tauri-connector`. Under feature-gated/mixed: also verifies `[features] dev-connector` declares the dep and that `app.add_capability(include_str!(...))` registers the dev capability at runtime. Legacy setups receive a non-blocking warn nudging migration. |
 | Runtime | `.connector.json` PID file under `target/`, PID alive, WebSocket ping on `ws_port`, MCP TCP probe on `mcp_port` |
 | Integration | `.claude/` auto-detect hook install status (optional) |
 
@@ -453,6 +459,8 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | Problem | Fix |
 |---|---|
 | Any setup problem | `tauri-connector doctor` -- prints a `Fix:` line for each missing/misconfigured piece |
+| `Permission connector:default not found` in release `tauri build` | The connector capability JSON is being loaded by `tauri-build`'s default `./capabilities/**/*` glob. Migrate to the feature-gated layout: move it to `src-tauri/capabilities-dev/dev-connector.json` and register it at runtime via `app.add_capability(include_str!(...))` inside `cfg(feature = "dev-connector")`. Re-run `tauri-connector doctor`. |
+| `tauri build` still compiles the plugin / pulls xcap, aws-sdk-s3 | Plugin is gated on `cfg(debug_assertions)` (legacy). Migrate to `cfg(feature = "dev-connector")` with `optional = true` so the dep is skipped entirely when the feature is off. Doctor's legacy nudge has the full migration checklist. |
 | Connection refused | App not running or plugin not loaded. Check: `lsof -i :9555 \| grep LISTEN` |
 | Stale PID file | App crashed. Delete: `rm target/debug/.connector.json` |
 | Port conflict | Use `ConnectorBuilder::new().port_range(9600, 9700)` or set `TAURI_CONNECTOR_PORT=9600` |

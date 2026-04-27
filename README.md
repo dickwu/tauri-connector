@@ -194,37 +194,114 @@ Large DOMs routinely blow past LLM context windows. The snapshot engine now budg
 
 > **Using Claude Code?** Install the skill for automated setup -- see [Claude Code Skill](#claude-code-skill-recommended) above.
 
-### 1. Add the plugin
+### 1. Add the plugin (feature-gated, recommended)
+
+The recommended pattern keeps `tauri-plugin-connector` and its transitive deps (xcap → libspa/pipewire on Linux, aws-sdk-s3, etc.) **out of release builds** entirely — they're never even compiled when the feature is off.
 
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.9"
+# ...
+
+# Optional dep — only pulled when --features dev-connector is set.
+tauri-plugin-connector = { version = "0.10", optional = true }
+
+[features]
+default = []
+dev-connector = ["dep:tauri-plugin-connector"]
 ```
 
-### 2. Register it (debug-only)
+> Mobile gotcha: if you also build for Android/iOS, scope the dep to desktop:
+> `[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]`
+
+### 2. Register it behind the cargo feature
 
 ```rust
 // src-tauri/src/lib.rs -- place BEFORE .invoke_handler()
+#[cfg(feature = "dev-connector")]
+const DEV_CONNECTOR_CAPABILITY: &str =
+    include_str!("../capabilities-dev/dev-connector.json");
+
+pub fn run() {
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(feature = "dev-connector")]
+    {
+        builder = builder.plugin(tauri_plugin_connector::init());
+    }
+
+    builder
+        .setup(|app| {
+            // Register the dev capability at runtime so plain `tauri build`
+            // (without --features dev-connector) does not need any dev-only
+            // capability JSON in `capabilities/`.
+            #[cfg(feature = "dev-connector")]
+            app.add_capability(DEV_CONNECTOR_CAPABILITY)
+                .map_err(|e| format!("dev-connector capability: {e}"))?;
+            Ok(())
+        })
+        .invoke_handler(/* ... */)
+        .run(/* ... */);
+}
+```
+
+### 3. Drop the dev capability JSON outside `capabilities/`
+
+`tauri-build`'s default glob is `./capabilities/**/*`, so anything under that directory is auto-loaded. Keeping the dev capability one level over (`capabilities-dev/`) means a release `tauri build` will not see it — no need to delete the file before shipping.
+
+```json
+// src-tauri/capabilities-dev/dev-connector.json (NEW directory)
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "dev-connector",
+  "description": "Permissions for tauri-plugin-connector dev tooling. Registered at runtime via app.add_capability(...) gated on cfg(feature = \"dev-connector\").",
+  "windows": ["main"],
+  "permissions": ["connector:default"]
+}
+```
+
+### 4. Wire up the dev script + `withGlobalTauri`
+
+```json
+// package.json — flip the feature on for `tauri:dev` only
+{
+  "scripts": {
+    "tauri:dev": "tauri dev --features dev-connector"
+  }
+}
+```
+
+```json
+// src-tauri/tauri.conf.json — required for the eval+event JS fallback path
+{ "app": { "withGlobalTauri": true } }
+```
+
+`bun run tauri:dev` (or `cargo tauri dev --features dev-connector`) compiles the plugin in. Plain `tauri build` skips the feature, leaves the dep uncompiled, and never sees the dev capability.
+
+#### Alternative: legacy `cfg(debug_assertions)` pattern
+
+If you don't want a separate dev script and don't mind the plugin (and its transitive crates) being **compiled** for release — they're stripped at link time by dead-code elimination, but still pulled into the dependency graph — the original `cfg(debug_assertions)` form still works:
+
+```toml
+# src-tauri/Cargo.toml
+[dependencies]
+tauri-plugin-connector = "0.10"
+```
+
+```rust
+// src-tauri/src/lib.rs
 #[cfg(debug_assertions)]
 {
     builder = builder.plugin(tauri_plugin_connector::init());
 }
 ```
 
-### 3. Add permission
-
 ```json
-// src-tauri/capabilities/default.json -- add to permissions array
+// src-tauri/capabilities/default.json — add to permissions array
 "connector:default"
 ```
 
-### 4. Set `withGlobalTauri` (required)
-
-```json
-// src-tauri/tauri.conf.json
-{ "app": { "withGlobalTauri": true } }
-```
+`tauri-connector doctor` accepts both patterns; on the legacy form it emits a non-blocking warn nudging you toward the feature-gated layout.
 
 ### 5. Install snapdom (screenshot fallback)
 
@@ -269,7 +346,7 @@ The MCP server is now live. Claude Code connects automatically via the URL in `.
 
 ### 8. Verify with `doctor` (v0.9+)
 
-`tauri-connector doctor` walks the current project and confirms every setup step above. It inspects `src-tauri/Cargo.toml`, the plugin registration in `lib.rs`/`main.rs`, `src-tauri/capabilities/*.json`, `src-tauri/tauri.conf.json`, the frontend `package.json`, the root `.mcp.json`, and the live `.connector.json` PID file (plus WS/MCP port probes) -- each missing piece is reported with a copy-pasteable `Fix:` snippet. It exits non-zero when any required check fails, so it drops straight into CI.
+`tauri-connector doctor` auto-detects whether the project is using the **feature-gated** or **legacy** registration pattern, then walks the current project and confirms every setup step above. It inspects `src-tauri/Cargo.toml` (including the `[features]` block), the plugin registration in `lib.rs`/`main.rs` (accepts either `cfg(feature = "dev-connector")` or `cfg(debug_assertions)`), both `src-tauri/capabilities/*.json` and `src-tauri/capabilities-dev/*.json`, `src-tauri/tauri.conf.json`, the frontend `package.json`, the root `.mcp.json`, and the live `.connector.json` PID file (plus WS/MCP port probes) -- each missing piece is reported with a copy-pasteable `Fix:` snippet. It exits non-zero when any required check fails, so it drops straight into CI.
 
 ```bash
 tauri-connector doctor                 # full checklist (text)
@@ -277,33 +354,56 @@ tauri-connector doctor --no-runtime    # skip live WS/MCP probes (offline / CI)
 tauri-connector doctor --json          # machine-readable output
 ```
 
+The `--json` payload includes a top-level `setup_pattern` field with one of `"feature-gated" | "legacy" | "mixed" | "none"` so CI can branch on the active pattern:
+
+```bash
+$ tauri-connector doctor --no-runtime --json | jq '.setup_pattern, .summary'
+"feature-gated"
+{ "ok": 9, "fail": 0, "warn": 1, "passed": true }
+```
+
 Sections reported:
 
 | Section | Checks |
 |---|---|
 | Environment | CLI version, working directory, Tauri v2 project detection |
-| Plugin Setup | `tauri-plugin-connector` Cargo dep, plugin registered, `connector:default` permission, `app.withGlobalTauri: true`, `@zumer/snapdom` in `package.json`, `.mcp.json` entry |
+| Plugin Setup | `tauri-plugin-connector` Cargo dep (with `(optional, feature-gated)` tag when applicable), plugin registered (cites the matched cfg gate), `connector:default` permission in `capabilities/` or `capabilities-dev/`, `app.withGlobalTauri: true`, `@zumer/snapdom` in `package.json`, `.mcp.json` entry; under feature-gated/mixed: also `[features] dev-connector` declared and runtime `app.add_capability(include_str!(...))`. Legacy setups receive a non-blocking warn nudging migration. |
 | Runtime | `.connector.json` PID file, PID alive, WS ping on `ws_port`, MCP TCP probe on `mcp_port` |
 | Integration | `.claude/` auto-detect hook install status (optional) |
 
-Example output (one failing check):
+Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.9.1
+tauri-connector doctor v0.10.0
 
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.9"
-  ✓ Plugin registered in src-tauri/src/lib.rs
-  ✗ Permission `connector:default` missing
-      Fix: add "connector:default" to the `permissions` array in src-tauri/capabilities/default.json:
-        {
-          "permissions": ["connector:default"]
-        }
+  ✓ Cargo dependency: tauri-plugin-connector = "0.10" (optional, feature-gated)
+  ✓ Plugin registered in src-tauri/src/lib.rs (cfg(feature = "dev-connector"))
+  ✓ Permission "connector:default" in src-tauri/capabilities-dev/dev-connector.json
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
   ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/sse)
+  ✓ [features] dev-connector = ["dep:tauri-plugin-connector"]
+  ✓ Capability loaded at runtime via app.add_capability(include_str!("../capabilities-dev/..."))
+```
 
-Run the `Fix` commands above and re-run `tauri-connector doctor`.
+Example output for a legacy setup (passes, with the migration nudge):
+
+```
+Plugin Setup
+  ✓ Cargo dependency: tauri-plugin-connector = "0.10"
+  ✓ Plugin registered in src-tauri/src/lib.rs (cfg(debug_assertions))
+  ✓ Permission "connector:default" in src-tauri/capabilities/default.json
+  ✓ app.withGlobalTauri: true
+  ✓ Frontend dependency: @zumer/snapdom
+  ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/sse)
+  ! Using legacy debug_assertions gate — consider migrating to --features dev-connector
+      Fix: 1. tauri-plugin-connector = { version = "0.10", optional = true }
+           2. [features] dev-connector = ["dep:tauri-plugin-connector"]
+           3. replace cfg(debug_assertions) with cfg(feature = "dev-connector")
+           4. move connector:default to capabilities-dev/dev-connector.json
+           5. register at runtime: app.add_capability(include_str!(...))
+           6. "tauri:dev": "tauri dev --features dev-connector"
 ```
 
 ## WebSocket API via Bun
@@ -525,10 +625,12 @@ cargo build -p connector-mcp-server --release
 
 ## Plugin Configuration
 
+Wrap the builder in whichever cfg gate matches your setup pattern (`cfg(feature = "dev-connector")` for the recommended feature-gated layout, or `cfg(debug_assertions)` for the legacy alternative):
+
 ```rust
 use tauri_plugin_connector::ConnectorBuilder;
 
-#[cfg(debug_assertions)]
+#[cfg(feature = "dev-connector")]
 {
     builder = builder.plugin(
         ConnectorBuilder::new()
