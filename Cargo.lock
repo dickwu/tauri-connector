@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "connector-cli"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "clap",
  "connector-client",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "connector-client"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "futures-util",
  "serde",
@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "connector-mcp-server"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "connector-client",
  "serde",
@@ -4798,7 +4798,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-connector"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "axum",
  "base64 0.22.1",
