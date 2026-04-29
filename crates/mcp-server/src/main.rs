@@ -5,6 +5,7 @@
 
 use std::io::{self, BufRead, Write};
 
+use connector_client::discovery::{self, ConnectionOptions};
 use connector_client::ConnectorClient;
 use serde_json::{json, Value};
 
@@ -18,11 +19,25 @@ const DEFAULT_PORT: u16 = 9555;
 
 #[tokio::main]
 async fn main() {
-    let host = std::env::var("TAURI_CONNECTOR_HOST").unwrap_or_else(|_| DEFAULT_HOST.to_string());
-    let port: u16 = std::env::var("TAURI_CONNECTOR_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(DEFAULT_PORT);
+    let resolved = discovery::resolve_connection(ConnectionOptions::from_current_dir())
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("[tauri-connector-mcp] Discovery failed: {e}");
+            let host =
+                std::env::var("TAURI_CONNECTOR_HOST").unwrap_or_else(|_| DEFAULT_HOST.to_string());
+            let port = std::env::var("TAURI_CONNECTOR_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(DEFAULT_PORT);
+            discovery::ResolvedConnection {
+                host,
+                port,
+                source: discovery::ConnectionSource::Env,
+                instance: None,
+            }
+        });
+    let host = resolved.host;
+    let port = resolved.port;
 
     let mut client = ConnectorClient::new();
 
@@ -93,7 +108,7 @@ async fn handle_request(
                 },
                 "serverInfo": {
                     "name": "tauri-connector",
-                    "version": "0.1.0"
+                    "version": env!("CARGO_PKG_VERSION")
                 }
             });
             JsonRpcResponse::success(id, result)
@@ -106,14 +121,8 @@ async fn handle_request(
 
         "tools/call" => {
             let params = request.params.as_ref().cloned().unwrap_or(json!({}));
-            let tool_name = params
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let arguments = params
-                .get("arguments")
-                .cloned()
-                .unwrap_or(json!({}));
+            let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
             // Auto-connect if not connected (except for driver_session)
             if tool_name != "driver_session" && !client.is_connected() {

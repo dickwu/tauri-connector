@@ -32,7 +32,7 @@ Plugin (Rust)
   |-- xcap native capture (cross-platform) --> PNG/JPEG/WebP with resize
   '-- snapdom fallback ---------------------> DOM-to-image via @zumer/snapdom
 
-Claude Code -------- SSE http://host:9556/sse -----> Embedded MCP server
+Claude Code -------- HTTP http://host:9556/mcp ----> Embedded MCP server
                                                       |-- handlers (direct, in-process)
                                                       |-- bridge.execute_js() -> JS result
                                                       '-- state.get_dom() -> cached DOM
@@ -199,7 +199,7 @@ Large DOMs routinely blow past LLM context windows. The snapshot engine now budg
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.9"
+tauri-plugin-connector = "0.10"
 ```
 
 ### 2. Register it (debug-only)
@@ -247,7 +247,7 @@ window.snapdom = snapdom;
 {
   "mcpServers": {
     "tauri-connector": {
-      "url": "http://127.0.0.1:9556/sse"
+      "url": "http://127.0.0.1:9556/mcp"
     }
   }
 }
@@ -261,8 +261,8 @@ bun run tauri dev
 
 Look for:
 ```
-[connector][mcp] MCP ready for 'MyApp' -- url: http://0.0.0.0:9556/sse
-[connector] Plugin ready for 'MyApp' (com.example.app) -- WS on 0.0.0.0:9555
+[connector][mcp] MCP ready for 'MyApp' -- url: http://127.0.0.1:9556/mcp (/sse legacy)
+[connector] Plugin ready for 'MyApp' (com.example.app) -- WS on 127.0.0.1:9555
 ```
 
 The MCP server is now live. Claude Code connects automatically via the URL in `.mcp.json`.
@@ -292,7 +292,7 @@ Example output (one failing check):
 tauri-connector doctor v0.9.1
 
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.9"
+  ✓ Cargo dependency: tauri-plugin-connector = "0.10"
   ✓ Plugin registered in src-tauri/src/lib.rs
   ✗ Permission `connector:default` missing
       Fix: add "connector:default" to the `permissions` array in src-tauri/capabilities/default.json:
@@ -301,7 +301,7 @@ Plugin Setup
         }
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
-  ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/sse)
+  ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
 
 Run the `Fix` commands above and re-run `tauri-connector doctor`.
 ```
@@ -492,7 +492,7 @@ The MCP server starts automatically inside the Tauri plugin when the app runs. C
 {
   "mcpServers": {
     "tauri-connector": {
-      "url": "http://127.0.0.1:9556/sse"
+      "url": "http://127.0.0.1:9556/mcp"
     }
   }
 }
@@ -532,7 +532,7 @@ use tauri_plugin_connector::ConnectorBuilder;
 {
     builder = builder.plugin(
         ConnectorBuilder::new()
-            .bind_address("127.0.0.1")  // localhost only (default: 0.0.0.0)
+            .bind_address("0.0.0.0")  // remote debug opt-in; default is 127.0.0.1
             .port_range(8000, 8100)     // WS port range (default: 9555-9655)
             .mcp_port_range(8100, 8200) // MCP port range (default: 9556-9656)
             .build()
@@ -630,7 +630,7 @@ The bridge uses two execution paths for maximum reliability:
 
 2. **Eval+Event fallback**: If the WS bridge times out, the plugin injects JS via Tauri's `window.eval()` and receives results through Tauri's event system (`plugin:event|emit`). Requires `withGlobalTauri: true`. Handles double-serialized event payloads automatically.
 
-The fallback is transparent -- `bridge.execute_js()` returns the same result regardless of which path succeeded.
+The fallback is transparent -- `bridge.execute_js()` returns the same result regardless of which path succeeded. The bridge accepts reconnects after webview reloads and routes commands by `windowId`; `tauri-connector bridge` shows connected windows and pending evals.
 
 ### Screenshot
 
@@ -640,21 +640,23 @@ The `webview_screenshot` tool uses a tiered approach:
 
 2. **snapdom fallback**: When xcap is unavailable (e.g. Wayland without permissions, CI environments), falls back to [snapdom](https://github.com/zumerlab/snapdom) (`@zumer/snapdom`) — a fast DOM-to-image library that captures exactly what the web engine renders. Loaded via dynamic `import()` or `window.snapdom` global. No CDN dependency, works fully offline.
 
+CLI screenshot saves never overwrite by default. Reusing an existing path creates a unique sibling unless `--overwrite` is passed; auto-generated screenshots go under the connector artifact directory and print the final resolved path plus `sha256`. MCP/WS screenshot saves return the same artifact metadata when `save: true`.
+
 ### PID File Auto-Discovery
 
-When the plugin starts, it writes `target/.connector.json` with all port info:
+When the plugin starts, it writes `.connector.json` near the Tauri target directory with all port info:
 
 ```json
-{ "pid": 12345, "ws_port": 9555, "mcp_port": 9556, "bridge_port": 9300, "app_name": "MyApp", "app_id": "com.example.app" }
+{ "pid": 12345, "ws_port": 9555, "mcp_port": 9556, "bridge_port": 9300, "app_name": "MyApp", "app_id": "com.example.app", "log_dir": "/path/to/.tauri-connector" }
 ```
 
-The bun scripts in `skill/scripts/` auto-discover this file, verify the PID is alive, and connect without any env vars. If the Tauri app is already running in another terminal, the scripts connect directly -- no need to start a new instance.
+The Rust CLI, standalone MCP server, and bun scripts auto-discover this file, verify the PID and WebSocket ping, and connect without env vars. Resolution order is explicit `--host/--port` > `TAURI_CONNECTOR_*` env > `.connector.json` > port scan. Use `tauri-connector status --json` to inspect all candidates.
 
 ### Embedded MCP Server
 
-1. Plugin starts an SSE HTTP server on port 9556 (configurable)
-2. Claude Code connects via `GET /sse` and receives an SSE event stream
-3. Tool calls arrive via `POST /message` with JSON-RPC bodies
+1. Plugin starts an HTTP MCP server on port 9556 (configurable)
+2. New clients use `POST /mcp` for JSON-RPC and can open `GET /mcp` for a stream
+3. Legacy clients can still use `GET /sse` plus `POST /message`
 4. Handlers call the bridge and plugin state directly -- zero WebSocket overhead
 
 ### Console Log Capture
@@ -663,7 +665,7 @@ The bridge intercepts `console.log/warn/error/info/debug`, storing entries in fi
 
 ### Ref System
 
-The unified snapshot engine assigns sequential ref IDs (`e0`, `e1`, ...) to interactive elements (buttons, links, inputs, checkboxes, etc.) and elements with `onclick`, `tabindex`, or `cursor:pointer`. Three ref formats are accepted: `@e1`, `ref=e1`, or `e1`. Refs are persisted to disk and used across subsequent CLI invocations until the next `snapshot` refreshes them. The ref resolution uses a three-strategy fallback: CSS selector, then role+name text matching, then `[role="..."]` attribute matching.
+The unified snapshot engine assigns sequential ref IDs (`e0`, `e1`, ...) to interactive elements (buttons, links, inputs, checkboxes, etc.) and elements with `onclick`, `tabindex`, or `cursor:pointer`. Three ref formats are accepted: `@e1`, `ref=e1`, or `e1`. Server-side handlers cache refs per `windowId`, so MCP, CLI, and WebSocket commands can resolve refs consistently after a snapshot. Stale refs return a structured re-snapshot suggestion.
 
 ## Requirements
 

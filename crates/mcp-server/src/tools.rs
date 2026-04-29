@@ -32,6 +32,13 @@ pub fn tool_definitions() -> Value {
                     "required": ["script"]
                 })
             ),
+            tool_def("bridge_status",
+                "Show internal JS bridge clients, pending evals, and fallback availability",
+                json!({
+                    "type": "object",
+                    "properties": {}
+                })
+            ),
             tool_def("webview_screenshot",
                 "Take a screenshot of the Tauri window using native xcap capture (cross-platform)",
                 json!({
@@ -40,6 +47,11 @@ pub fn tool_definitions() -> Value {
                         "format": { "type": "string", "enum": ["png", "jpeg", "webp"] },
                         "quality": { "type": "number", "minimum": 0, "maximum": 100 },
                         "maxWidth": { "type": "number" },
+                        "save": { "type": "boolean" },
+                        "outputDir": { "type": "string" },
+                        "nameHint": { "type": "string" },
+                        "overwrite": { "type": "boolean" },
+                        "selector": { "type": "string" },
                         "windowId": { "type": "string" }
                     }
                 })
@@ -321,6 +333,7 @@ pub async fn call_tool(
     let result = match name {
         "driver_session" => handle_driver_session(client, host, port, args).await,
         "webview_execute_js" => handle_execute_js(client, args).await,
+        "bridge_status" => handle_bridge_status(client).await,
         "webview_screenshot" => handle_screenshot(client, args).await,
         "webview_dom_snapshot" => handle_dom_snapshot(client, args).await,
         "get_cached_dom" => handle_cached_dom(client, args).await,
@@ -357,7 +370,9 @@ pub async fn call_tool(
 // ─── Helpers ───
 
 fn str_arg(args: &Value, key: &str) -> Option<String> {
-    args.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 fn num_arg(args: &Value, key: &str) -> Option<f64> {
@@ -367,7 +382,6 @@ fn num_arg(args: &Value, key: &str) -> Option<f64> {
 fn window_id(args: &Value) -> String {
     str_arg(args, "windowId").unwrap_or_else(|| "main".to_string())
 }
-
 
 // ─── Tool Handlers ───
 
@@ -405,7 +419,13 @@ async fn handle_driver_session(
 async fn handle_execute_js(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
     let script = str_arg(args, "script").ok_or("Missing 'script' parameter")?;
     let wid = window_id(args);
-    client.send(json!({ "type": "execute_js", "script": script, "window_id": wid })).await
+    client
+        .send(json!({ "type": "execute_js", "script": script, "window_id": wid }))
+        .await
+}
+
+async fn handle_bridge_status(client: &mut ConnectorClient) -> Result<Value, String> {
+    client.send(json!({ "type": "bridge_status" })).await
 }
 
 async fn handle_screenshot(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
@@ -423,12 +443,30 @@ async fn handle_screenshot(client: &mut ConnectorClient, args: &Value) -> Result
     if let Some(mw) = max_width {
         cmd["max_width"] = json!(mw);
     }
+    if let Some(save) = args.get("save").and_then(|v| v.as_bool()) {
+        cmd["save"] = json!(save);
+    }
+    if let Some(output_dir) = str_arg(args, "outputDir") {
+        cmd["output_dir"] = json!(output_dir);
+    }
+    if let Some(name_hint) = str_arg(args, "nameHint") {
+        cmd["name_hint"] = json!(name_hint);
+    }
+    if let Some(overwrite) = args.get("overwrite").and_then(|v| v.as_bool()) {
+        cmd["overwrite"] = json!(overwrite);
+    }
+    if let Some(selector) = str_arg(args, "selector") {
+        cmd["selector"] = json!(selector);
+    }
     client.send(cmd).await
 }
 
 async fn handle_dom_snapshot(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
-    let mode = args.get("mode").or_else(|| args.get("type"))
-        .and_then(|v| v.as_str()).unwrap_or("ai");
+    let mode = args
+        .get("mode")
+        .or_else(|| args.get("type"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("ai");
     let wid = window_id(args);
 
     let mut cmd = json!({
@@ -459,7 +497,9 @@ async fn handle_dom_snapshot(client: &mut ConnectorClient, args: &Value) -> Resu
 
 async fn handle_cached_dom(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
     let wid = window_id(args);
-    client.send(json!({ "type": "get_cached_dom", "window_id": wid })).await
+    client
+        .send(json!({ "type": "get_cached_dom", "window_id": wid }))
+        .await
 }
 
 async fn handle_find_element(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
@@ -472,7 +512,9 @@ async fn handle_find_element(client: &mut ConnectorClient, args: &Value) -> Resu
         "strategy": strategy,
         "window_id": wid,
     });
-    if let Some(t) = str_arg(args, "target") { cmd["target"] = json!(t); }
+    if let Some(t) = str_arg(args, "target") {
+        cmd["target"] = json!(t);
+    }
     client.send(cmd).await
 }
 
@@ -499,11 +541,21 @@ async fn handle_interact(client: &mut ConnectorClient, args: &Value) -> Result<V
         "strategy": str_arg(args, "strategy").unwrap_or_else(|| "css".to_string()),
         "window_id": wid,
     });
-    if let Some(s) = str_arg(args, "selector") { cmd["selector"] = json!(s); }
-    if let Some(v) = num_arg(args, "x") { cmd["x"] = json!(v); }
-    if let Some(v) = num_arg(args, "y") { cmd["y"] = json!(v); }
-    if let Some(s) = str_arg(args, "direction") { cmd["direction"] = json!(s); }
-    if let Some(v) = num_arg(args, "distance") { cmd["distance"] = json!(v); }
+    if let Some(s) = str_arg(args, "selector") {
+        cmd["selector"] = json!(s);
+    }
+    if let Some(v) = num_arg(args, "x") {
+        cmd["x"] = json!(v);
+    }
+    if let Some(v) = num_arg(args, "y") {
+        cmd["y"] = json!(v);
+    }
+    if let Some(s) = str_arg(args, "direction") {
+        cmd["direction"] = json!(s);
+    }
+    if let Some(v) = num_arg(args, "distance") {
+        cmd["distance"] = json!(v);
+    }
     client.send(cmd).await
 }
 
@@ -515,9 +567,15 @@ async fn handle_keyboard(client: &mut ConnectorClient, args: &Value) -> Result<V
         "action": action,
         "window_id": wid,
     });
-    if let Some(s) = str_arg(args, "text") { cmd["text"] = json!(s); }
-    if let Some(s) = str_arg(args, "key") { cmd["key"] = json!(s); }
-    if let Some(m) = args.get("modifiers") { cmd["modifiers"] = m.clone(); }
+    if let Some(s) = str_arg(args, "text") {
+        cmd["text"] = json!(s);
+    }
+    if let Some(s) = str_arg(args, "key") {
+        cmd["key"] = json!(s);
+    }
+    if let Some(m) = args.get("modifiers") {
+        cmd["modifiers"] = m.clone();
+    }
     client.send(cmd).await
 }
 
@@ -530,19 +588,33 @@ async fn handle_wait_for(client: &mut ConnectorClient, args: &Value) -> Result<V
         "timeout": timeout,
         "window_id": wid,
     });
-    if let Some(s) = str_arg(args, "selector") { cmd["selector"] = json!(s); }
-    if let Some(s) = str_arg(args, "text") { cmd["text"] = json!(s); }
+    if let Some(s) = str_arg(args, "selector") {
+        cmd["selector"] = json!(s);
+    }
+    if let Some(s) = str_arg(args, "text") {
+        cmd["text"] = json!(s);
+    }
     client.send_with_timeout(cmd, timeout + 5000).await
 }
 
-async fn handle_get_pointed_element(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_get_pointed_element(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
     let wid = window_id(args);
-    client.send(json!({ "type": "get_pointed_element", "window_id": wid })).await
+    client
+        .send(json!({ "type": "get_pointed_element", "window_id": wid }))
+        .await
 }
 
-async fn handle_select_element(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_select_element(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
     let wid = window_id(args);
-    client.send(json!({ "type": "select_element", "window_id": wid })).await
+    client
+        .send(json!({ "type": "select_element", "window_id": wid }))
+        .await
 }
 
 async fn handle_manage_window(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
@@ -551,16 +623,22 @@ async fn handle_manage_window(client: &mut ConnectorClient, args: &Value) -> Res
 
     match action.as_str() {
         "list" => client.send(json!({ "type": "window_list" })).await,
-        "info" => client.send(json!({ "type": "window_info", "window_id": wid })).await,
+        "info" => {
+            client
+                .send(json!({ "type": "window_info", "window_id": wid }))
+                .await
+        }
         "resize" => {
             let width = num_arg(args, "width").ok_or("Missing 'width'")?;
             let height = num_arg(args, "height").ok_or("Missing 'height'")?;
-            client.send(json!({
-                "type": "window_resize",
-                "window_id": wid,
-                "width": width as u32,
-                "height": height as u32,
-            })).await
+            client
+                .send(json!({
+                    "type": "window_resize",
+                    "window_id": wid,
+                    "width": width as u32,
+                    "height": height as u32,
+                }))
+                .await
         }
         _ => Err(format!("Unknown window action: {action}")),
     }
@@ -570,31 +648,52 @@ async fn handle_backend_state(client: &mut ConnectorClient) -> Result<Value, Str
     client.send(json!({ "type": "backend_state" })).await
 }
 
-async fn handle_ipc_execute_command(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_ipc_execute_command(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
     let command = str_arg(args, "command").ok_or("Missing 'command' parameter")?;
     let mut cmd = json!({ "type": "ipc_execute_command", "command": command });
-    if let Some(a) = args.get("args") { cmd["args"] = a.clone(); }
+    if let Some(a) = args.get("args") {
+        cmd["args"] = a.clone();
+    }
     client.send(cmd).await
 }
 
 async fn handle_ipc_monitor(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
     let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
-    client.send(json!({ "type": "ipc_monitor", "action": action })).await
+    client
+        .send(json!({ "type": "ipc_monitor", "action": action }))
+        .await
 }
 
-async fn handle_ipc_get_captured(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_ipc_get_captured(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
     let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
     let mut cmd = json!({ "type": "ipc_get_captured", "limit": limit });
-    if let Some(f) = str_arg(args, "filter") { cmd["filter"] = json!(f); }
-    if let Some(p) = str_arg(args, "pattern") { cmd["pattern"] = json!(p); }
-    if let Some(s) = num_arg(args, "since") { cmd["since"] = json!(s as u64); }
+    if let Some(f) = str_arg(args, "filter") {
+        cmd["filter"] = json!(f);
+    }
+    if let Some(p) = str_arg(args, "pattern") {
+        cmd["pattern"] = json!(p);
+    }
+    if let Some(s) = num_arg(args, "since") {
+        cmd["since"] = json!(s as u64);
+    }
     client.send(cmd).await
 }
 
-async fn handle_ipc_emit_event(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_ipc_emit_event(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
     let event_name = str_arg(args, "eventName").ok_or("Missing 'eventName' parameter")?;
     let mut cmd = json!({ "type": "ipc_emit_event", "event_name": event_name });
-    if let Some(p) = args.get("payload") { cmd["payload"] = p.clone(); }
+    if let Some(p) = args.get("payload") {
+        cmd["payload"] = p.clone();
+    }
     client.send(cmd).await
 }
 
@@ -602,56 +701,88 @@ async fn handle_read_logs(client: &mut ConnectorClient, args: &Value) -> Result<
     let lines = num_arg(args, "lines").unwrap_or(50.0) as usize;
     let wid = window_id(args);
     let mut cmd = json!({ "type": "console_logs", "lines": lines, "window_id": wid });
-    if let Some(f) = str_arg(args, "filter") { cmd["filter"] = json!(f); }
-    if let Some(p) = str_arg(args, "pattern") { cmd["pattern"] = json!(p); }
-    if let Some(l) = str_arg(args, "level") { cmd["level"] = json!(l); }
+    if let Some(f) = str_arg(args, "filter") {
+        cmd["filter"] = json!(f);
+    }
+    if let Some(p) = str_arg(args, "pattern") {
+        cmd["pattern"] = json!(p);
+    }
+    if let Some(l) = str_arg(args, "level") {
+        cmd["level"] = json!(l);
+    }
     client.send(cmd).await
 }
 
 async fn handle_clear_logs(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
     let source = str_arg(args, "source").unwrap_or_else(|| "all".to_string());
-    client.send(json!({ "type": "clear_logs", "source": source })).await
+    client
+        .send(json!({ "type": "clear_logs", "source": source }))
+        .await
 }
 
 async fn handle_read_log_file(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
     let source = str_arg(args, "source").ok_or("Missing 'source' parameter")?;
     let lines = num_arg(args, "lines").unwrap_or(100.0) as usize;
     let mut cmd = json!({ "type": "read_log_file", "source": source, "lines": lines });
-    if let Some(l) = str_arg(args, "level") { cmd["level"] = json!(l); }
-    if let Some(p) = str_arg(args, "pattern") { cmd["pattern"] = json!(p); }
-    if let Some(s) = num_arg(args, "since") { cmd["since"] = json!(s as u64); }
-    if let Some(w) = str_arg(args, "windowId") { cmd["window_id"] = json!(w); }
+    if let Some(l) = str_arg(args, "level") {
+        cmd["level"] = json!(l);
+    }
+    if let Some(p) = str_arg(args, "pattern") {
+        cmd["pattern"] = json!(p);
+    }
+    if let Some(s) = num_arg(args, "since") {
+        cmd["since"] = json!(s as u64);
+    }
+    if let Some(w) = str_arg(args, "windowId") {
+        cmd["window_id"] = json!(w);
+    }
     client.send(cmd).await
 }
 
 async fn handle_ipc_listen(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
     let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
     let mut cmd = json!({ "type": "ipc_listen", "action": action });
-    if let Some(events) = args.get("events") { cmd["events"] = events.clone(); }
+    if let Some(events) = args.get("events") {
+        cmd["events"] = events.clone();
+    }
     client.send(cmd).await
 }
 
-async fn handle_event_get_captured(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_event_get_captured(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
     let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
     let mut cmd = json!({ "type": "event_get_captured", "limit": limit });
-    if let Some(e) = str_arg(args, "event") { cmd["event"] = json!(e); }
-    if let Some(p) = str_arg(args, "pattern") { cmd["pattern"] = json!(p); }
-    if let Some(s) = num_arg(args, "since") { cmd["since"] = json!(s as u64); }
+    if let Some(e) = str_arg(args, "event") {
+        cmd["event"] = json!(e);
+    }
+    if let Some(p) = str_arg(args, "pattern") {
+        cmd["pattern"] = json!(p);
+    }
+    if let Some(s) = num_arg(args, "since") {
+        cmd["since"] = json!(s as u64);
+    }
     client.send(cmd).await
 }
 
-async fn handle_search_snapshot(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_search_snapshot(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
     let pattern = str_arg(args, "pattern").ok_or("Missing 'pattern' parameter")?;
     let context = num_arg(args, "context").unwrap_or(2.0) as usize;
     let mode = str_arg(args, "mode").unwrap_or_else(|| "ai".to_string());
     let wid = window_id(args);
-    client.send(json!({
-        "type": "search_snapshot",
-        "pattern": pattern,
-        "context": context,
-        "mode": mode,
-        "window_id": wid,
-    })).await
+    client
+        .send(json!({
+            "type": "search_snapshot",
+            "pattern": pattern,
+            "context": context,
+            "mode": mode,
+            "window_id": wid,
+        }))
+        .await
 }
 
 async fn handle_list_devices(host: &str, port: u16) -> Result<Value, String> {
@@ -664,7 +795,9 @@ async fn handle_list_devices(host: &str, port: u16) -> Result<Value, String> {
         if let Ok(stream) = tokio::time::timeout(
             std::time::Duration::from_millis(100),
             tokio::net::TcpStream::connect(format!("{host}:{p}")),
-        ).await {
+        )
+        .await
+        {
             if stream.is_ok() {
                 devices.push(json!({ "host": host, "port": p }));
             }
@@ -683,7 +816,7 @@ In your Tauri app's `src-tauri/Cargo.toml`:
 
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.6"
+tauri-plugin-connector = "0.9"
 ```
 
 ### 2. Register the plugin

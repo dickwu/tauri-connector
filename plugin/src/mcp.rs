@@ -8,13 +8,14 @@ use std::convert::Infallible;
 use std::net::TcpListener;
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::{Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
-use axum::Router;
 use futures_util::stream::{self, StreamExt};
-use serde_json::{json, Value};
-use tokio::sync::{mpsc, Mutex};
+use serde_json::{Value, json};
+use tokio::sync::{Mutex, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::bridge::Bridge;
@@ -51,6 +52,12 @@ pub async fn start(
     };
 
     let app = Router::new()
+        .route(
+            "/mcp",
+            get(mcp_get_handler)
+                .post(mcp_post_handler)
+                .delete(mcp_delete_handler),
+        )
         .route("/sse", get(sse_handler))
         .route("/message", post(message_handler))
         .with_state(state);
@@ -59,7 +66,7 @@ pub async fn start(
         .await
         .map_err(|e| format!("MCP bind failed: {e}"))?;
 
-    println!("[connector][mcp] SSE server listening on {bind_address}:{port}");
+    println!("[connector][mcp] HTTP server listening on {bind_address}:{port} (/mcp, /sse)");
 
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -70,6 +77,36 @@ pub async fn start(
     Ok(port)
 }
 
+/// GET /mcp — streamable HTTP read side. Uses the same event stream as /sse.
+async fn mcp_get_handler(
+    State(state): State<McpState>,
+) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    sse_handler(State(state)).await
+}
+
+/// POST /mcp — streamable HTTP JSON-RPC request endpoint.
+async fn mcp_post_handler(
+    headers: HeaderMap,
+    State(state): State<McpState>,
+    body: String,
+) -> (StatusCode, String) {
+    if !origin_allowed(&headers) {
+        let resp = jsonrpc_error(Value::Null, -32000, "Origin not allowed");
+        return (
+            StatusCode::FORBIDDEN,
+            serde_json::to_string(&resp).unwrap_or_default(),
+        );
+    }
+    (
+        StatusCode::OK,
+        handle_jsonrpc_request(state, body, None).await,
+    )
+}
+
+async fn mcp_delete_handler() -> StatusCode {
+    StatusCode::OK
+}
+
 /// GET /sse — SSE event stream for an MCP client session.
 async fn sse_handler(
     State(state): State<McpState>,
@@ -77,11 +114,7 @@ async fn sse_handler(
     let session_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::unbounded_channel::<String>();
 
-    state
-        .sessions
-        .lock()
-        .await
-        .insert(session_id.clone(), tx);
+    state.sessions.lock().await.insert(session_id.clone(), tx);
 
     // First event: tell the client where to POST
     let endpoint_event = stream::once(async move {
@@ -90,9 +123,8 @@ async fn sse_handler(
     });
 
     // Subsequent events: JSON-RPC responses
-    let response_stream = UnboundedReceiverStream::new(rx).map(|data| {
-        Ok::<_, Infallible>(Event::default().event("message").data(data))
-    });
+    let response_stream = UnboundedReceiverStream::new(rx)
+        .map(|data| Ok::<_, Infallible>(Event::default().event("message").data(data)));
 
     Sse::new(endpoint_event.chain(response_stream)).keep_alive(KeepAlive::default())
 }
@@ -104,7 +136,14 @@ async fn message_handler(
     body: String,
 ) -> String {
     let session_id = params.get("sessionId").cloned().unwrap_or_default();
+    handle_jsonrpc_request(state, body, Some(session_id)).await
+}
 
+async fn handle_jsonrpc_request(
+    state: McpState,
+    body: String,
+    session_id: Option<String>,
+) -> String {
     let request: Value = match serde_json::from_str(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -114,10 +153,7 @@ async fn message_handler(
     };
 
     let id = request.get("id").cloned();
-    let method = request
-        .get("method")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let method = request.get("method").and_then(|v| v.as_str()).unwrap_or("");
 
     // Notifications (no id) — no response
     if id.is_none() {
@@ -133,7 +169,7 @@ async fn message_handler(
             json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "tauri-connector", "version": "0.1.0" }
+                "serverInfo": { "name": "tauri-connector", "version": env!("CARGO_PKG_VERSION") }
             }),
         ),
 
@@ -166,11 +202,22 @@ async fn message_handler(
     let response_str = serde_json::to_string(&response).unwrap_or_default();
 
     // Also push to SSE stream
-    if let Some(tx) = state.sessions.lock().await.get(&session_id) {
+    if let Some(session_id) = session_id
+        && let Some(tx) = state.sessions.lock().await.get(&session_id)
+    {
         let _ = tx.send(response_str.clone());
     }
 
     response_str
+}
+
+fn origin_allowed(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) else {
+        return true;
+    };
+    origin.starts_with("http://127.0.0.1:")
+        || origin.starts_with("http://localhost:")
+        || origin == "tauri://localhost"
 }
 
 fn jsonrpc_success(id: Value, result: Value) -> Value {

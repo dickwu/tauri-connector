@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use connector_client::discovery::{self, ConnectionOptions};
 use connector_client::ConnectorClient;
 
 mod commands;
@@ -15,8 +16,6 @@ mod update;
 use snapshot::RefMap;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_PORT: u16 = 9555;
-
 fn ref_cache_path() -> PathBuf {
     std::env::temp_dir().join("tauri-connector-refs.json")
 }
@@ -41,6 +40,18 @@ fn save_refs(refs: &RefMap) {
     version = env!("CARGO_PKG_VERSION"),
 )]
 struct Cli {
+    /// Explicit connector host (overrides discovery)
+    #[arg(long, global = true)]
+    host: Option<String>,
+    /// Explicit connector WebSocket port (overrides discovery)
+    #[arg(long, global = true)]
+    port: Option<u16>,
+    /// Select a discovered app by identifier
+    #[arg(long, global = true)]
+    app_id: Option<String>,
+    /// Explicit path to .connector.json
+    #[arg(long, global = true)]
+    pid_file: Option<PathBuf>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -86,13 +97,9 @@ enum Commands {
         target: String,
     },
     /// Double-click an element
-    Dblclick {
-        target: String,
-    },
+    Dblclick { target: String },
     /// Hover over element
-    Hover {
-        target: String,
-    },
+    Hover { target: String },
     /// Drag element to target
     Drag {
         /// Source: @ref or CSS selector
@@ -110,32 +117,17 @@ enum Commands {
         strategy: String,
     },
     /// Focus an element
-    Focus {
-        target: String,
-    },
+    Focus { target: String },
     /// Clear and fill input
-    Fill {
-        target: String,
-        text: Vec<String>,
-    },
+    Fill { target: String, text: Vec<String> },
     /// Type text character by character
-    Type {
-        target: String,
-        text: Vec<String>,
-    },
+    Type { target: String, text: Vec<String> },
     /// Check checkbox
-    Check {
-        target: String,
-    },
+    Check { target: String },
     /// Uncheck checkbox
-    Uncheck {
-        target: String,
-    },
+    Uncheck { target: String },
     /// Select option(s) in a <select>
-    Select {
-        target: String,
-        values: Vec<String>,
-    },
+    Select { target: String, values: Vec<String> },
     /// Scroll page or element
     Scroll {
         /// Direction: up, down, left, right
@@ -149,13 +141,9 @@ enum Commands {
         selector: Option<String>,
     },
     /// Scroll element into view
-    Scrollintoview {
-        target: String,
-    },
+    Scrollintoview { target: String },
     /// Press a key (Enter, Tab, Escape, etc.)
-    Press {
-        key: String,
-    },
+    Press { key: String },
     /// Get property from element or page
     Get {
         /// Property: title, url, text, html, value, attr, box, styles, count
@@ -199,7 +187,7 @@ enum Commands {
     /// Take a screenshot and save to file
     Screenshot {
         /// Output file path (e.g. /tmp/shot.png)
-        output: String,
+        output: Option<String>,
         /// Image format: png, jpeg, webp
         #[arg(short, long, default_value = "png")]
         format: String,
@@ -209,6 +197,15 @@ enum Commands {
         /// Max width in pixels (resize if larger)
         #[arg(short, long)]
         max_width: Option<u32>,
+        /// Allow overwriting an existing output path
+        #[arg(long)]
+        overwrite: bool,
+        /// Directory for auto-generated screenshot names
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        /// Short slug included in auto-generated names
+        #[arg(long)]
+        name_hint: Option<String>,
     },
     /// Get cached DOM snapshot (pushed from frontend)
     Dom {
@@ -261,6 +258,14 @@ enum Commands {
     },
     /// App backend state
     State,
+    /// Show discovered connector instances
+    Status {
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show internal webview bridge status
+    Bridge,
     /// List windows
     Windows,
     /// Check for updates and self-update
@@ -370,6 +375,13 @@ enum EventCommands {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let connection_options = ConnectionOptions {
+        cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        host: cli.host.clone(),
+        port: cli.port,
+        app_id: cli.app_id.clone(),
+        pid_file: cli.pid_file.clone(),
+    };
 
     if matches!(cli.command, Commands::Examples) {
         print_help();
@@ -385,7 +397,10 @@ async fn main() {
     }
 
     if let Commands::Doctor { json, no_runtime } = &cli.command {
-        let opts = doctor::Options { json: *json, no_runtime: *no_runtime };
+        let opts = doctor::Options {
+            json: *json,
+            no_runtime: *no_runtime,
+        };
         if let Err(e) = doctor::run(opts).await {
             eprintln!("{e}");
             std::process::exit(1);
@@ -406,9 +421,15 @@ async fn main() {
     }
 
     if let Commands::Snapshots { action } = &cli.command {
+        let resolved = discovery::resolve_connection(connection_options.clone())
+            .await
+            .ok();
+        let instance = resolved.as_ref().and_then(|r| r.instance.as_ref());
         let result = match action {
-            SnapshotActions::List => commands::snapshots_list(),
-            SnapshotActions::Read { uuid, file } => commands::snapshots_read(uuid, file.as_deref()),
+            SnapshotActions::List => commands::snapshots_list(instance),
+            SnapshotActions::Read { uuid, file } => {
+                commands::snapshots_read(instance, uuid, file.as_deref())
+            }
         };
         if let Err(e) = result {
             eprintln!("Error: {e}");
@@ -417,17 +438,78 @@ async fn main() {
         return;
     }
 
-    let host = std::env::var("TAURI_CONNECTOR_HOST").unwrap_or_else(|_| DEFAULT_HOST.to_string());
-    let port: u16 = std::env::var("TAURI_CONNECTOR_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(DEFAULT_PORT);
+    if let Commands::Status { json } = &cli.command {
+        let host = cli
+            .host
+            .clone()
+            .or_else(|| std::env::var("TAURI_CONNECTOR_HOST").ok())
+            .unwrap_or_else(|| DEFAULT_HOST.to_string());
+        let statuses = discovery::instance_statuses(
+            &connection_options.cwd,
+            connection_options.app_id.as_deref(),
+            connection_options.pid_file.as_deref(),
+            Some(&host),
+        )
+        .await;
+        let resolved = discovery::resolve_connection(connection_options.clone())
+            .await
+            .ok();
+        if *json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "resolved": resolved,
+                    "instances": statuses,
+                }))
+                .unwrap_or_default()
+            );
+        } else {
+            if let Some(r) = resolved {
+                println!("connected: {}:{} ({:?})", r.host, r.port, r.source);
+            } else {
+                println!("connected: none");
+            }
+            if statuses.is_empty() {
+                println!("instances: none");
+            } else {
+                println!("instances:");
+                for s in statuses {
+                    let i = s.instance;
+                    let state = if s.stale { "stale" } else { "ready" };
+                    println!(
+                        "  {state} {}:{} pid={} app={} id={} file={}",
+                        host,
+                        i.ws_port,
+                        i.pid,
+                        i.app_name.as_deref().unwrap_or("?"),
+                        i.app_id.as_deref().unwrap_or("?"),
+                        i.pid_file.display(),
+                    );
+                    if let Some(error) = s.error {
+                        println!("    {error}");
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    let resolved = match discovery::resolve_connection(connection_options).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let mut client = ConnectorClient::new();
 
     // Connect with ping fallback
-    if let Err(e) = client.connect(&host, port).await {
-        eprintln!("Error: Failed to connect to {host}:{port}: {e}");
+    if let Err(e) = client.connect(&resolved.host, resolved.port).await {
+        eprintln!(
+            "Error: Failed to connect to {}:{}: {e}",
+            resolved.host, resolved.port
+        );
         std::process::exit(1);
     }
 
@@ -447,10 +529,20 @@ async fn main() {
             no_split,
         } => {
             match commands::snapshot(
-                &client, interactive, compact, depth, max_elements,
-                selector, mode, !no_react, !no_portals,
-                max_tokens, no_split,
-            ).await {
+                &client,
+                interactive,
+                compact,
+                depth,
+                max_elements,
+                selector,
+                mode,
+                !no_react,
+                !no_portals,
+                max_tokens,
+                no_split,
+            )
+            .await
+            {
                 Ok(new_refs) => {
                     refs = new_refs;
                     save_refs(&refs);
@@ -462,9 +554,13 @@ async fn main() {
         Commands::Click { target } => commands::click(&client, &refs, &target).await,
         Commands::Dblclick { target } => commands::dblclick(&client, &refs, &target).await,
         Commands::Hover { target } => commands::hover(&client, &refs, &target).await,
-        Commands::Drag { source, target, steps, duration, strategy } => {
-            commands::drag(&client, &refs, &source, &target, steps, duration, &strategy).await
-        }
+        Commands::Drag {
+            source,
+            target,
+            steps,
+            duration,
+            strategy,
+        } => commands::drag(&client, &refs, &source, &target, steps, duration, &strategy).await,
         Commands::Focus { target } => commands::focus(&client, &refs, &target).await,
         Commands::Fill { target, text } => {
             commands::fill(&client, &refs, &target, &text.join(" ")).await
@@ -490,36 +586,55 @@ async fn main() {
             prop,
             target,
             extra,
-        } => {
-            commands::get_prop(
-                &client,
-                &refs,
-                &prop,
-                target.as_deref(),
-                extra.as_deref(),
-            )
-            .await
-        }
+        } => commands::get_prop(&client, &refs, &prop, target.as_deref(), extra.as_deref()).await,
         Commands::Wait {
             selector,
             text,
             timeout,
         } => commands::wait(&client, selector.as_deref(), text.as_deref(), timeout).await,
         Commands::Eval { script } => commands::eval_js(&client, &script.join(" ")).await,
-        Commands::Logs { lines, filter, level, pattern } => {
-            commands::logs(&client, lines, filter.as_deref(), level.as_deref(), pattern.as_deref()).await
+        Commands::Logs {
+            lines,
+            filter,
+            level,
+            pattern,
+        } => {
+            commands::logs(
+                &client,
+                lines,
+                filter.as_deref(),
+                level.as_deref(),
+                pattern.as_deref(),
+            )
+            .await
         }
         Commands::Screenshot {
             output,
             format,
             quality,
             max_width,
-        } => commands::screenshot(&client, &output, &format, quality, max_width).await,
+            overwrite,
+            output_dir,
+            name_hint,
+        } => {
+            let instance = resolved.instance.as_ref();
+            commands::screenshot(
+                &client,
+                output.as_deref(),
+                &format,
+                quality,
+                max_width,
+                overwrite,
+                output_dir.as_deref(),
+                name_hint.as_deref(),
+                instance,
+            )
+            .await
+        }
         Commands::Dom { window_id } => commands::cached_dom(&client, &window_id).await,
-        Commands::Find {
-            selector,
-            strategy,
-        } => commands::find(&client, &selector, &strategy).await,
+        Commands::Find { selector, strategy } => {
+            commands::find(&client, &selector, &strategy).await
+        }
         Commands::Pointed => commands::pointed(&client).await,
         Commands::Resize {
             width,
@@ -532,28 +647,32 @@ async fn main() {
             }
             IpcCommands::Monitor => commands::ipc_monitor(&client, "start").await,
             IpcCommands::Unmonitor => commands::ipc_monitor(&client, "stop").await,
-            IpcCommands::Captured { filter, pattern, since, limit } => {
-                commands::ipc_captured(&client, filter.as_deref(), pattern.as_deref(), since, limit).await
+            IpcCommands::Captured {
+                filter,
+                pattern,
+                since,
+                limit,
+            } => {
+                commands::ipc_captured(&client, filter.as_deref(), pattern.as_deref(), since, limit)
+                    .await
             }
         },
         Commands::Emit { event, payload } => {
             commands::ipc_emit(&client, &event, payload.as_deref()).await
         }
         Commands::Events { action } => match action {
-            EventCommands::Listen { events } => {
-                commands::event_listen(&client, &events).await
-            }
-            EventCommands::Captured { pattern, since, limit } => {
-                commands::event_captured(&client, pattern.as_deref(), since, limit).await
-            }
-            EventCommands::Stop => {
-                commands::event_stop(&client).await
-            }
+            EventCommands::Listen { events } => commands::event_listen(&client, &events).await,
+            EventCommands::Captured {
+                pattern,
+                since,
+                limit,
+            } => commands::event_captured(&client, pattern.as_deref(), since, limit).await,
+            EventCommands::Stop => commands::event_stop(&client).await,
         },
-        Commands::Clear { target } => {
-            commands::clear_logs(&client, &target).await
-        },
+        Commands::Clear { target } => commands::clear_logs(&client, &target).await,
         Commands::State => commands::state(&client).await,
+        Commands::Status { .. } => unreachable!(),
+        Commands::Bridge => commands::bridge_status(&client).await,
         Commands::Windows => commands::windows(&client).await,
         Commands::Snapshots { .. } => unreachable!(),
         Commands::Update { .. } => unreachable!(),
@@ -577,8 +696,12 @@ USAGE:
   tauri-connector <command> [args...]
 
 CONNECTION:
-  Connects to tauri-plugin-connector WebSocket on
-  $TAURI_CONNECTOR_HOST:$TAURI_CONNECTOR_PORT (default: 127.0.0.1:9555)
+  Resolves the connector endpoint as:
+  --host/--port > TAURI_CONNECTOR_* env > .connector.json > port scan
+
+STATUS:
+  status [--json]                    Show discovered instances and selected endpoint
+  bridge                             Show connected internal webview bridge clients
 
 SNAPSHOT:
   snapshot [-i] [-c] [-d N] [-s "#selector"] [--max-tokens N] [--no-split]

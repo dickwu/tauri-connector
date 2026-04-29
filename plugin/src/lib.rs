@@ -42,7 +42,7 @@ use bridge::Bridge;
 use server::Server;
 use state::{DomEntry, EventEntry, IpcEvent, LogEntry, PluginState};
 
-const DEFAULT_BIND_ADDRESS: &str = "0.0.0.0";
+const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1";
 const DEFAULT_PORT_RANGE: (u16, u16) = (9555, 9655);
 const DEFAULT_MCP_PORT_RANGE: (u16, u16) = (9556, 9656);
 
@@ -72,20 +72,16 @@ fn default_main() -> String {
 }
 
 #[tauri::command]
-async fn push_dom(
-    app: AppHandle,
-    payload: PushDomPayload,
-) -> Result<(), String> {
+async fn push_dom(app: AppHandle, payload: PushDomPayload) -> Result<(), String> {
     let state = app.state::<PluginState>();
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let refs: state::RefMap = serde_json::from_str(&payload.refs)
-        .map_err(|e| format!("Invalid refs JSON: {e}"))?;
-    let meta: state::SnapshotMeta = serde_json::from_str(&payload.meta)
-        .unwrap_or_default();
+    let refs: state::RefMap =
+        serde_json::from_str(&payload.refs).map_err(|e| format!("Invalid refs JSON: {e}"))?;
+    let meta: state::SnapshotMeta = serde_json::from_str(&payload.meta).unwrap_or_default();
 
     state
         .push_dom(DomEntry {
@@ -122,10 +118,7 @@ struct LogEntryPayload {
 }
 
 #[tauri::command]
-async fn push_logs(
-    app: AppHandle,
-    payload: PushLogsPayload,
-) -> Result<(), String> {
+async fn push_logs(app: AppHandle, payload: PushLogsPayload) -> Result<(), String> {
     let state = app.state::<PluginState>();
     let entries: Vec<LogEntry> = payload
         .entries
@@ -149,10 +142,7 @@ struct PointedElementPayload {
 }
 
 #[tauri::command]
-async fn set_pointed_element(
-    app: AppHandle,
-    payload: PointedElementPayload,
-) -> Result<(), String> {
+async fn set_pointed_element(app: AppHandle, payload: PointedElementPayload) -> Result<(), String> {
     let state = app.state::<PluginState>();
     state.set_pointed_element(payload.element).await;
     Ok(())
@@ -172,18 +162,17 @@ struct PushIpcEventPayload {
 }
 
 #[tauri::command]
-async fn push_ipc_event(
-    app: AppHandle,
-    payload: PushIpcEventPayload,
-) -> Result<(), String> {
+async fn push_ipc_event(app: AppHandle, payload: PushIpcEventPayload) -> Result<(), String> {
     let state = app.state::<PluginState>();
-    state.push_ipc_event(IpcEvent {
-        command: payload.command,
-        args: payload.args,
-        timestamp: payload.timestamp,
-        duration_ms: payload.duration_ms,
-        error: payload.error,
-    }).await;
+    state
+        .push_ipc_event(IpcEvent {
+            command: payload.command,
+            args: payload.args,
+            timestamp: payload.timestamp,
+            duration_ms: payload.duration_ms,
+            error: payload.error,
+        })
+        .await;
     Ok(())
 }
 
@@ -199,17 +188,16 @@ struct PushEventPayload {
 }
 
 #[tauri::command]
-async fn push_event(
-    app: AppHandle,
-    payload: PushEventPayload,
-) -> Result<(), String> {
+async fn push_event(app: AppHandle, payload: PushEventPayload) -> Result<(), String> {
     let state = app.state::<PluginState>();
-    state.push_event(EventEntry {
-        event: payload.event,
-        payload: payload.payload,
-        timestamp: payload.timestamp,
-        window_id: payload.window_id,
-    }).await;
+    state
+        .push_event(EventEntry {
+            event: payload.event,
+            payload: payload.payload,
+            timestamp: payload.timestamp,
+            window_id: payload.window_id,
+        })
+        .await;
     Ok(())
 }
 
@@ -239,8 +227,8 @@ impl ConnectorBuilder {
         }
     }
 
-    /// Set the bind address. Default: "0.0.0.0" (all interfaces).
-    /// Use "127.0.0.1" for localhost-only access.
+    /// Set the bind address. Default: "127.0.0.1" (localhost only).
+    /// Passing "0.0.0.0" exposes the debug connector to the network.
     pub fn bind_address(self, addr: &str) -> Self {
         Self {
             bind_address: addr.to_string(),
@@ -288,6 +276,11 @@ impl ConnectorBuilder {
                 push_event,
             ])
             .setup(move |app, _api| {
+                if bind_address == "0.0.0.0" || bind_address == "::" {
+                    eprintln!(
+                        "[connector][security] Remote debug exposed on {bind_address}; prefer 127.0.0.1 unless this is intentional"
+                    );
+                }
                 let log_dir = app.path().app_data_dir()
                     .unwrap_or_else(|_| std::env::temp_dir())
                     .join(".tauri-connector");
@@ -319,8 +312,8 @@ impl ConnectorBuilder {
                     bridge.set_app_handle(handle.clone()).await;
 
                     // 2. Inject bridge JS into all current webviews
-                    let init_script = bridge::bridge_init_script(bridge.port());
-                    for (_label, window) in handle.webview_windows() {
+                    for (label, window) in handle.webview_windows() {
+                        let init_script = bridge::bridge_init_script(bridge.port(), &label);
                         if let Err(e) = window.eval(&init_script) {
                             eprintln!("[connector] Failed to inject bridge script: {e}");
                         }
@@ -330,8 +323,8 @@ impl ConnectorBuilder {
                     let bridge_port = bridge.port();
                     let handle_for_event = handle.clone();
                     handle.listen("tauri://webview-created", move |_event| {
-                        let script = bridge::bridge_init_script(bridge_port);
-                        for (_label, window) in handle_for_event.webview_windows() {
+                        for (label, window) in handle_for_event.webview_windows() {
+                            let script = bridge::bridge_init_script(bridge_port, &label);
                             let _ = window.eval(&script);
                         }
                     });
@@ -357,7 +350,7 @@ impl ConnectorBuilder {
                                 mcp_port_actual = Some(port);
                                 let config = handle.config();
                                 println!(
-                                    "[connector][mcp] MCP ready for '{}' — url: http://{}:{}/sse",
+                                    "[connector][mcp] MCP ready for '{}' — url: http://{}:{}/mcp (/sse legacy)",
                                     config.product_name.clone().unwrap_or_default(),
                                     bind_address,
                                     port,
@@ -452,9 +445,13 @@ fn write_pid_file(
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),
+        "pid_file": pid_path.to_string_lossy(),
     });
 
-    match std::fs::write(&pid_path, serde_json::to_string_pretty(&info).ok()?) {
+    let tmp_path = pid_path.with_extension("json.tmp");
+    match std::fs::write(&tmp_path, serde_json::to_string_pretty(&info).ok()?)
+        .and_then(|_| std::fs::rename(&tmp_path, &pid_path))
+    {
         Ok(()) => {
             println!("[connector] PID file: {}", pid_path.display());
             Some(pid_path)

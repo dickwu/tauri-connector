@@ -23,7 +23,7 @@ Check `src-tauri/Cargo.toml`. If `tauri-plugin-connector` is not present, add it
 
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.9"
+tauri-plugin-connector = "0.10"
 ```
 
 ## Step 2: Register the plugin
@@ -97,7 +97,7 @@ Add to `.mcp.json` in the project root:
 {
   "mcpServers": {
     "tauri-connector": {
-      "url": "http://127.0.0.1:9556/sse"
+      "url": "http://127.0.0.1:9556/mcp"
     }
   }
 }
@@ -111,12 +111,12 @@ Run the app with `bun run tauri dev` (or `cargo tauri dev`). Look for these log 
 
 ```
 [connector][bridge] Internal bridge on port 9300
-[connector][mcp] MCP ready for 'App Name' -- url: http://0.0.0.0:9556/sse
-[connector] Plugin ready for 'App Name' (com.app.id) -- WS on 0.0.0.0:9555
-[connector] PID file: /path/to/src-tauri/target/debug/.connector.json
+[connector][mcp] MCP ready for 'App Name' -- url: http://127.0.0.1:9556/mcp (/sse legacy)
+[connector] Plugin ready for 'App Name' (com.app.id) -- WS on 127.0.0.1:9555
+[connector] PID file: /path/to/src-tauri/target/.connector.json
 ```
 
-The PID file enables bun scripts to auto-discover ports without configuration.
+The PID file enables the Rust CLI, standalone MCP server, and bun scripts to auto-discover ports without configuration. Run `tauri-connector status --json` to inspect the selected endpoint and stale candidates.
 
 For a one-shot health check of the entire setup, run `tauri-connector doctor` in the project root. It walks every file above, probes the running WS/MCP ports, and prints a Fix line for anything missing. Use `--json` for CI, `--no-runtime` to skip the live probes.
 
@@ -138,7 +138,7 @@ tauri-connector hook remove
 
 ## Custom Configuration
 
-For localhost-only access, custom ports, or disabling the embedded MCP:
+For remote access, custom ports, or disabling the embedded MCP:
 
 ```rust
 use tauri_plugin_connector::ConnectorBuilder;
@@ -147,7 +147,7 @@ use tauri_plugin_connector::ConnectorBuilder;
 {
     builder = builder.plugin(
         ConnectorBuilder::new()
-            .bind_address("127.0.0.1")   // default: 0.0.0.0
+            .bind_address("0.0.0.0")     // remote debug opt-in; default is 127.0.0.1
             .port_range(9600, 9700)      // WS port range (default: 9555-9655)
             .mcp_port_range(9700, 9800)  // MCP port range (default: 9556-9656)
             .build()

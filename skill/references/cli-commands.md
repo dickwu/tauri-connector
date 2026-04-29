@@ -1,6 +1,6 @@
 # CLI Command Reference
 
-Complete reference for the `tauri-connector` CLI binary. All commands connect to `TAURI_CONNECTOR_HOST:TAURI_CONNECTOR_PORT` (default `127.0.0.1:9555`).
+Complete reference for the `tauri-connector` CLI binary. Commands resolve the connection as `--host/--port` > `TAURI_CONNECTOR_*` env > nearby `.connector.json` > port scan.
 
 Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-cli --release`
 
@@ -9,7 +9,23 @@ Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-
 | Variable | Default | Description |
 |---|---|---|
 | `TAURI_CONNECTOR_HOST` | `127.0.0.1` | Plugin WebSocket host |
-| `TAURI_CONNECTOR_PORT` | `9555` | Plugin WebSocket port |
+| `TAURI_CONNECTOR_PORT` | discovered | Plugin WebSocket port |
+| `TAURI_CONNECTOR_PID_FILE` | | Explicit `.connector.json` path |
+| `TAURI_CONNECTOR_APP_ID` | | Filter discovered instances by app identifier |
+
+---
+
+## Connection
+
+```bash
+tauri-connector status
+tauri-connector status --json
+tauri-connector --app-id com.example.app logs -l error
+tauri-connector --pid-file src-tauri/target/.connector.json snapshot -i
+tauri-connector bridge
+```
+
+`status` lists live and stale candidates. `bridge` shows connected webviews, pending evals, and whether eval fallback is available.
 
 ---
 
@@ -49,7 +65,7 @@ tauri-connector snapshot -i --max-tokens 0         # Unlimited (legacy behavior)
 tauri-connector snapshot -i --no-split             # Full output, never write subtree files
 ```
 
-When the budget fires, stderr prints the snapshot UUID plus each spilled subtree's label, estimated tokens, and absolute path under `$TMPDIR/tauri-connector-<pid>/snapshots/<uuid>/`.
+When the budget fires, stderr prints the snapshot UUID plus each spilled subtree's label, estimated tokens, and absolute path under the app connector log directory's `snapshots/<uuid>/`.
 
 ### snapshots
 
@@ -253,7 +269,7 @@ tauri-connector drag "[draggable]" ".trash" --strategy html5dnd
 ## Screenshot
 
 ```bash
-tauri-connector screenshot <output-path> [FLAGS]
+tauri-connector screenshot [output-path] [FLAGS]
 ```
 
 | Flag | Short | Default | Description |
@@ -261,14 +277,20 @@ tauri-connector screenshot <output-path> [FLAGS]
 | `--format` | `-f` | `png` | `png`, `jpeg`, `webp` |
 | `--quality` | `-q` | 80 | JPEG/WebP quality (0-100) |
 | `--max-width` | `-m` | | Max width in pixels (maintains aspect ratio) |
-| `--window-id` | | | Target window |
+| `--overwrite` | | false | Allow replacing an existing output path |
+| `--output-dir` | | connector artifact dir | Directory for auto-generated names |
+| `--name-hint` | | `full` | Slug included in generated filenames |
 
 Examples:
 ```bash
 tauri-connector screenshot /tmp/shot.png -m 1280
+tauri-connector screenshot /tmp/shot.png             # If it exists, writes a unique sibling
+tauri-connector screenshot --name-hint login-before  # Auto artifact path
 tauri-connector screenshot /tmp/s.webp -f webp
 tauri-connector screenshot /tmp/s.jpg -f jpeg -q 60
 ```
+
+The command prints the final resolved path and `sha256` as JSON. Do not assume a reused requested path is the latest capture unless `--overwrite` was used.
 
 ---
 

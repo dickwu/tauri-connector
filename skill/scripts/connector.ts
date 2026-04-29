@@ -3,14 +3,15 @@
  *
  * Port discovery order:
  * 1. TAURI_CONNECTOR_PORT env var (explicit override)
- * 2. .connector.json PID file in target/ (auto-discovery)
- * 3. Default port 9555
+ * 2. TAURI_CONNECTOR_PID_FILE
+ * 3. .connector.json PID files near cwd
+ * 4. Default port 9555
  *
  * Usage: import { send, getConnectionInfo } from './connector';
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { dirname, join, resolve } from 'path';
 
 interface ConnectorInfo {
   pid: number;
@@ -20,39 +21,65 @@ interface ConnectorInfo {
   app_name: string;
   app_id: string;
   exe: string;
+  log_dir?: string;
   started_at: number;
+  pid_file?: string;
 }
 
 const TIMEOUT = parseInt(process.env.TAURI_CONNECTOR_TIMEOUT || '15000', 10);
 
-/** Search upward from cwd for target/.connector.json */
-function findPidFile(): ConnectorInfo | null {
-  // Common locations: ./target, ./src-tauri/target, ../src-tauri/target
-  const searchPaths = [
-    join(process.cwd(), 'target', '.connector.json'),
-    join(process.cwd(), 'src-tauri', 'target', '.connector.json'),
-    join(process.cwd(), '..', 'src-tauri', 'target', '.connector.json'),
-    join(process.cwd(), '..', 'target', '.connector.json'),
-  ];
+function pidFileCandidates(): string[] {
+  const roots: string[] = [];
+  let cur = resolve(process.cwd());
+  for (let i = 0; i < 8; i += 1) {
+    roots.push(cur);
+    const next = dirname(cur);
+    if (next === cur) break;
+    cur = next;
+  }
 
-  for (const p of searchPaths) {
+  const candidates: string[] = [];
+  if (process.env.TAURI_CONNECTOR_PID_FILE) {
+    candidates.push(process.env.TAURI_CONNECTOR_PID_FILE);
+  }
+  for (const root of roots) {
+    candidates.push(
+      join(root, 'src-tauri', 'target', '.connector.json'),
+      join(root, 'src-tauri', 'target', 'debug', '.connector.json'),
+      join(root, 'src-tauri', 'target', 'release', '.connector.json'),
+      join(root, 'target', '.connector.json'),
+      join(root, 'target', 'debug', '.connector.json'),
+      join(root, 'target', 'release', '.connector.json'),
+    );
+  }
+  return Array.from(new Set(candidates));
+}
+
+/** Search upward from cwd for live .connector.json files. */
+function findPidFile(): ConnectorInfo | null {
+  const appId = process.env.TAURI_CONNECTOR_APP_ID;
+  const live: ConnectorInfo[] = [];
+
+  for (const p of pidFileCandidates()) {
     if (existsSync(p)) {
       try {
         const data = JSON.parse(readFileSync(p, 'utf-8')) as ConnectorInfo;
+        data.pid_file = p;
+        if (appId && data.app_id !== appId) continue;
         // Verify process is still alive
         try {
           process.kill(data.pid, 0); // signal 0 = just check existence
-          return data;
+          live.push(data);
         } catch {
-          // Process is dead, stale PID file
-          return null;
+          // Ignore stale PID files.
         }
       } catch {
-        return null;
+        // Ignore malformed PID files and keep scanning.
       }
     }
   }
-  return null;
+  live.sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
+  return live[0] || null;
 }
 
 /** Resolve host and port, preferring env vars > PID file > defaults. */

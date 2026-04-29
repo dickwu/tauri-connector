@@ -20,6 +20,7 @@ pub enum Command {
         #[serde(default = "default_window")]
         window_id: String,
     },
+    BridgeStatus,
 
     // --- Screenshot ---
     Screenshot {
@@ -31,18 +32,40 @@ pub enum Command {
         max_width: Option<u32>,
         #[serde(default = "default_window")]
         window_id: String,
+        #[serde(default)]
+        save: Option<bool>,
+        #[serde(default)]
+        output_dir: Option<String>,
+        #[serde(default)]
+        name_hint: Option<String>,
+        #[serde(default)]
+        overwrite: Option<bool>,
+        #[serde(default)]
+        selector: Option<String>,
     },
 
     // --- DOM ---
     DomSnapshot {
-        #[serde(default = "default_snapshot_type")]
-        snapshot_type: String,
+        #[serde(default)]
+        mode: Option<String>,
+        #[serde(default)]
+        snapshot_type: Option<String>,
         #[serde(default)]
         selector: Option<String>,
+        #[serde(default)]
+        max_depth: Option<u64>,
+        #[serde(default)]
+        max_elements: Option<u64>,
         #[serde(default)]
         max_tokens: Option<u64>,
         #[serde(default)]
         no_split: Option<bool>,
+        #[serde(default)]
+        react_enrich: Option<bool>,
+        #[serde(default)]
+        follow_portals: Option<bool>,
+        #[serde(default)]
+        shadow_dom: Option<bool>,
         #[serde(default = "default_window")]
         window_id: String,
     },
@@ -230,9 +253,6 @@ fn default_format() -> String {
 }
 fn default_quality() -> u8 {
     80
-}
-fn default_snapshot_type() -> String {
-    "accessibility".to_string()
 }
 fn default_strategy() -> String {
     "css".to_string()

@@ -24,3 +24,5 @@ server/bun.lockb
 .swarm/
 .gitnexus
 .gstack/
+.omc
+.agents/

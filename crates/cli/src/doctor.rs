@@ -41,7 +41,7 @@ const SNIPPET_WITH_GLOBAL_TAURI: &str = r#""app": {
 
 const SNIPPET_MCP_JSON: &str = r#"{
   "mcpServers": {
-    "tauri-connector": { "url": "http://127.0.0.1:9556/sse" }
+    "tauri-connector": { "url": "http://127.0.0.1:9556/mcp" }
   }
 }"#;
 
@@ -55,7 +55,10 @@ fn cargo_version_hint() -> String {
 /// Indent every line of a snippet by two spaces so it nests cleanly under a
 /// Fix: header when rendered by `print_text`.
 fn indent_snippet(s: &str) -> String {
-    s.lines().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n")
+    s.lines()
+        .map(|l| format!("  {l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -91,13 +94,28 @@ struct Check {
 
 impl Check {
     fn ok(label: impl Into<String>) -> Self {
-        Self { label: label.into(), status: Status::Ok, detail: None, fix: None }
+        Self {
+            label: label.into(),
+            status: Status::Ok,
+            detail: None,
+            fix: None,
+        }
     }
     fn fail(label: impl Into<String>, fix: impl Into<String>) -> Self {
-        Self { label: label.into(), status: Status::Fail, detail: None, fix: Some(fix.into()) }
+        Self {
+            label: label.into(),
+            status: Status::Fail,
+            detail: None,
+            fix: Some(fix.into()),
+        }
     }
     fn warn(label: impl Into<String>, fix: impl Into<String>) -> Self {
-        Self { label: label.into(), status: Status::Warn, detail: None, fix: Some(fix.into()) }
+        Self {
+            label: label.into(),
+            status: Status::Warn,
+            detail: None,
+            fix: Some(fix.into()),
+        }
     }
     fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
@@ -204,7 +222,10 @@ fn check_environment(cwd: &Path, project: Option<&PathBuf>) -> Section {
         ),
     }
 
-    Section { name: "Environment", checks }
+    Section {
+        name: "Environment",
+        checks,
+    }
 }
 
 // ----- section: plugin setup -----------------------------------------------
@@ -218,7 +239,10 @@ fn check_plugin_setup(root: &Path) -> Section {
         check_snapdom(root),
         check_mcp_json(root),
     ];
-    Section { name: "Plugin Setup", checks }
+    Section {
+        name: "Plugin Setup",
+        checks,
+    }
 }
 
 /// `src-tauri/Cargo.toml` must depend on `tauri-plugin-connector`.
@@ -271,9 +295,13 @@ fn extract_cargo_version(text: &str, name: &str) -> Option<String> {
         }
 
         // Match "name = ..." (tolerate spaces).
-        let Some(rest) = line.strip_prefix(name) else { continue };
+        let Some(rest) = line.strip_prefix(name) else {
+            continue;
+        };
         let rest = rest.trim_start();
-        let Some(rest) = rest.strip_prefix('=') else { continue };
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
         let rest = rest.trim_start();
 
         // Inline table: { version = "...", ... }
@@ -315,7 +343,9 @@ fn check_plugin_registration(root: &Path) -> Check {
     ];
 
     for path in &candidates {
-        let Ok(text) = fs::read_to_string(path) else { continue };
+        let Ok(text) = fs::read_to_string(path) else {
+            continue;
+        };
         let mentions_init = text.contains("tauri_plugin_connector::init")
             || text.contains("tauri_plugin_connector::ConnectorBuilder")
             || (text.contains("tauri_plugin_connector") && text.contains("ConnectorBuilder"));
@@ -367,8 +397,12 @@ fn check_capabilities(root: &Path) -> Check {
             continue;
         }
         checked_any = true;
-        let Ok(text) = fs::read_to_string(&path) else { continue };
-        let Ok(value) = serde_json::from_str::<Value>(&text) else { continue };
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
         if permissions_contain(&value, "connector:default") {
             found_in = Some(path);
             break;
@@ -529,7 +563,15 @@ fn check_mcp_json(root: &Path) -> Check {
                 Check::warn(
                     ".mcp.json `tauri-connector` entry has no `url`",
                     format!(
-                        "set the url in {display}:\n  \"mcpServers\": {{\n    \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/sse\" }}\n  }}"
+                        "set the url in {display}:\n  \"mcpServers\": {{\n    \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/mcp\" }}\n  }}"
+                    ),
+                )
+            } else if url.ends_with("/sse") {
+                Check::warn(
+                    ".mcp.json uses legacy /sse transport",
+                    format!(
+                        "prefer the streamable HTTP endpoint in {display}:\n  \"tauri-connector\": {{ \"url\": \"{}\" }}",
+                        url.trim_end_matches("/sse").to_string() + "/mcp"
                     ),
                 )
             } else {
@@ -540,7 +582,7 @@ fn check_mcp_json(root: &Path) -> Check {
         _ => Check::fail(
             ".mcp.json has no `tauri-connector` entry",
             format!(
-                "add a `tauri-connector` entry under `mcpServers` in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/sse\" }}"
+                "add a `tauri-connector` entry under `mcpServers` in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/mcp\" }}"
             ),
         ),
     }
@@ -560,11 +602,20 @@ fn find_pid_file(root: &Path) -> Option<PathBuf> {
     // The plugin writes the PID file next to the dev binary, so it moves between
     // `target/` and `target/debug|release/`. Scan common spots relative to the project.
     let candidates = [
-        root.join("src-tauri").join("target").join("debug").join(".connector.json"),
-        root.join("src-tauri").join("target").join(".connector.json"),
+        root.join("src-tauri")
+            .join("target")
+            .join("debug")
+            .join(".connector.json"),
+        root.join("src-tauri")
+            .join("target")
+            .join(".connector.json"),
         root.join("target").join("debug").join(".connector.json"),
         root.join("target").join(".connector.json"),
-        root.join("src-tauri").join("target").join("release").join(".connector.json"),
+        root.join("src-tauri")
+            .join("target")
+            .join("release")
+            .join(".connector.json"),
+        root.join("target").join("release").join(".connector.json"),
     ];
     candidates.into_iter().find(|p| p.is_file())
 }
@@ -593,25 +644,23 @@ fn read_pid_file(path: &Path) -> Option<PidInfo> {
     })
 }
 
-async fn check_runtime(
-    project: Option<&PathBuf>,
-    pid: Option<(PathBuf, PidInfo)>,
-) -> Section {
+async fn check_runtime(project: Option<&PathBuf>, pid: Option<(PathBuf, PidInfo)>) -> Section {
     let mut checks = Vec::new();
 
     // PID file presence
     let (ws_port, mcp_port) = match (&pid, project) {
         (Some((path, info)), Some(root)) => {
-            let mut detail = format!("app: {}", info.app_name.clone().unwrap_or_else(|| "?".into()));
+            let mut detail = format!(
+                "app: {}",
+                info.app_name.clone().unwrap_or_else(|| "?".into())
+            );
             if let Some(id) = &info.app_id {
                 detail.push_str(&format!(" ({id})"));
             }
             if let Some(pid) = info.pid {
                 detail.push_str(&format!(", pid {pid}"));
             }
-            checks.push(
-                Check::ok(format!("PID file: {}", rel(root, path))).with_detail(detail),
-            );
+            checks.push(Check::ok(format!("PID file: {}", rel(root, path))).with_detail(detail));
             (
                 info.ws_port.unwrap_or(DEFAULT_WS_PORT),
                 info.mcp_port.unwrap_or(DEFAULT_MCP_PORT),
@@ -619,8 +668,10 @@ async fn check_runtime(
         }
         (Some((path, info)), None) => {
             checks.push(
-                Check::ok(format!("PID file: {}", path.display()))
-                    .with_detail(format!("app: {}", info.app_name.clone().unwrap_or_else(|| "?".into()))),
+                Check::ok(format!("PID file: {}", path.display())).with_detail(format!(
+                    "app: {}",
+                    info.app_name.clone().unwrap_or_else(|| "?".into())
+                )),
             );
             (
                 info.ws_port.unwrap_or(DEFAULT_WS_PORT),
@@ -654,12 +705,12 @@ async fn check_runtime(
     match probe_tcp(PROBE_HOST, mcp_port).await {
         Ok(()) => checks.push(
             Check::ok(format!(
-                "MCP server http://{PROBE_HOST}:{mcp_port}/sse reachable"
+                "MCP server http://{PROBE_HOST}:{mcp_port}/mcp reachable"
             )),
         ),
         Err(e) => checks.push(
             Check::fail(
-                format!("MCP server http://{PROBE_HOST}:{mcp_port}/sse unreachable"),
+                format!("MCP server http://{PROBE_HOST}:{mcp_port}/mcp unreachable"),
                 format!(
                     "start the Tauri app in dev mode — MCP is embedded and starts automatically. If custom ports are set via ConnectorBuilder.mcp_port_range(...), update .mcp.json to match port {mcp_port}:\n  $ bun run tauri dev"
                 ),
@@ -668,7 +719,10 @@ async fn check_runtime(
         ),
     }
 
-    Section { name: "Runtime", checks }
+    Section {
+        name: "Runtime",
+        checks,
+    }
 }
 
 async fn probe_ws(host: &str, port: u16) -> Result<(), String> {
@@ -686,13 +740,10 @@ async fn probe_ws(host: &str, port: u16) -> Result<(), String> {
 
 async fn probe_tcp(host: &str, port: u16) -> Result<(), String> {
     let addr = (host, port);
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        tokio::net::TcpStream::connect(addr),
-    )
-    .await
-    .map_err(|_| "connect timed out after 2s".to_string())?
-    .map_err(|e| format!("tcp connect failed: {e}"))?;
+    tokio::time::timeout(Duration::from_secs(2), tokio::net::TcpStream::connect(addr))
+        .await
+        .map_err(|_| "connect timed out after 2s".to_string())?
+        .map_err(|e| format!("tcp connect failed: {e}"))?;
     Ok(())
 }
 
@@ -701,7 +752,10 @@ async fn probe_tcp(host: &str, port: u16) -> Result<(), String> {
 fn check_integration(root: &Path) -> Section {
     let mut checks = Vec::new();
 
-    let hook_script = root.join(".claude").join("hooks").join("tauri-connector-detect.sh");
+    let hook_script = root
+        .join(".claude")
+        .join("hooks")
+        .join("tauri-connector-detect.sh");
     let settings = root.join(".claude").join("settings.local.json");
 
     let script_exists = hook_script.is_file();
@@ -731,11 +785,17 @@ fn check_integration(root: &Path) -> Section {
         )),
     }
 
-    Section { name: "Integration", checks }
+    Section {
+        name: "Integration",
+        checks,
+    }
 }
 
 fn settings_has_connector_hook(settings: &Value) -> bool {
-    let Some(arr) = settings.pointer("/hooks/UserPromptSubmit").and_then(|v| v.as_array()) else {
+    let Some(arr) = settings
+        .pointer("/hooks/UserPromptSubmit")
+        .and_then(|v| v.as_array())
+    else {
         return false;
     };
     arr.iter().any(|entry| {
@@ -825,7 +885,9 @@ fn tally(sections: &[Section]) -> (usize, usize, usize) {
 }
 
 fn any_fail(sections: &[Section]) -> bool {
-    sections.iter().any(|s| s.checks.iter().any(|c| c.status == Status::Fail))
+    sections
+        .iter()
+        .any(|s| s.checks.iter().any(|c| c.status == Status::Fail))
 }
 
 // ----- small helpers -------------------------------------------------------
@@ -850,7 +912,10 @@ serde = "1"
 tauri-plugin-connector = "0.8"
 reqwest = "0.12"
 "#;
-        assert_eq!(extract_cargo_version(toml, "tauri-plugin-connector"), Some("0.8".into()));
+        assert_eq!(
+            extract_cargo_version(toml, "tauri-plugin-connector"),
+            Some("0.8".into())
+        );
     }
 
     #[test]
@@ -859,7 +924,10 @@ reqwest = "0.12"
 [dependencies]
 tauri-plugin-connector = { version = "0.8.0", features = ["foo"] }
 "#;
-        assert_eq!(extract_cargo_version(toml, "tauri-plugin-connector"), Some("0.8.0".into()));
+        assert_eq!(
+            extract_cargo_version(toml, "tauri-plugin-connector"),
+            Some("0.8.0".into())
+        );
     }
 
     #[test]
@@ -900,12 +968,17 @@ default = []
 [dev-dependencies]
 tauri-plugin-connector = "0.8"
 "#;
-        assert_eq!(extract_cargo_version(toml, "tauri-plugin-connector"), Some("0.8".into()));
+        assert_eq!(
+            extract_cargo_version(toml, "tauri-plugin-connector"),
+            Some("0.8".into())
+        );
     }
 
     #[test]
     fn permissions_string_form() {
-        let caps: Value = serde_json::from_str(r#"{ "permissions": ["connector:default", "fs:default"] }"#).unwrap();
+        let caps: Value =
+            serde_json::from_str(r#"{ "permissions": ["connector:default", "fs:default"] }"#)
+                .unwrap();
         assert!(permissions_contain(&caps, "connector:default"));
         assert!(!permissions_contain(&caps, "missing:perm"));
     }
@@ -921,10 +994,9 @@ tauri-plugin-connector = "0.8"
 
     #[test]
     fn package_deps_found_across_sections() {
-        let pkg: Value = serde_json::from_str(
-            r#"{ "devDependencies": { "@zumer/snapdom": "^1.0.0" } }"#,
-        )
-        .unwrap();
+        let pkg: Value =
+            serde_json::from_str(r#"{ "devDependencies": { "@zumer/snapdom": "^1.0.0" } }"#)
+                .unwrap();
         assert!(package_has_dep(&pkg, "@zumer/snapdom"));
         assert!(!package_has_dep(&pkg, "missing-pkg"));
     }

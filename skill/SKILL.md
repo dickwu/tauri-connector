@@ -22,7 +22,7 @@ The plugin injects a JavaScript bridge into each Tauri webview. Commands flow th
 | **CLI** (`tauri-connector`) | Shell commands with `@eN` ref addressing from snapshots |
 | **Bun scripts** (fallback) | Neither MCP nor CLI binary available -- scripts at `skill/scripts/` |
 
-Verify the app is running: `lsof -i :9555 -P -n 2>/dev/null | grep LISTEN`
+First check connection with `tauri-connector status --json`. It uses explicit args/env, then `.connector.json`, then port scan; do not hardcode 9555 unless discovery fails and you are deliberately probing.
 
 Port layout:
 
@@ -30,7 +30,16 @@ Port layout:
 |---|---|
 | 9300--9400 | Internal bridge (plugin <-> webview JS) |
 | 9555--9655 | External WebSocket (CLI + bun scripts) |
-| 9556--9656 | Embedded MCP SSE server (Claude Code) |
+| 9556--9656 | Embedded MCP HTTP server (`/mcp`, `/sse` legacy) |
+
+## First Move
+
+1. If MCP tools are available, call `ipc_get_backend_state()` or `bridge_status()` first.
+2. If using CLI, run `tauri-connector status`; if it reports stale files, use its path/port evidence.
+3. If bridge execution is flaky, run `tauri-connector bridge` or `bridge_status` before retrying.
+4. If an action changes the DOM, re-snapshot before reusing refs.
+
+Compatibility: older apps may still use `tauri-plugin-connector` 0.8 or an older Homebrew CLI. If `tauri-connector status` is an unknown command, the CLI is stale; use a current project binary or reinstall. If `bridge_status` / `tauri-connector bridge` times out against a 0.8 app, stop retrying that command and continue with `state`, `logs`, `snapshot`, and direct interactions, or upgrade the app's connector plugin for `/mcp`, bridge status, and screenshot artifact metadata.
 
 ## Core Loop: Snapshot -> Act -> Verify
 
@@ -121,6 +130,7 @@ tauri-connector events stop
 # Native pixel-accurate screenshot (xcap, falls back to snapdom)
 webview_screenshot(format: "png", maxWidth: 1280)
 tauri-connector screenshot /tmp/debug.png -m 1280
+tauri-connector screenshot --name-hint login-before
 
 # DOM snapshot shows full element tree with refs
 webview_dom_snapshot(mode: "ai")
@@ -129,6 +139,8 @@ tauri-connector snapshot -i
 # Search the snapshot for patterns
 webview_search_snapshot(pattern: "error|warning", context: 3)
 ```
+
+Screenshots do not overwrite existing files unless `--overwrite` or `overwrite: true` is passed. Always use the returned final path when comparing before/after captures.
 
 ### Runtime State Inspection
 
@@ -325,7 +337,7 @@ For complex apps, DOM snapshots can exceed AI tool result limits. The snapshot e
 - **Default behavior**: `maxTokens: 4000` over MCP -- large DOMs return a layout skeleton (inline) plus `file=subtree-K.txt` markers pointing at on-disk subtree files.
 - **WebSocket / Bun / internal callers**: default `maxTokens: 0` (full output) for backward compatibility. Pass `max_tokens` explicitly to opt in.
 - **Unlimited on MCP**: set `maxTokens: 0` or `noSplit: true` to restore legacy behavior.
-- **Subtree files**: written atomically to `$TMPDIR/tauri-connector-<pid>/snapshots/<uuid>/` (`0700` dir on unix). `meta.subtreeFiles[].path` gives the absolute path; `allRefsPath` points to `refs.json` when the ref map also spills.
+- **Subtree files**: written atomically under the app connector log directory at `snapshots/<uuid>/` (`0700` dir on unix). `meta.subtreeFiles[].path` gives the absolute path; `allRefsPath` points to `refs.json` when the ref map also spills.
 - **Reading subtrees**: use the `Read` tool on the `path` field, or the CLI's `snapshots read <uuid> <file>` (canonicalized -- rejects path traversal). Old sessions are auto-pruned by mtime (keeps newest 5).
 - **Search stays complete**: `webview_search_snapshot` matches against merged full text (skeleton + every subtree), so filters never hide inside spilled content.
 - **Repeating siblings**: runs of 5+ siblings with the same tag + role + ARIA state collapse to 2 examples + a marker; the collapsed rows are written to a subtree file whenever the budget is active.
@@ -403,12 +415,12 @@ bun run $SCRIPTS/events.ts listen user:login  # Listen for events
 
 For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. Summary:
 
-1. `tauri-plugin-connector = "0.9"` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = "0.10"` in `src-tauri/Cargo.toml`
 2. Register plugin with `#[cfg(debug_assertions)]` guard
 3. Add `"connector:default"` permission in capabilities
 4. Set `"withGlobalTauri": true` in `tauri.conf.json`
 5. Install `@zumer/snapdom` for screenshot fallback
-6. Add `"url": "http://127.0.0.1:9556/sse"` to `.mcp.json`
+6. Add `"url": "http://127.0.0.1:9556/mcp"` to `.mcp.json`
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 
@@ -433,7 +445,7 @@ What it verifies:
 
 Exit code is non-zero when any required check fails, so `doctor --json` drops cleanly into CI or pre-commit. Use `--no-runtime` when the Tauri app isn't running (offline setup validation).
 
-First move when something looks wrong: `tauri-connector doctor`. Second move: read the `Fix:` line.
+First move when setup looks wrong: `tauri-connector doctor`. First move when runtime connection looks wrong: `tauri-connector status --json` or `bridge_status`.
 
 ## Deep Reference
 
@@ -453,12 +465,12 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | Problem | Fix |
 |---|---|
 | Any setup problem | `tauri-connector doctor` -- prints a `Fix:` line for each missing/misconfigured piece |
-| Connection refused | App not running or plugin not loaded. Check: `lsof -i :9555 \| grep LISTEN` |
-| Stale PID file | App crashed. Delete: `rm target/debug/.connector.json` |
+| Connection refused | App not running, plugin not loaded, or stale discovery. Run `tauri-connector status --json` |
+| Stale PID file | App crashed. Remove the exact `.connector.json` path reported by `status` |
 | Port conflict | Use `ConnectorBuilder::new().port_range(9600, 9700)` or set `TAURI_CONNECTOR_PORT=9600` |
 | Refs not found | DOM changed since snapshot. Re-run snapshot for fresh refs |
 | Drag not working | Try explicit `--strategy pointer` or `html5dnd`. Increase `--steps` (>5) and `--duration` |
 | Screenshot blank | Install `@zumer/snapdom` for DOM-based fallback capture |
-| No MCP tools | Verify `.mcp.json` has `"url": "http://127.0.0.1:9556/sse"` and app is running |
-| Bridge not connecting | Check `withGlobalTauri: true` in tauri.conf.json. Bridge auto-reconnects every 1s |
+| No MCP tools | Verify `.mcp.json` has `"url": "http://127.0.0.1:9556/mcp"` and app is running; `/sse` is legacy |
+| Bridge not connecting | Run `bridge_status`; bridge accepts reconnects and falls back through window eval when available |
 | Logs empty | Console interception starts on bridge connect. Ensure plugin is registered before app loads |
