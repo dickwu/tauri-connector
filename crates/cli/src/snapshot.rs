@@ -60,12 +60,21 @@ pub fn legacy_ref_cache_path() -> PathBuf {
 }
 
 pub fn load_ref_cache(resolved: &ResolvedConnection, window_id: &str) -> Result<RefMap, String> {
+    Ok(load_ref_cache_full(resolved, window_id)?
+        .map(|cache| cache.refs)
+        .unwrap_or_default())
+}
+
+pub fn load_ref_cache_full(
+    resolved: &ResolvedConnection,
+    window_id: &str,
+) -> Result<Option<RefCache>, String> {
     let path = ref_cache_path(resolved, window_id);
     if let Ok(data) = std::fs::read_to_string(&path) {
         let cache: RefCache = serde_json::from_str(&data)
             .map_err(|e| format!("Ref cache {} is invalid: {e}", path.display()))?;
         validate_ref_cache(&cache, resolved, window_id)?;
-        return Ok(cache.refs);
+        return Ok(Some(cache));
     }
 
     let legacy = legacy_ref_cache_path();
@@ -75,11 +84,22 @@ pub fn load_ref_cache(resolved: &ResolvedConnection, window_id: &str) -> Result<
                 "Warning: using legacy global ref cache at {}. Run snapshot again to create scoped refs for this app/window.",
                 legacy.display()
             );
-            return Ok(refs);
+            return Ok(Some(RefCache {
+                schema_version: 0,
+                app_id: None,
+                app_name: None,
+                pid: None,
+                ws_port: resolved.port,
+                window_id: window_id.to_string(),
+                snapshot_id: None,
+                snapshot_mode: "legacy".to_string(),
+                created_at_ms: 0,
+                refs,
+            }));
         }
     }
 
-    Ok(RefMap::default())
+    Ok(None)
 }
 
 pub fn save_ref_cache(

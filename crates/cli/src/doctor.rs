@@ -15,6 +15,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use connector_client::ConnectorClient;
 
+use crate::skills;
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const SYM_OK: &str = "✓";
@@ -1818,6 +1820,26 @@ fn check_integration(root: &Path) -> Section {
             "Claude Code auto-detect hook not installed (optional)",
             "enable per-prompt detection:\n  $ tauri-connector hook install",
         )),
+    }
+
+    let stale_docs = skills::stale_local_skill_docs();
+    if stale_docs.is_empty() {
+        checks.push(Check::ok(
+            "Local tauri-connector skill docs match the bundled CLI skill",
+        ));
+    } else {
+        let details = stale_docs
+            .iter()
+            .map(|(path, reason)| format!("{} ({reason})", path.display()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        checks.push(
+            Check::warn(
+                "Local tauri-connector skill docs are stale",
+                "refresh each stale file from the CLI-bundled docs listed above:\n  $ tauri-connector skills list\n  $ tauri-connector skills get tauri-connector > <skill-dir>/SKILL.md\n  $ tauri-connector skills get mcp-tools > <skill-dir>/references/mcp-tools.md\n  $ tauri-connector skills path mcp-tools",
+            )
+            .with_detail(details),
+        );
     }
 
     Section {

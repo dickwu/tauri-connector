@@ -42,6 +42,11 @@ use bridge::Bridge;
 use server::Server;
 use state::{DomEntry, EventEntry, IpcEvent, LogEntry, PluginState, RuntimeEntry};
 
+#[doc(hidden)]
+pub fn __connector_mcp_tool_definitions() -> serde_json::Value {
+    mcp_tools::tool_definitions()
+}
+
 const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1";
 const DEFAULT_PORT_RANGE: (u16, u16) = (9555, 9655);
 const DEFAULT_MCP_PORT_RANGE: (u16, u16) = (9556, 9656);

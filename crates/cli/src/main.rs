@@ -9,6 +9,7 @@ use connector_client::ConnectorClient;
 mod commands;
 mod doctor;
 mod hook;
+mod skills;
 mod snapshot;
 mod update;
 
@@ -144,9 +145,56 @@ enum Commands {
         /// Wait for this text to appear
         #[arg(long)]
         text: Option<String>,
+        /// Wait for the current URL to match a glob pattern
+        #[arg(long)]
+        url: Option<String>,
+        /// Wait for document load state: domcontentloaded, load, networkidle
+        #[arg(long)]
+        load_state: Option<String>,
+        /// Wait until this JavaScript expression/function returns truthy
+        #[arg(long = "fn")]
+        function: Option<String>,
+        /// Element state for selector waits: attached, detached, visible, hidden
+        #[arg(long)]
+        state: Option<String>,
         /// Timeout in milliseconds
         #[arg(long, default_value_t = 5000)]
         timeout: u64,
+    },
+    /// Find elements semantically and optionally act on the match
+    Locator {
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long)]
+        text: Option<String>,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long)]
+        placeholder: Option<String>,
+        #[arg(long)]
+        alt: Option<String>,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long, alias = "testid")]
+        test_id: Option<String>,
+        /// Accessible-name filter applied after the primary locator
+        #[arg(long)]
+        name: Option<String>,
+        /// Match text/name exactly instead of substring matching
+        #[arg(long)]
+        exact: bool,
+        #[arg(long)]
+        first: bool,
+        #[arg(long)]
+        last: bool,
+        #[arg(long)]
+        nth: Option<usize>,
+        /// Optional action: click, fill, type, hover, focus, check, uncheck, text
+        #[arg(long)]
+        action: Option<String>,
+        /// Value for fill/type
+        #[arg(long)]
+        value: Option<String>,
     },
     /// Execute JavaScript
     Eval {
@@ -193,6 +241,9 @@ enum Commands {
         /// Short slug included in auto-generated names
         #[arg(long)]
         name_hint: Option<String>,
+        /// Overlay numbered labels for @eN refs from the latest ai snapshot
+        #[arg(long)]
+        annotate: bool,
     },
     /// Get cached DOM snapshot (pushed from frontend)
     Dom,
@@ -344,6 +395,27 @@ enum Commands {
     Snapshots {
         #[command(subcommand)]
         action: SnapshotActions,
+    },
+    /// Read bundled tauri-connector skill docs from this binary
+    Skills {
+        #[command(subcommand)]
+        action: SkillCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillCommands {
+    /// List bundled skill documents
+    List,
+    /// Print a bundled skill document to stdout
+    Get {
+        /// Name or path, e.g. tauri-connector, mcp-tools, references/mcp-tools.md
+        name: String,
+    },
+    /// Materialize a bundled skill document to a cache path and print that path
+    Path {
+        /// Name or path, e.g. tauri-connector, mcp-tools, references/mcp-tools.md
+        name: String,
     },
 }
 
@@ -556,6 +628,24 @@ async fn main() {
         return;
     }
 
+    if let Commands::Skills { action } = &cli.command {
+        let result = match action {
+            SkillCommands::List => {
+                skills::list();
+                Ok(())
+            }
+            SkillCommands::Get { name } => skills::print(name),
+            SkillCommands::Path { name } => skills::materialize(name).map(|path| {
+                println!("{}", path.display());
+            }),
+        };
+        if let Err(e) = result {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     if let Commands::Snapshots { action } = &cli.command {
         let resolved = discovery::resolve_connection(connection_options.clone())
             .await
@@ -734,8 +824,59 @@ async fn main() {
         Commands::Wait {
             selector,
             text,
+            url,
+            load_state,
+            function,
+            state,
             timeout,
-        } => commands::wait(&client, selector.as_deref(), text.as_deref(), timeout).await,
+        } => {
+            commands::wait(
+                &client,
+                selector.as_deref(),
+                text.as_deref(),
+                url.as_deref(),
+                load_state.as_deref(),
+                function.as_deref(),
+                state.as_deref(),
+                timeout,
+            )
+            .await
+        }
+        Commands::Locator {
+            role,
+            text,
+            label,
+            placeholder,
+            alt,
+            title,
+            test_id,
+            name,
+            exact,
+            first,
+            last,
+            nth,
+            action,
+            value,
+        } => {
+            commands::locator(
+                &client,
+                role.as_deref(),
+                text.as_deref(),
+                label.as_deref(),
+                placeholder.as_deref(),
+                alt.as_deref(),
+                title.as_deref(),
+                test_id.as_deref(),
+                name.as_deref(),
+                exact,
+                first,
+                last,
+                nth,
+                action.as_deref(),
+                value.as_deref(),
+            )
+            .await
+        }
         Commands::Eval { script } => commands::eval_js(&client, &script.join(" ")).await,
         Commands::Logs {
             lines,
@@ -761,6 +902,7 @@ async fn main() {
             overwrite,
             output_dir,
             name_hint,
+            annotate,
         } => {
             let instance = resolved.instance.as_ref();
             commands::screenshot(
@@ -773,7 +915,9 @@ async fn main() {
                 overwrite,
                 output_dir.as_deref(),
                 name_hint.as_deref(),
+                annotate,
                 instance,
+                &resolved,
             )
             .await
         }
@@ -936,6 +1080,7 @@ async fn main() {
         Commands::Bridge => commands::bridge_status(&client).await,
         Commands::Windows => commands::windows(&client).await,
         Commands::Snapshots { .. } => unreachable!(),
+        Commands::Skills { .. } => unreachable!(),
         Commands::Update { .. } => unreachable!(),
         Commands::Examples => unreachable!(),
         Commands::Doctor { .. } => unreachable!(),
@@ -1009,12 +1154,17 @@ GETTERS:
   get count <selector>               Element count
 
 WAIT:
-  wait <selector>                    Wait for element
-  wait --timeout <ms>                Wait for duration
+  wait <selector> --state visible    Wait for element state
   wait --text "Success"              Wait for text
+  wait --url "**/settings*"          Wait for URL glob
+  wait --fn "window.ready === true"  Wait for JS condition
 
 SCREENSHOT:
-  screenshot [path] [--selector @eN] [-f png|jpeg|webp] [-q 80] [-m 1280]
+  screenshot [path] [--selector @eN] [--annotate] [-f png|jpeg|webp] [-q 80] [-m 1280]
+
+LOCATOR:
+  locator --role button --name Save --action click
+  locator --label Email --action fill --value user@example.com
 
 ARTIFACTS:
   artifacts list [--kind screenshot]  List artifact manifest entries
@@ -1051,6 +1201,7 @@ OTHER:
   logs [-n 20] [-f "filter"]         Console logs
   clear logs|ipc|events|runtime|all  Clear persisted captures
   state                              App metadata
+  skills list|get|path               Read bundled skill docs from this binary
   doctor [--json] [--no-runtime]     Diagnose current project setup
   help                               This help
 
@@ -1059,6 +1210,8 @@ EXAMPLES:
   tauri-connector click @e7
   tauri-connector fill @e5 "user@example.com"
   tauri-connector screenshot --name-hint debug -m 1280
+  tauri-connector snapshot -i && tauri-connector screenshot --annotate --name-hint map
+  tauri-connector locator --role button --name Save --action click
   tauri-connector act click @e7 --wait-text Success --logs --ipc --runtime
   tauri-connector drag @e3 @e7 --steps 15 --duration 500
   tauri-connector drag "#item" ".drop-zone" --strategy pointer

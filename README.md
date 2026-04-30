@@ -52,6 +52,14 @@ npx skills add dickwu/tauri-connector
 
 This installs from [skills.sh](https://skills.sh) -- the agent skills directory. Works with Claude Code, Cursor, Windsurf, Codex, Gemini CLI, and more.
 
+The CLI also embeds the same skill bundle for version-matched agent docs:
+
+```bash
+tauri-connector skills list
+tauri-connector skills get tauri-connector
+tauri-connector skills path mcp-tools
+```
+
 ### Install manually
 
 ```bash
@@ -112,8 +120,9 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Select | `webview_select_element` | *(visual picker, not yet implemented)* |
 | Interact | `webview_interact` | `click`, `dblclick`, `hover`, `drag`, `focus`, `fill`, `type`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview` |
 | Keyboard | `webview_keyboard` | `press <key>` |
-| Wait | `webview_wait_for` | `wait <selector> [--text] [--timeout]` |
-| Screenshot | `webview_screenshot` | `screenshot [path] [--selector @eN] [--name-hint debug]` |
+| Wait | `webview_wait_for` | `wait <selector> [--text] [--url] [--load-state] [--fn] [--state] [--timeout]` |
+| Locator | `webview_locator` | `locator --role button --name Save --action click` |
+| Screenshot | `webview_screenshot` | `screenshot [path] [--selector @eN] [--annotate] [--name-hint debug]` |
 | Artifacts | `artifact_list` / `artifact_read` / `artifact_compare` / `artifact_prune` | `artifacts list\|show\|compare\|prune` |
 | Debug | `debug_mark` / `debug_snapshot` / `webview_act_and_verify` | `debug mark\|snapshot`, `act` |
 | Windows | `manage_window` | `windows`, `resize <w> <h>` |
@@ -130,6 +139,7 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Events | `event_get_captured` | `events captured [-p regex]` |
 | DOM | `webview_search_snapshot` | *(via MCP only)* |
 | Setup | `get_setup_instructions` | `examples` |
+| Skills | *(CLI only)* | `skills list|get|path` |
 | Diagnostics | *(CLI only)* | `doctor [--json] [--no-runtime]` |
 | Devices | `list_devices` | *(info only)* |
 
@@ -207,7 +217,7 @@ The recommended pattern keeps `tauri-plugin-connector` and its transitive deps (
 # ...
 
 # Optional dep — only pulled when --features dev-connector is set.
-tauri-plugin-connector = { version = "0.11", optional = true }
+tauri-plugin-connector = { version = "0.12", optional = true }
 
 [features]
 default = []
@@ -288,7 +298,7 @@ If you don't want a separate dev script and don't mind the plugin (and its trans
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.11"
+tauri-plugin-connector = "0.12"
 ```
 
 ```rust
@@ -351,6 +361,8 @@ The MCP server is now live. Claude Code connects automatically via the URL in `.
 
 `tauri-connector doctor` auto-detects whether the project is using the **feature-gated** or **legacy** registration pattern, then walks the current project and confirms every setup step above. It inspects `src-tauri/Cargo.toml` (including the `[features]` block), the plugin registration in `lib.rs`/`main.rs`, both `src-tauri/capabilities/*.json` and `src-tauri/capabilities-dev/*.json`, `src-tauri/tauri.conf.json`, the frontend `package.json` scripts/deps, the root `.mcp.json`, and the live `.connector.json` PID file. Runtime checks verify PID liveness, log_dir/log initialization, WebSocket reachability, bridge status, runtime/artifact/debug command availability, and the Streamable HTTP `/mcp` initialize -> notification -> ping -> GET 405 -> DELETE lifecycle. Each missing piece is reported with a copy-pasteable `Fix:` snippet. It exits non-zero when any required check fails, so it drops straight into CI.
 
+Doctor also warns when an installed local `tauri-connector` skill doc differs from the CLI-bundled copy, so agents do not keep following stale command syntax.
+
 ```bash
 tauri-connector doctor                 # full checklist (text)
 tauri-connector doctor --no-runtime    # skip live WS/MCP probes (offline / CI)
@@ -377,10 +389,10 @@ Sections reported:
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.11.1
+tauri-connector doctor v0.12.0
 
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.11" (optional, feature-gated)
+  ✓ Cargo dependency: tauri-plugin-connector = "0.12" (optional, feature-gated)
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(feature = "dev-connector"))
   ✓ Permission "connector:default" in src-tauri/capabilities-dev/dev-connector.json
   ✓ app.withGlobalTauri: true
@@ -395,14 +407,14 @@ Example output for a legacy setup (passes, with the migration nudge):
 
 ```
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.11"
+  ✓ Cargo dependency: tauri-plugin-connector = "0.12"
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(debug_assertions))
   ✓ Permission "connector:default" in src-tauri/capabilities/default.json
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
   ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
   ! Using legacy debug_assertions gate — consider migrating to --features dev-connector
-      Fix: 1. tauri-plugin-connector = { version = "0.11", optional = true }
+      Fix: 1. tauri-plugin-connector = { version = "0.12", optional = true }
            2. [features] dev-connector = ["dep:tauri-plugin-connector"]
            3. replace cfg(debug_assertions) with cfg(feature = "dev-connector")
            4. move connector:default to capabilities-dev/dev-connector.json
@@ -515,13 +527,14 @@ All commands use `{ id, type, ...params }` with snake_case types:
 |---|---|
 | `ping` | -- |
 | `execute_js` | `script`, `window_id` |
-| `screenshot` | `format`, `quality`, `max_width`, `window_id`, `save`, `output_dir`, `name_hint`, `overwrite`, `selector` |
+| `screenshot` | `format`, `quality`, `max_width`, `window_id`, `save`, `output_dir`, `name_hint`, `overwrite`, `selector`, `annotate` |
 | `dom_snapshot` | `mode` (ai/accessibility/structure), `selector`, `max_depth`, `max_elements`, `max_tokens`, `no_split`, `react_enrich`, `follow_portals`, `shadow_dom`, `window_id` |
 | `find_element` | `selector`, `strategy`, `window_id` |
 | `get_styles` | `selector`, `properties`, `window_id` |
 | `interact` | `action`, `selector`, `strategy`, `x`, `y`, `target_selector`, `target_x`, `target_y`, `steps`, `duration_ms`, `drag_strategy`, `window_id` |
 | `keyboard` | `action`, `text`, `key`, `modifiers`, `window_id` |
-| `wait_for` | `selector`, `strategy`, `text`, `timeout`, `window_id` |
+| `wait_for` | `selector`, `strategy`, `text`, `url`, `load_state`, `function`, `state`, `timeout`, `window_id` |
+| `locator` | `role`, `text`, `label`, `placeholder`, `alt`, `title`, `test_id`, `name`, `exact`, `first`, `last`, `nth`, `action`, `value`, `window_id` |
 | `window_list` / `window_info` / `window_resize` | `window_id`, `width`, `height` |
 | `backend_state` | -- |
 | `ipc_execute_command` | `command`, `args` |
@@ -748,6 +761,8 @@ The `webview_screenshot` tool uses a tiered approach:
 1. **xcap native capture** (cross-platform): Uses the [xcap](https://github.com/nashaofu/xcap) crate for pixel-accurate window capture on Windows, macOS, and Linux. Matches the window by title, captures via native OS APIs, then resizes (`maxWidth`) and encodes to PNG/JPEG/WebP via the `image` crate. Runs on a blocking thread to avoid stalling the Tokio runtime.
 
 2. **snapdom fallback**: When xcap is unavailable (e.g. Wayland without permissions, CI environments), falls back to [snapdom](https://github.com/zumerlab/snapdom) (`@zumer/snapdom`) — a fast DOM-to-image library that captures exactly what the web engine renders. Loaded via dynamic `import()` or `window.snapdom` global. No CDN dependency, works fully offline.
+
+Set `annotate: true` or `tauri-connector screenshot --annotate --name-hint <slug>` after an `ai` DOM snapshot to overlay numbered labels on visible `@eN` refs. The saved artifact manifest records `path`, `sha256`, `refsPath`, `snapshotId`, `windowId`, `selector`, `width`, and `height` so agents can map visual labels back to snapshot refs.
 
 ### PID File Auto-Discovery
 

@@ -51,6 +51,7 @@ pub fn tool_definitions() -> Value {
                         "outputDir": { "type": "string" },
                         "nameHint": { "type": "string" },
                         "overwrite": { "type": "boolean" },
+                        "annotate": { "type": "boolean", "description": "Overlay numbered labels for @eN refs from the latest ai snapshot" },
                         "selector": { "type": "string" },
                         "windowId": { "type": "string" }
                     }
@@ -146,14 +147,41 @@ pub fn tool_definitions() -> Value {
                 })
             ),
             tool_def("webview_wait_for",
-                "Wait for element selectors or text content to appear",
+                "Wait for element selectors, text, URL glob, load state, or a JavaScript condition",
                 json!({
                     "type": "object",
                     "properties": {
                         "selector": { "type": "string" },
                         "strategy": { "type": "string", "enum": ["css", "xpath", "text"] },
                         "text": { "type": "string" },
+                        "url": { "type": "string", "description": "Glob pattern matched against location.href" },
+                        "loadState": { "type": "string", "enum": ["domcontentloaded", "load", "networkidle"] },
+                        "fn": { "type": "string", "description": "JavaScript expression/function/body that returns truthy" },
+                        "state": { "type": "string", "enum": ["attached", "detached", "visible", "hidden"], "description": "Selector state to wait for" },
                         "timeout": { "type": "number" },
+                        "windowId": { "type": "string" }
+                    }
+                })
+            ),
+            tool_def("webview_locator",
+                "Find by semantic locator (role/text/label/placeholder/alt/title/testid/name) and optionally act on the match",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "role": { "type": "string" },
+                        "text": { "type": "string" },
+                        "label": { "type": "string" },
+                        "placeholder": { "type": "string" },
+                        "alt": { "type": "string" },
+                        "title": { "type": "string" },
+                        "testId": { "type": "string" },
+                        "name": { "type": "string", "description": "Accessible-name filter" },
+                        "exact": { "type": "boolean" },
+                        "first": { "type": "boolean" },
+                        "last": { "type": "boolean" },
+                        "nth": { "type": "number" },
+                        "action": { "type": "string", "enum": ["click", "fill", "type", "hover", "focus", "check", "uncheck", "text"] },
+                        "value": { "type": "string", "description": "Value for fill/type" },
                         "windowId": { "type": "string" }
                     }
                 })
@@ -437,6 +465,7 @@ pub async fn call_tool(
         "webview_interact" => handle_interact(client, args).await,
         "webview_keyboard" => handle_keyboard(client, args).await,
         "webview_wait_for" => handle_wait_for(client, args).await,
+        "webview_locator" => handle_locator(client, args).await,
         "webview_get_pointed_element" => handle_get_pointed_element(client, args).await,
         "webview_select_element" => handle_select_element(client, args).await,
         "manage_window" => handle_manage_window(client, args).await,
@@ -558,6 +587,9 @@ async fn handle_screenshot(client: &mut ConnectorClient, args: &Value) -> Result
     }
     if let Some(overwrite) = args.get("overwrite").and_then(|v| v.as_bool()) {
         cmd["overwrite"] = json!(overwrite);
+    }
+    if let Some(annotate) = args.get("annotate").and_then(|v| v.as_bool()) {
+        cmd["annotate"] = json!(annotate);
     }
     if let Some(selector) = str_arg(args, "selector") {
         cmd["selector"] = json!(selector);
@@ -724,7 +756,55 @@ async fn handle_wait_for(client: &mut ConnectorClient, args: &Value) -> Result<V
     if let Some(s) = str_arg(args, "text") {
         cmd["text"] = json!(s);
     }
+    if let Some(s) = str_arg(args, "url") {
+        cmd["url"] = json!(s);
+    }
+    if let Some(s) = str_arg(args, "loadState").or_else(|| str_arg(args, "load_state")) {
+        cmd["load_state"] = json!(s);
+    }
+    if let Some(s) = str_arg(args, "fn")
+        .or_else(|| str_arg(args, "function"))
+        .or_else(|| str_arg(args, "condition"))
+    {
+        cmd["function"] = json!(s);
+    }
+    if let Some(s) = str_arg(args, "state") {
+        cmd["state"] = json!(s);
+    }
     client.send_with_timeout(cmd, timeout + 5000).await
+}
+
+async fn handle_locator(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+    let wid = window_id(args);
+    let mut cmd = json!({
+        "type": "locator",
+        "window_id": wid,
+        "exact": args.get("exact").and_then(|v| v.as_bool()).unwrap_or(false),
+        "first": args.get("first").and_then(|v| v.as_bool()).unwrap_or(false),
+        "last": args.get("last").and_then(|v| v.as_bool()).unwrap_or(false),
+    });
+    for (in_key, out_key) in [
+        ("role", "role"),
+        ("text", "text"),
+        ("label", "label"),
+        ("placeholder", "placeholder"),
+        ("alt", "alt"),
+        ("title", "title"),
+        ("testId", "test_id"),
+        ("testid", "test_id"),
+        ("test_id", "test_id"),
+        ("name", "name"),
+        ("action", "action"),
+        ("value", "value"),
+    ] {
+        if let Some(value) = str_arg(args, in_key) {
+            cmd[out_key] = json!(value);
+        }
+    }
+    if let Some(nth) = num_arg(args, "nth") {
+        cmd["nth"] = json!(nth as usize);
+    }
+    client.send_with_timeout(cmd, 30_000).await
 }
 
 async fn handle_get_pointed_element(
@@ -1169,6 +1249,7 @@ The MCP server connects to this WebSocket to bridge Claude Code ↔ your Tauri a
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn tool(name: &str) -> Value {
         tool_definitions()["tools"]
@@ -1217,10 +1298,39 @@ mod tests {
             "outputDir",
             "nameHint",
             "overwrite",
+            "annotate",
             "selector",
             "windowId",
         ] {
             assert!(props.get(key).is_some(), "missing {key}");
+        }
+    }
+
+    #[test]
+    fn wait_and_locator_schema_expose_agent_oriented_args() {
+        let wait = tool("webview_wait_for");
+        let wait_props = &wait["inputSchema"]["properties"];
+        for key in ["url", "loadState", "fn", "state"] {
+            assert!(wait_props.get(key).is_some(), "missing wait prop {key}");
+        }
+
+        let locator = tool("webview_locator");
+        let locator_props = &locator["inputSchema"]["properties"];
+        for key in [
+            "role",
+            "text",
+            "label",
+            "placeholder",
+            "alt",
+            "title",
+            "testId",
+            "name",
+            "action",
+        ] {
+            assert!(
+                locator_props.get(key).is_some(),
+                "missing locator prop {key}"
+            );
         }
     }
 
@@ -1238,5 +1348,40 @@ mod tests {
         let props = &tool["inputSchema"]["properties"];
         assert!(props.get("keep").is_some());
         assert!(props.get("deleteFiles").is_some());
+    }
+
+    #[test]
+    fn common_tool_properties_match_embedded_mcp_schema() {
+        let standalone = property_map(&tool_definitions());
+        let embedded = property_map(&tauri_plugin_connector::__connector_mcp_tool_definitions());
+        for (name, embedded_props) in &embedded {
+            let Some(standalone_props) = standalone.get(name) else {
+                panic!("standalone MCP missing embedded common tool {name}");
+            };
+            assert_eq!(
+                standalone_props, embedded_props,
+                "schema property mismatch for common MCP tool {name}"
+            );
+        }
+        assert!(standalone.contains_key("driver_session"));
+        assert!(standalone.contains_key("webview_locator"));
+    }
+
+    fn property_map(defs: &Value) -> BTreeMap<String, BTreeSet<String>> {
+        defs["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| {
+                let name = tool["name"].as_str().unwrap().to_string();
+                let keys = tool["inputSchema"]["properties"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .cloned()
+                    .collect();
+                (name, keys)
+            })
+            .collect()
     }
 }

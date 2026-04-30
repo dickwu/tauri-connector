@@ -1082,53 +1082,32 @@ pub async fn wait_for(
     selector: Option<&str>,
     strategy: &str,
     text: Option<&str>,
+    url: Option<&str>,
+    load_state: Option<&str>,
+    function: Option<&str>,
+    selector_state: Option<&str>,
     timeout: u64,
     window_id: &str,
     bridge: &Bridge,
     state: &PluginState,
 ) -> Response {
-    let condition = if let Some(sel) = selector {
-        match cached_ref(state, window_id, sel).await {
-            Ok(Some((ref_id, entry, _, _))) => {
-                let block = ref_resolver_block("__waitEl", &ref_id, &entry);
-                format!("(() => {{ {block} return !!__waitEl; }})()")
-            }
-            Ok(None) => {
-                let selector_js = js_string(sel);
-                match strategy {
-                    "xpath" => format!(
-                        "document.evaluate({selector_js}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue"
-                    ),
-                    "text" => format!(
-                        "Array.from(document.querySelectorAll('*')).find(el => el.textContent && el.textContent.includes({selector_js}))"
-                    ),
-                    _ => format!("document.querySelector({selector_js})"),
-                }
-            }
-            Err(e) => return Response::error(id.to_string(), e),
-        }
-    } else if let Some(t) = text {
-        format!("document.body.innerText.includes({})", js_string(t))
-    } else {
-        return Response::error(id.to_string(), "Provide selector or text to wait for");
+    let script = match build_wait_script(
+        selector,
+        strategy,
+        text,
+        url,
+        load_state,
+        function,
+        selector_state,
+        timeout,
+        window_id,
+        state,
+    )
+    .await
+    {
+        Ok(script) => script,
+        Err(e) => return Response::error(id.to_string(), e),
     };
-
-    let script = format!(
-        r#"new Promise((resolve) => {{
-            const start = Date.now();
-            const check = () => {{
-                const found = {condition};
-                if (found) {{
-                    resolve({{ found: true, elapsed_ms: Date.now() - start }});
-                }} else if (Date.now() - start > {timeout}) {{
-                    resolve({{ found: false, timeout: true, elapsed_ms: Date.now() - start }});
-                }} else {{
-                    setTimeout(check, 100);
-                }}
-            }};
-            check();
-        }})"#
-    );
 
     match bridge
         .execute_js_for_window(&script, timeout + 2000, window_id)
@@ -1136,6 +1115,369 @@ pub async fn wait_for(
     {
         Ok(result) => Response::success(id.to_string(), result),
         Err(e) => Response::error(id.to_string(), format!("Wait failed: {e}")),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn build_wait_script(
+    selector: Option<&str>,
+    strategy: &str,
+    text: Option<&str>,
+    url: Option<&str>,
+    load_state: Option<&str>,
+    function: Option<&str>,
+    selector_state: Option<&str>,
+    timeout: u64,
+    window_id: &str,
+    state: &PluginState,
+) -> Result<String, String> {
+    let mut checks = Vec::new();
+
+    if let Some(sel) = selector {
+        let state_name = selector_state.unwrap_or("attached");
+        let state_js = js_string(state_name);
+        let condition = match cached_ref(state, window_id, sel).await? {
+            Some((ref_id, entry, _, _)) => {
+                let block = ref_resolver_block("__waitEl", &ref_id, &entry);
+                format!(
+                    "(() => {{ {block} return __connectorElementState(__waitEl, {state_js}); }})()"
+                )
+            }
+            None => {
+                let selector_js = js_string(sel);
+                let query = match strategy {
+                    "xpath" => format!(
+                        "document.evaluate({selector_js}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue"
+                    ),
+                    "text" => format!(
+                        "Array.from(document.querySelectorAll('*')).find(el => el.textContent && el.textContent.includes({selector_js}))"
+                    ),
+                    _ => format!("document.querySelector({selector_js})"),
+                };
+                format!(
+                    "(() => {{ const __waitEl = {query}; return __connectorElementState(__waitEl, {state_js}); }})()"
+                )
+            }
+        };
+        checks.push(condition);
+    }
+
+    if let Some(t) = text {
+        checks.push(format!(
+            "((document.body && document.body.innerText) || '').includes({})",
+            js_string(t)
+        ));
+    }
+
+    if let Some(pattern) = url {
+        checks.push(format!(
+            "__connectorGlobMatch(location.href, {})",
+            js_string(pattern)
+        ));
+    }
+
+    if let Some(load_state) = load_state {
+        checks.push(format!(
+            "__connectorLoadStateReady({})",
+            js_string(load_state)
+        ));
+    }
+
+    if let Some(function) = function {
+        checks.push(format!(
+            "(await __connectorUserCondition({}))",
+            js_string(function)
+        ));
+    }
+
+    if checks.is_empty() {
+        return Err("Provide selector, text, url, loadState, or fn to wait for".to_string());
+    }
+
+    let combined = checks.join(" && ");
+    Ok(format!(
+        r#"new Promise((resolve) => {{
+            const start = Date.now();
+            const timeout = {timeout};
+            const __connectorElementState = (el, state) => {{
+                const target = String(state || 'attached').toLowerCase();
+                if (target === 'attached') return !!el;
+                if (target === 'detached') return !el;
+                if (!el) return target === 'hidden';
+                const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : {{ width: 0, height: 0 }};
+                const visible = !!(rect.width || rect.height || el.getClientRects().length)
+                    && (!style || (style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity || 1) !== 0));
+                if (target === 'visible') return visible;
+                if (target === 'hidden') return !visible;
+                return !!el;
+            }};
+            const __connectorGlobMatch = (value, pattern) => {{
+                const escaped = String(pattern).replace(/[.+^${{}}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+                return new RegExp('^' + escaped + '$').test(String(value));
+            }};
+            const __connectorLoadStateReady = (state) => {{
+                const target = String(state || 'load').toLowerCase();
+                if (target === 'domcontentloaded') return document.readyState === 'interactive' || document.readyState === 'complete';
+                if (target === 'load') return document.readyState === 'complete';
+                if (target === 'networkidle') return document.readyState === 'complete';
+                return document.readyState === target;
+            }};
+            const __connectorUserCondition = async (src) => {{
+                const code = String(src || '').trim();
+                if (!code) return false;
+                try {{
+                    const candidate = (0, eval)(code);
+                    if (typeof candidate === 'function') return !!(await candidate());
+                    return !!candidate;
+                }} catch (_) {{
+                    try {{
+                        return !!(await (0, eval)('(async () => (' + code + '))()'));
+                    }} catch (_) {{
+                        return !!(await (0, eval)('(async () => {{ ' + code + ' }})()'));
+                    }}
+                }}
+            }};
+            const check = async () => {{
+                try {{
+                    const found = !!({combined});
+                    if (found) {{
+                        resolve({{ found: true, elapsed_ms: Date.now() - start }});
+                    }} else if (Date.now() - start > timeout) {{
+                        resolve({{ found: false, timeout: true, elapsed_ms: Date.now() - start }});
+                    }} else {{
+                        setTimeout(check, 100);
+                    }}
+                }} catch (error) {{
+                    resolve({{ found: false, error: String(error && error.message || error), elapsed_ms: Date.now() - start }});
+                }}
+            }};
+            check();
+        }})"#
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn locator(
+    id: &str,
+    role: Option<&str>,
+    text: Option<&str>,
+    label: Option<&str>,
+    placeholder: Option<&str>,
+    alt: Option<&str>,
+    title: Option<&str>,
+    test_id: Option<&str>,
+    name: Option<&str>,
+    exact: bool,
+    first: bool,
+    last: bool,
+    nth: Option<usize>,
+    action: Option<&str>,
+    value: Option<&str>,
+    window_id: &str,
+    bridge: &Bridge,
+) -> Response {
+    if role.is_none()
+        && text.is_none()
+        && label.is_none()
+        && placeholder.is_none()
+        && alt.is_none()
+        && title.is_none()
+        && test_id.is_none()
+    {
+        return Response::error(
+            id.to_string(),
+            "Provide one locator: role, text, label, placeholder, alt, title, or testid",
+        );
+    }
+
+    let query = serde_json::json!({
+        "role": role,
+        "text": text,
+        "label": label,
+        "placeholder": placeholder,
+        "alt": alt,
+        "title": title,
+        "testId": test_id,
+        "name": name,
+        "exact": exact,
+        "first": first,
+        "last": last,
+        "nth": nth,
+        "action": action,
+        "value": value,
+    });
+    let query_js = query.to_string();
+    let script = format!(
+        r#"(() => {{
+            const query = {query_js};
+            const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+            const matchText = (value, expected) => {{
+                if (expected == null) return true;
+                const a = normalize(value);
+                const b = normalize(expected);
+                return query.exact ? a === b : a.toLowerCase().includes(b.toLowerCase());
+            }};
+            const implicitRole = (el) => {{
+                const tag = (el.tagName || '').toLowerCase();
+                const type = (el.getAttribute('type') || '').toLowerCase();
+                if (el.getAttribute('role')) return el.getAttribute('role');
+                if (tag === 'button') return 'button';
+                if (tag === 'a' && el.hasAttribute('href')) return 'link';
+                if (tag === 'select') return 'combobox';
+                if (tag === 'textarea') return 'textbox';
+                if (tag === 'img') return 'img';
+                if (/^h[1-6]$/.test(tag)) return 'heading';
+                if (tag === 'input') {{
+                    if (['button', 'submit', 'reset'].includes(type)) return 'button';
+                    if (type === 'checkbox') return 'checkbox';
+                    if (type === 'radio') return 'radio';
+                    if (type === 'range') return 'slider';
+                    return 'textbox';
+                }}
+                return '';
+            }};
+            const labelText = (el) => {{
+                const id = el.id;
+                const labels = [];
+                if (el.labels) for (const label of el.labels) labels.push(label.textContent || '');
+                if (id) {{
+                    for (const label of document.querySelectorAll('label[for="' + CSS.escape(id) + '"]')) {{
+                        labels.push(label.textContent || '');
+                    }}
+                }}
+                const wrapping = el.closest && el.closest('label');
+                if (wrapping) labels.push(wrapping.textContent || '');
+                return normalize(labels.join(' '));
+            }};
+            const accessibleName = (el) => {{
+                const labelledBy = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+                    .map((id) => document.getElementById(id)?.textContent || '').join(' ');
+                return normalize(
+                    el.getAttribute('aria-label') ||
+                    labelledBy ||
+                    labelText(el) ||
+                    el.getAttribute('alt') ||
+                    el.getAttribute('title') ||
+                    el.getAttribute('placeholder') ||
+                    el.textContent ||
+                    ''
+                );
+            }};
+            const cssPath = (el) => {{
+                if (!el || el.nodeType !== 1) return '';
+                if (el.id) return '#' + CSS.escape(el.id);
+                const parts = [];
+                let cur = el;
+                while (cur && cur.nodeType === 1 && cur !== document.documentElement) {{
+                    let part = cur.tagName.toLowerCase();
+                    const parent = cur.parentElement;
+                    if (parent) {{
+                        const siblings = Array.from(parent.children).filter((child) => child.tagName === cur.tagName);
+                        if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(cur) + 1) + ')';
+                    }}
+                    parts.unshift(part);
+                    cur = parent;
+                }}
+                return parts.join(' > ');
+            }};
+            const all = Array.from(document.querySelectorAll('*'));
+            const matches = [];
+            const push = (el) => {{
+                if (el && !matches.includes(el)) matches.push(el);
+            }};
+            if (query.role) {{
+                for (const el of all) if (matchText(implicitRole(el), query.role)) push(el);
+            }}
+            if (query.text) {{
+                for (const el of all) {{
+                    if (!matchText(el.textContent || '', query.text)) continue;
+                    const childMatches = Array.from(el.children || []).some((child) => matchText(child.textContent || '', query.text));
+                    if (!childMatches) push(el);
+                }}
+            }}
+            if (query.label) {{
+                for (const el of all) if (matchText(labelText(el), query.label)) push(el);
+            }}
+            if (query.placeholder) {{
+                for (const el of all) if (matchText(el.getAttribute('placeholder'), query.placeholder)) push(el);
+            }}
+            if (query.alt) {{
+                for (const el of all) if (matchText(el.getAttribute('alt'), query.alt)) push(el);
+            }}
+            if (query.title) {{
+                for (const el of all) if (matchText(el.getAttribute('title'), query.title)) push(el);
+            }}
+            if (query.testId) {{
+                for (const el of all) {{
+                    const value = el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('testid');
+                    if (matchText(value, query.testId)) push(el);
+                }}
+            }}
+            let filtered = query.name ? matches.filter((el) => matchText(accessibleName(el), query.name)) : matches;
+            const count = filtered.length;
+            let index = query.last ? count - 1 : 0;
+            if (query.nth !== null && query.nth !== undefined) index = Number(query.nth);
+            if (query.first) index = 0;
+            const el = filtered[index];
+            if (!el) return {{ count, index, error: 'No element matched locator' }};
+            const action = query.action || null;
+            const value = query.value || '';
+            if (action) {{
+                if (action === 'click') el.click();
+                else if (action === 'hover') {{
+                    const rect = el.getBoundingClientRect();
+                    const opts = {{ bubbles: true, cancelable: true, view: window, clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2 }};
+                    el.dispatchEvent(new PointerEvent('pointerover', opts));
+                    el.dispatchEvent(new MouseEvent('mouseover', opts));
+                }}
+                else if (action === 'focus') el.focus();
+                else if (action === 'fill') {{
+                    el.focus();
+                    el.value = value;
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                }}
+                else if (action === 'type') {{
+                    el.focus();
+                    for (const ch of value) {{
+                        el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch, bubbles: true }}));
+                        if ('value' in el) {{
+                            el.value = String(el.value || '') + ch;
+                            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        }}
+                        el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch, bubbles: true }}));
+                    }}
+                }}
+                else if (action === 'check') {{ if (!el.checked) el.click(); }}
+                else if (action === 'uncheck') {{ if (el.checked) el.click(); }}
+                else if (action !== 'text') return {{ count, index, error: 'Unsupported locator action: ' + action }};
+            }}
+            const rect = el.getBoundingClientRect();
+            return {{
+                count,
+                index,
+                action,
+                value: action === 'text' ? normalize(el.textContent || '') : undefined,
+                matched: {{
+                    tag: el.tagName.toLowerCase(),
+                    role: implicitRole(el) || null,
+                    name: accessibleName(el),
+                    text: normalize(el.textContent || '').slice(0, 300),
+                    selector: cssPath(el),
+                    rect: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }},
+                    visible: !!(rect.width || rect.height || el.getClientRects().length)
+                }}
+            }};
+        }})()"#
+    );
+
+    match bridge
+        .execute_js_for_window(&script, 15_000, window_id)
+        .await
+    {
+        Ok(result) => Response::success(id.to_string(), result),
+        Err(e) => Response::error(id.to_string(), format!("Locator failed: {e}")),
     }
 }
 
@@ -1488,6 +1830,7 @@ pub async fn screenshot(
     name_hint: Option<&str>,
     overwrite: bool,
     selector: Option<&str>,
+    annotate: bool,
 ) -> Response {
     if let Some(selector) = selector {
         match snapdom_element_screenshot(
@@ -1499,14 +1842,17 @@ pub async fn screenshot(
                 return finish_screenshot_response(
                     id,
                     result,
+                    annotate,
                     save,
                     output_dir,
                     name_hint,
                     overwrite,
                     Some(selector),
                     window_id,
+                    bridge,
                     state,
-                );
+                )
+                .await;
             }
             Err(e) => {
                 return Response::error(id.to_string(), format!("Element screenshot failed: {e}"));
@@ -1520,8 +1866,10 @@ pub async fn screenshot(
         match xcap_screenshot(app, window_id, format, quality, max_width).await {
             Ok(result) => {
                 return finish_screenshot_response(
-                    id, result, save, output_dir, name_hint, overwrite, selector, window_id, state,
-                );
+                    id, result, annotate, save, output_dir, name_hint, overwrite, selector,
+                    window_id, bridge, state,
+                )
+                .await;
             }
             Err(e) => {
                 eprintln!("[connector][screenshot] xcap failed, falling back to snapdom: {e}");
@@ -1534,9 +1882,13 @@ pub async fn screenshot(
 
     // Tier 2: snapdom JS capture (requires @zumer/snapdom in frontend)
     match snapdom_screenshot(format, quality, max_width, window_id, bridge).await {
-        Ok(result) => finish_screenshot_response(
-            id, result, save, output_dir, name_hint, overwrite, selector, window_id, state,
-        ),
+        Ok(result) => {
+            finish_screenshot_response(
+                id, result, annotate, save, output_dir, name_hint, overwrite, selector, window_id,
+                bridge, state,
+            )
+            .await
+        }
         Err(e) => Response::error(id.to_string(), format!("Screenshot failed: {e}")),
     }
 }
@@ -1740,17 +2092,24 @@ async fn snapdom_element_screenshot(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn finish_screenshot_response(
+async fn finish_screenshot_response(
     id: &str,
     mut result: serde_json::Value,
+    annotate: bool,
     save: bool,
     output_dir: Option<&str>,
     name_hint: Option<&str>,
     overwrite: bool,
     selector: Option<&str>,
     window_id: &str,
+    bridge: &Bridge,
     state: &PluginState,
 ) -> Response {
+    if annotate
+        && let Err(e) = annotate_screenshot_result(&mut result, window_id, bridge, state).await
+    {
+        return Response::error(id.to_string(), e);
+    }
     if save {
         match save_screenshot_artifact(
             &result, output_dir, name_hint, overwrite, selector, window_id, state,
@@ -1764,6 +2123,340 @@ fn finish_screenshot_response(
         }
     }
     Response::success(id.to_string(), result)
+}
+
+#[cfg(feature = "xcap")]
+async fn annotate_screenshot_result(
+    result: &mut serde_json::Value,
+    window_id: &str,
+    bridge: &Bridge,
+    state: &PluginState,
+) -> Result<(), String> {
+    let dom = state.get_dom(window_id).await.ok_or_else(|| {
+        format!(
+            "No snapshot refs cached for window '{window_id}'. Run webview_dom_snapshot(mode:'ai') first."
+        )
+    })?;
+    if dom.snapshot_mode != "ai" || dom.refs.is_empty() {
+        return Err(
+            "Annotated screenshots need a latest ai snapshot with @eN refs. Run webview_dom_snapshot(mode:'ai') first."
+                .to_string(),
+        );
+    }
+
+    let refs_path = ensure_refs_path(state, &dom)?;
+    let mut refs = dom
+        .refs
+        .iter()
+        .map(|(ref_id, entry)| {
+            let label = ref_id.trim_start_matches('e');
+            serde_json::json!({
+                "ref": ref_id,
+                "label": label,
+                "selector": entry.selector,
+                "tag": entry.tag,
+                "role": entry.role,
+                "name": entry.name,
+            })
+        })
+        .collect::<Vec<_>>();
+    refs.sort_by_key(|value| {
+        value
+            .get("label")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(usize::MAX)
+    });
+    refs.truncate(200);
+    let refs_js = serde_json::to_string(&refs).map_err(|e| e.to_string())?;
+    let rects_script = format!(
+        r#"(() => {{
+            const refs = {refs_js};
+            const visible = (el) => {{
+                if (!el) return false;
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                return !!(rect.width || rect.height || el.getClientRects().length)
+                    && (!style || (style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity || 1) !== 0));
+            }};
+            const resolved = [];
+            for (const item of refs) {{
+                let el = null;
+                try {{ el = document.querySelector('[data-connector-ref="' + CSS.escape(item.ref) + '"]'); }} catch (_) {{}}
+                if (!el && item.selector) {{
+                    try {{ el = document.querySelector(item.selector); }} catch (_) {{}}
+                }}
+                if (!visible(el)) continue;
+                const rect = el.getBoundingClientRect();
+                resolved.push({{
+                    ref: item.ref,
+                    label: item.label,
+                    selector: item.selector,
+                    tag: item.tag,
+                    role: item.role,
+                    name: item.name,
+                    rectCssPx: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }}
+                }});
+            }}
+            return {{
+                annotations: resolved,
+                viewport: {{ width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio || 1 }}
+            }};
+        }})()"#
+    );
+    let probe = bridge
+        .execute_js_for_window(&rects_script, 10_000, window_id)
+        .await
+        .map_err(|e| format!("Failed to map snapshot refs for annotations: {e}"))?;
+
+    let annotations = probe
+        .get("annotations")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if annotations.is_empty() {
+        return Err(
+            "No visible @eN refs from the latest ai snapshot could be annotated".to_string(),
+        );
+    }
+
+    let base64_data = result
+        .get("base64")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "No base64 data in screenshot response".to_string())?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_data)
+        .map_err(|e| format!("Invalid screenshot base64: {e}"))?;
+    let mut image = image::load_from_memory(&bytes)
+        .map_err(|e| format!("Screenshot decode failed before annotation: {e}"))?
+        .to_rgba8();
+
+    let image_width = image.width().max(1);
+    let image_height = image.height().max(1);
+    let capture_rect = result.get("rectCssPx");
+    let origin_x = capture_rect
+        .and_then(|v| v.get("x"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let origin_y = capture_rect
+        .and_then(|v| v.get("y"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let css_width = capture_rect
+        .and_then(|v| v.get("width"))
+        .and_then(|v| v.as_f64())
+        .or_else(|| probe.pointer("/viewport/width").and_then(|v| v.as_f64()))
+        .unwrap_or(image_width as f64)
+        .max(1.0);
+    let css_height = capture_rect
+        .and_then(|v| v.get("height"))
+        .and_then(|v| v.as_f64())
+        .or_else(|| probe.pointer("/viewport/height").and_then(|v| v.as_f64()))
+        .unwrap_or(image_height as f64)
+        .max(1.0);
+    let scale_x = image_width as f64 / css_width;
+    let scale_y = image_height as f64 / css_height;
+
+    let mut enriched = Vec::with_capacity(annotations.len());
+    for item in annotations {
+        let Some(rect) = item.get("rectCssPx") else {
+            continue;
+        };
+        let x = rect.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let y = rect.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let px = ((x - origin_x) * scale_x).round().max(0.0) as i32;
+        let py = ((y - origin_y) * scale_y).round().max(0.0) as i32;
+        let label = item.get("label").and_then(|v| v.as_str()).unwrap_or("?");
+        draw_number_label(&mut image, px, py, label);
+
+        let mut value = item;
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert(
+                "rectPx".to_string(),
+                serde_json::json!({ "x": px, "y": py }),
+            );
+        }
+        enriched.push(value);
+    }
+
+    let mime = result
+        .get("mimeType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("image/png");
+    let format = match mime {
+        "image/jpeg" => "jpeg",
+        "image/webp" => "webp",
+        _ => "png",
+    };
+    let encoded = encode_image(image, format, 95, None)?;
+    let encoded_base64 = base64::engine::general_purpose::STANDARD.encode(&encoded);
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("base64".to_string(), serde_json::json!(encoded_base64));
+        obj.insert("annotated".to_string(), serde_json::json!(true));
+        obj.insert("annotations".to_string(), serde_json::json!(enriched));
+        obj.insert(
+            "snapshotId".to_string(),
+            serde_json::json!(dom.snapshot_id.unwrap_or_else(|| "inline".to_string())),
+        );
+        obj.insert(
+            "refsPath".to_string(),
+            serde_json::json!(refs_path.to_string_lossy()),
+        );
+        obj.insert("width".to_string(), serde_json::json!(image_width));
+        obj.insert("height".to_string(), serde_json::json!(image_height));
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "xcap"))]
+async fn annotate_screenshot_result(
+    _result: &mut serde_json::Value,
+    _window_id: &str,
+    _bridge: &Bridge,
+    _state: &PluginState,
+) -> Result<(), String> {
+    Err("annotate=true requires the default xcap/image feature".to_string())
+}
+
+#[cfg(feature = "xcap")]
+fn ensure_refs_path(state: &PluginState, dom: &DomEntry) -> Result<std::path::PathBuf, String> {
+    if let Some(snapshot_id) = dom.snapshot_id.as_deref() {
+        let path = state
+            .log_dir
+            .join("snapshots")
+            .join(snapshot_id)
+            .join("refs.json");
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+    let snapshot_id = dom.snapshot_id.as_deref().unwrap_or("inline");
+    let path = state
+        .log_dir
+        .join("artifacts")
+        .join("refs")
+        .join(format!("{snapshot_id}-{}-refs.json", uuid8()));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create refs artifact dir {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
+    let json = serde_json::to_string_pretty(&dom.refs).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+    Ok(path)
+}
+
+#[cfg(feature = "xcap")]
+fn draw_number_label(image: &mut image::RgbaImage, x: i32, y: i32, label: &str) {
+    let digits = label
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>();
+    let digits = if digits.is_empty() { "0" } else { &digits };
+    let scale = 3i32;
+    let pad = 4i32;
+    let digit_w = 3 * scale;
+    let digit_h = 5 * scale;
+    let gap = scale;
+    let width = pad * 2 + digit_w * digits.len() as i32 + gap * (digits.len() as i32 - 1).max(0);
+    let height = pad * 2 + digit_h;
+    let max_x = image.width().saturating_sub(width.max(1) as u32) as i32;
+    let max_y = image.height().saturating_sub(height.max(1) as u32) as i32;
+    let left = x.clamp(0, max_x.max(0));
+    let top = y.clamp(0, max_y.max(0));
+    fill_rect(
+        image,
+        left,
+        top,
+        width,
+        height,
+        image::Rgba([24, 88, 255, 238]),
+    );
+    draw_rect_border(
+        image,
+        left,
+        top,
+        width,
+        height,
+        image::Rgba([255, 255, 255, 255]),
+    );
+    for (i, ch) in digits.chars().enumerate() {
+        draw_digit(
+            image,
+            left + pad + i as i32 * (digit_w + gap),
+            top + pad,
+            ch,
+            scale,
+            image::Rgba([255, 255, 255, 255]),
+        );
+    }
+}
+
+#[cfg(feature = "xcap")]
+fn fill_rect(image: &mut image::RgbaImage, x: i32, y: i32, w: i32, h: i32, color: image::Rgba<u8>) {
+    for yy in y.max(0)..(y + h).max(0) {
+        for xx in x.max(0)..(x + w).max(0) {
+            if xx < image.width() as i32 && yy < image.height() as i32 {
+                image.put_pixel(xx as u32, yy as u32, color);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "xcap")]
+fn draw_rect_border(
+    image: &mut image::RgbaImage,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    color: image::Rgba<u8>,
+) {
+    fill_rect(image, x, y, w, 1, color);
+    fill_rect(image, x, y + h - 1, w, 1, color);
+    fill_rect(image, x, y, 1, h, color);
+    fill_rect(image, x + w - 1, y, 1, h, color);
+}
+
+#[cfg(feature = "xcap")]
+fn draw_digit(
+    image: &mut image::RgbaImage,
+    x: i32,
+    y: i32,
+    ch: char,
+    scale: i32,
+    color: image::Rgba<u8>,
+) {
+    let rows = match ch {
+        '0' => ["111", "101", "101", "101", "111"],
+        '1' => ["010", "110", "010", "010", "111"],
+        '2' => ["111", "001", "111", "100", "111"],
+        '3' => ["111", "001", "111", "001", "111"],
+        '4' => ["101", "101", "111", "001", "001"],
+        '5' => ["111", "100", "111", "001", "111"],
+        '6' => ["111", "100", "111", "101", "111"],
+        '7' => ["111", "001", "010", "010", "010"],
+        '8' => ["111", "101", "111", "101", "111"],
+        '9' => ["111", "101", "111", "001", "111"],
+        _ => ["111", "001", "111", "100", "111"],
+    };
+    for (row_idx, row) in rows.iter().enumerate() {
+        for (col_idx, bit) in row.chars().enumerate() {
+            if bit == '1' {
+                fill_rect(
+                    image,
+                    x + col_idx as i32 * scale,
+                    y + row_idx as i32 * scale,
+                    scale,
+                    scale,
+                    color,
+                );
+            }
+        }
+    }
 }
 
 fn save_screenshot_artifact(
@@ -1848,6 +2541,10 @@ fn save_screenshot_artifact(
         "source": if selector.is_some() { "selector" } else { "full_window" },
         "selector": selector,
         "windowId": window_id,
+        "annotated": result.get("annotated").cloned().unwrap_or(serde_json::Value::Bool(false)),
+        "annotations": result.get("annotations").cloned().unwrap_or(serde_json::Value::Null),
+        "snapshotId": result.get("snapshotId").cloned().unwrap_or(serde_json::Value::Null),
+        "refsPath": result.get("refsPath").cloned().unwrap_or(serde_json::Value::Null),
         "rectCssPx": result.get("rectCssPx").cloned().unwrap_or(serde_json::Value::Null),
         "devicePixelRatio": result.get("devicePixelRatio").cloned().unwrap_or(serde_json::Value::Null),
     });
@@ -2605,6 +3302,7 @@ pub async fn debug_snapshot(
                 screenshot_name_hint.or(Some("debug-snapshot")),
                 false,
                 None,
+                false,
             )
             .await;
             obj.insert("screenshot".to_string(), response_to_value(shot));
@@ -2731,6 +3429,10 @@ pub async fn webview_act_and_verify(
                 wait_for_selector,
                 "css",
                 wait_for_text,
+                None,
+                None,
+                None,
+                None,
                 timeout,
                 window_id,
                 bridge,
@@ -3087,7 +3789,8 @@ pub async fn search_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::{same_path, sha256_hex};
+    use super::{build_wait_script, same_path, sha256_hex};
+    use crate::state::PluginState;
     use std::path::Path;
 
     #[test]
@@ -3104,5 +3807,56 @@ mod tests {
             Path::new("/tmp/connector-shot.png"),
             Path::new("/tmp/connector-shot.png")
         ));
+    }
+
+    #[tokio::test]
+    async fn wait_script_contains_success_and_timeout_paths() {
+        let dir = std::env::temp_dir().join(format!("connector-wait-test-{}", std::process::id()));
+        let state = PluginState::new(dir).unwrap();
+        let script = build_wait_script(
+            None,
+            "css",
+            Some("Ready"),
+            Some("https://example.test/*"),
+            Some("load"),
+            Some("window.__ready === true"),
+            None,
+            1200,
+            "main",
+            &state,
+        )
+        .await
+        .unwrap();
+
+        assert!(script.contains("found: true"));
+        assert!(script.contains("timeout: true"));
+        assert!(script.contains("__connectorGlobMatch"));
+        assert!(script.contains("__connectorLoadStateReady"));
+        assert!(script.contains("__connectorUserCondition"));
+    }
+
+    #[tokio::test]
+    async fn wait_script_supports_selector_state() {
+        let dir =
+            std::env::temp_dir().join(format!("connector-wait-state-test-{}", std::process::id()));
+        let state = PluginState::new(dir).unwrap();
+        let script = build_wait_script(
+            Some(".toast"),
+            "css",
+            None,
+            None,
+            None,
+            None,
+            Some("hidden"),
+            500,
+            "main",
+            &state,
+        )
+        .await
+        .unwrap();
+
+        assert!(script.contains("document.querySelector"));
+        assert!(script.contains("hidden"));
+        assert!(script.contains("__connectorElementState"));
     }
 }

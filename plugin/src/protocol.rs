@@ -42,6 +42,8 @@ pub enum Command {
         overwrite: Option<bool>,
         #[serde(default)]
         selector: Option<String>,
+        #[serde(default)]
+        annotate: Option<bool>,
     },
 
     // --- DOM ---
@@ -151,8 +153,48 @@ pub enum Command {
         strategy: String,
         #[serde(default)]
         text: Option<String>,
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default, alias = "loadState")]
+        load_state: Option<String>,
+        #[serde(default, alias = "fn", alias = "condition")]
+        function: Option<String>,
+        #[serde(default)]
+        state: Option<String>,
         #[serde(default = "default_timeout")]
         timeout: u64,
+        #[serde(default = "default_window")]
+        window_id: String,
+    },
+    Locator {
+        #[serde(default)]
+        role: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        label: Option<String>,
+        #[serde(default)]
+        placeholder: Option<String>,
+        #[serde(default)]
+        alt: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default, alias = "testId", alias = "testid")]
+        test_id: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        exact: Option<bool>,
+        #[serde(default)]
+        first: Option<bool>,
+        #[serde(default)]
+        last: Option<bool>,
+        #[serde(default)]
+        nth: Option<usize>,
+        #[serde(default)]
+        action: Option<String>,
+        #[serde(default)]
+        value: Option<String>,
         #[serde(default = "default_window")]
         window_id: String,
     },

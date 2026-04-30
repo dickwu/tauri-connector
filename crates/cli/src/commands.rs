@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use connector_client::discovery::ConnectorInstance;
+use connector_client::discovery::{ConnectorInstance, ResolvedConnection};
 use connector_client::ConnectorClient;
 use serde_json::{json, Value};
 
@@ -649,10 +649,15 @@ pub async fn get_prop(
 }
 
 /// Wait for an element or text.
+#[allow(clippy::too_many_arguments)]
 pub async fn wait(
     client: &ConnectorClient,
     selector: Option<&str>,
     text: Option<&str>,
+    url: Option<&str>,
+    load_state: Option<&str>,
+    function: Option<&str>,
+    selector_state: Option<&str>,
     timeout_ms: u64,
 ) -> Result<(), String> {
     let mut cmd = json!({
@@ -666,12 +671,72 @@ pub async fn wait(
     if let Some(t) = text {
         cmd["text"] = json!(t);
     }
+    if let Some(url) = url {
+        cmd["url"] = json!(url);
+    }
+    if let Some(load_state) = load_state {
+        cmd["load_state"] = json!(load_state);
+    }
+    if let Some(function) = function {
+        cmd["function"] = json!(function);
+    }
+    if let Some(selector_state) = selector_state {
+        cmd["state"] = json!(selector_state);
+    }
     let result = client.send_with_timeout(cmd, timeout_ms + 5000).await?;
     println!(
         "{}",
         serde_json::to_string_pretty(&result).unwrap_or_default()
     );
     Ok(())
+}
+
+/// Find by semantic locator and optionally act on the match.
+#[allow(clippy::too_many_arguments)]
+pub async fn locator(
+    client: &ConnectorClient,
+    role: Option<&str>,
+    text: Option<&str>,
+    label: Option<&str>,
+    placeholder: Option<&str>,
+    alt: Option<&str>,
+    title: Option<&str>,
+    test_id: Option<&str>,
+    name: Option<&str>,
+    exact: bool,
+    first: bool,
+    last: bool,
+    nth: Option<usize>,
+    action: Option<&str>,
+    value: Option<&str>,
+) -> Result<(), String> {
+    let mut cmd = json!({
+        "type": "locator",
+        "window_id": window_id(),
+        "exact": exact,
+        "first": first,
+        "last": last,
+    });
+    for (key, value) in [
+        ("role", role),
+        ("text", text),
+        ("label", label),
+        ("placeholder", placeholder),
+        ("alt", alt),
+        ("title", title),
+        ("test_id", test_id),
+        ("name", name),
+        ("action", action),
+        ("value", value),
+    ] {
+        if let Some(value) = value {
+            cmd[key] = json!(value);
+        }
+    }
+    if let Some(nth) = nth {
+        cmd["nth"] = json!(nth);
+    }
+    print_json_result(client.send_with_timeout(cmd, 30_000).await)
 }
 
 /// Evaluate arbitrary JavaScript.
@@ -769,7 +834,9 @@ pub async fn screenshot(
     overwrite: bool,
     output_dir: Option<&Path>,
     name_hint: Option<&str>,
+    annotate: bool,
     instance: Option<&ConnectorInstance>,
+    resolved: &ResolvedConnection,
 ) -> Result<(), String> {
     let mut cmd = json!({
         "type": "screenshot",
@@ -782,6 +849,9 @@ pub async fn screenshot(
     }
     if let Some(selector) = selector {
         cmd["selector"] = json!(selector);
+    }
+    if annotate {
+        cmd["annotate"] = json!(true);
     }
     let result = client.send_with_timeout(cmd, 60_000).await?;
 
@@ -830,6 +900,10 @@ pub async fn screenshot(
         "source": if selector.is_some() { "selector" } else { "full_window" },
         "selector": selector,
         "windowId": window_id(),
+        "annotated": result.get("annotated").cloned().unwrap_or(Value::Bool(false)),
+        "annotations": result.get("annotations").cloned().unwrap_or(Value::Null),
+        "snapshotId": result.get("snapshotId").cloned().or_else(|| latest_ref_cache_snapshot_id(resolved)).unwrap_or(Value::Null),
+        "refsPath": result.get("refsPath").cloned().or_else(|| latest_ref_cache_path(resolved)).unwrap_or(Value::Null),
         "rectCssPx": result.get("rectCssPx").cloned().unwrap_or(Value::Null),
         "devicePixelRatio": result.get("devicePixelRatio").cloned().unwrap_or(Value::Null),
     });
@@ -935,6 +1009,23 @@ fn cli_artifact_manifest_path(instance: Option<&ConnectorInstance>) -> PathBuf {
         .unwrap_or_else(|| std::env::temp_dir().join("tauri-connector"))
         .join("artifacts")
         .join("manifest.jsonl")
+}
+
+fn latest_ref_cache_snapshot_id(resolved: &ResolvedConnection) -> Option<Value> {
+    crate::snapshot::load_ref_cache_full(resolved, window_id())
+        .ok()
+        .flatten()
+        .and_then(|cache| cache.snapshot_id)
+        .map(Value::String)
+}
+
+fn latest_ref_cache_path(resolved: &ResolvedConnection) -> Option<Value> {
+    let path = crate::snapshot::ref_cache_path(resolved, window_id());
+    if path.exists() {
+        Some(Value::String(path.to_string_lossy().to_string()))
+    } else {
+        None
+    }
 }
 
 fn append_cli_artifact_manifest(

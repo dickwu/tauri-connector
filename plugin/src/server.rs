@@ -155,6 +155,7 @@ async fn handle_command(
             name_hint,
             overwrite,
             selector,
+            annotate,
         } => {
             handlers::screenshot(
                 &id,
@@ -170,6 +171,7 @@ async fn handle_command(
                 name_hint.as_deref(),
                 overwrite.unwrap_or(false),
                 selector.as_deref(),
+                annotate.unwrap_or(false),
             )
             .await
         }
@@ -325,6 +327,10 @@ async fn handle_command(
             selector,
             strategy,
             text,
+            url,
+            load_state,
+            function,
+            state: selector_state,
             timeout,
             window_id,
         } => {
@@ -333,10 +339,52 @@ async fn handle_command(
                 selector.as_deref(),
                 &strategy,
                 text.as_deref(),
+                url.as_deref(),
+                load_state.as_deref(),
+                function.as_deref(),
+                selector_state.as_deref(),
                 timeout,
                 &window_id,
                 bridge,
                 state,
+            )
+            .await
+        }
+        Command::Locator {
+            role,
+            text,
+            label,
+            placeholder,
+            alt,
+            title,
+            test_id,
+            name,
+            exact,
+            first,
+            last,
+            nth,
+            action,
+            value,
+            window_id,
+        } => {
+            handlers::locator(
+                &id,
+                role.as_deref(),
+                text.as_deref(),
+                label.as_deref(),
+                placeholder.as_deref(),
+                alt.as_deref(),
+                title.as_deref(),
+                test_id.as_deref(),
+                name.as_deref(),
+                exact.unwrap_or(false),
+                first.unwrap_or(false),
+                last.unwrap_or(false),
+                nth,
+                action.as_deref(),
+                value.as_deref(),
+                &window_id,
+                bridge,
             )
             .await
         }

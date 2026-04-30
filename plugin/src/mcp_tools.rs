@@ -101,6 +101,10 @@ pub async fn call_tool(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let selector = str_arg(args, "selector");
+            let annotate = args
+                .get("annotate")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let resp = handlers::screenshot(
                 id,
                 &format,
@@ -115,6 +119,7 @@ pub async fn call_tool(
                 name_hint.as_deref(),
                 overwrite,
                 selector.as_deref(),
+                annotate,
             )
             .await;
             // Return image content if base64 data is present
@@ -270,6 +275,12 @@ pub async fn call_tool(
             let selector = str_arg(args, "selector");
             let strategy = str_arg(args, "strategy").unwrap_or_else(|| "css".to_string());
             let text = str_arg(args, "text");
+            let url = str_arg(args, "url");
+            let load_state = str_arg(args, "loadState").or_else(|| str_arg(args, "load_state"));
+            let function = str_arg(args, "fn")
+                .or_else(|| str_arg(args, "function"))
+                .or_else(|| str_arg(args, "condition"));
+            let selector_state = str_arg(args, "state");
             let timeout = num_arg(args, "timeout").unwrap_or(5000.0) as u64;
             let wid = window_id(args);
             handlers::wait_for(
@@ -277,10 +288,41 @@ pub async fn call_tool(
                 selector.as_deref(),
                 &strategy,
                 text.as_deref(),
+                url.as_deref(),
+                load_state.as_deref(),
+                function.as_deref(),
+                selector_state.as_deref(),
                 timeout,
                 &wid,
                 bridge,
                 state,
+            )
+            .await
+        }
+
+        "webview_locator" => {
+            let wid = window_id(args);
+            handlers::locator(
+                id,
+                str_arg(args, "role").as_deref(),
+                str_arg(args, "text").as_deref(),
+                str_arg(args, "label").as_deref(),
+                str_arg(args, "placeholder").as_deref(),
+                str_arg(args, "alt").as_deref(),
+                str_arg(args, "title").as_deref(),
+                str_arg(args, "testId")
+                    .or_else(|| str_arg(args, "testid"))
+                    .or_else(|| str_arg(args, "test_id"))
+                    .as_deref(),
+                str_arg(args, "name").as_deref(),
+                args.get("exact").and_then(|v| v.as_bool()).unwrap_or(false),
+                args.get("first").and_then(|v| v.as_bool()).unwrap_or(false),
+                args.get("last").and_then(|v| v.as_bool()).unwrap_or(false),
+                num_arg(args, "nth").map(|n| n as usize),
+                str_arg(args, "action").as_deref(),
+                str_arg(args, "value").as_deref(),
+                &wid,
+                bridge,
             )
             .await
         }
@@ -605,6 +647,7 @@ pub fn tool_definitions() -> Value {
                     "outputDir": { "type": "string" },
                     "nameHint": { "type": "string" },
                     "overwrite": { "type": "boolean" },
+                    "annotate": { "type": "boolean", "description": "Overlay numbered labels for @eN refs from the latest ai snapshot" },
                     "selector": { "type": "string", "description": "CSS selector or @ref for future element captures" },
                     "windowId": { "type": "string" }
                 } })
@@ -675,12 +718,36 @@ pub fn tool_definitions() -> Value {
                 }, "required": ["action"] })
             ),
             tool_def("webview_wait_for",
-                "Wait for element selectors or text content to appear",
+                "Wait for element selectors, text, URL glob, load state, or a JavaScript condition",
                 json!({ "type": "object", "properties": {
                     "selector": { "type": "string" },
                     "strategy": { "type": "string", "enum": ["css", "xpath", "text"] },
                     "text": { "type": "string" },
+                    "url": { "type": "string", "description": "Glob pattern matched against location.href" },
+                    "loadState": { "type": "string", "enum": ["domcontentloaded", "load", "networkidle"] },
+                    "fn": { "type": "string", "description": "JavaScript expression/function/body that returns truthy" },
+                    "state": { "type": "string", "enum": ["attached", "detached", "visible", "hidden"], "description": "Selector state to wait for" },
                     "timeout": { "type": "number" },
+                    "windowId": { "type": "string" }
+                } })
+            ),
+            tool_def("webview_locator",
+                "Find by semantic locator (role/text/label/placeholder/alt/title/testid/name) and optionally act on the match",
+                json!({ "type": "object", "properties": {
+                    "role": { "type": "string" },
+                    "text": { "type": "string" },
+                    "label": { "type": "string" },
+                    "placeholder": { "type": "string" },
+                    "alt": { "type": "string" },
+                    "title": { "type": "string" },
+                    "testId": { "type": "string" },
+                    "name": { "type": "string", "description": "Accessible-name filter" },
+                    "exact": { "type": "boolean" },
+                    "first": { "type": "boolean" },
+                    "last": { "type": "boolean" },
+                    "nth": { "type": "number" },
+                    "action": { "type": "string", "enum": ["click", "fill", "type", "hover", "focus", "check", "uncheck", "text"] },
+                    "value": { "type": "string", "description": "Value for fill/type" },
                     "windowId": { "type": "string" }
                 } })
             ),
@@ -962,5 +1029,40 @@ mod tests {
         let props = &tool["inputSchema"]["properties"];
         assert!(props.get("keep").is_some());
         assert!(props.get("deleteFiles").is_some());
+    }
+
+    #[test]
+    fn screenshot_wait_and_locator_schema_expose_agent_oriented_args() {
+        let screenshot = tool("webview_screenshot");
+        assert!(
+            screenshot["inputSchema"]["properties"]
+                .get("annotate")
+                .is_some()
+        );
+
+        let wait = tool("webview_wait_for");
+        let wait_props = &wait["inputSchema"]["properties"];
+        for key in ["url", "loadState", "fn", "state"] {
+            assert!(wait_props.get(key).is_some(), "missing wait prop {key}");
+        }
+
+        let locator = tool("webview_locator");
+        let locator_props = &locator["inputSchema"]["properties"];
+        for key in [
+            "role",
+            "text",
+            "label",
+            "placeholder",
+            "alt",
+            "title",
+            "testId",
+            "name",
+            "action",
+        ] {
+            assert!(
+                locator_props.get(key).is_some(),
+                "missing locator prop {key}"
+            );
+        }
     }
 }
