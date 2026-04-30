@@ -33,6 +33,7 @@ use tauri::{AppHandle, Listener, Manager, Wry};
 mod bridge;
 mod handlers;
 mod mcp;
+mod mcp_tool_schema;
 mod mcp_tools;
 mod protocol;
 mod server;

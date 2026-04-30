@@ -739,7 +739,6 @@ dependencies = [
  "connector-client",
  "serde",
  "serde_json",
- "tauri-plugin-connector",
  "tokio",
 ]
 

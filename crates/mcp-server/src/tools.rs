@@ -5,6 +5,10 @@ use serde_json::{json, Value};
 
 use crate::protocol::text_content;
 
+#[cfg(test)]
+#[path = "../../../plugin/src/mcp_tool_schema.rs"]
+mod embedded_mcp_tool_schema;
+
 /// Return the list of all tool definitions for `tools/list`.
 pub fn tool_definitions() -> Value {
     json!({
@@ -1353,7 +1357,7 @@ mod tests {
     #[test]
     fn common_tool_properties_match_embedded_mcp_schema() {
         let standalone = property_map(&tool_definitions());
-        let embedded = property_map(&tauri_plugin_connector::__connector_mcp_tool_definitions());
+        let embedded = property_map(&embedded_mcp_tool_schema::tool_definitions());
         for (name, embedded_props) in &embedded {
             let Some(standalone_props) = standalone.get(name) else {
                 panic!("standalone MCP missing embedded common tool {name}");
