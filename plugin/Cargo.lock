@@ -3500,7 +3500,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-connector"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "base64 0.22.1",
  "futures-util",

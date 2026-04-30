@@ -264,8 +264,8 @@ fn check_environment(cwd: &Path, project: Option<&PathBuf>) -> Section {
 /// user toward migration).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SetupPattern {
-    /// Recommended layout: `optional = true` dep, a `[features] dev-connector
-    /// = [...]` declaration, a `cfg(feature = "dev-connector")` gate, and the
+    /// Recommended layout: `optional = true` dep, a `[features] <feature>
+    /// = [...]` declaration, a matching `cfg(feature = "<feature>")` gate, and the
     /// capability JSON under `capabilities-dev/` registered at runtime via
     /// `app.add_capability(...)`. Release `tauri build` skips the dep entirely.
     FeatureGated,
@@ -317,11 +317,39 @@ fn source_mentions_plugin(src: &str) -> bool {
         || (src.contains("tauri_plugin_connector") && src.contains("ConnectorBuilder"))
 }
 
-/// True when the source contains a `cfg(feature = "dev-connector")` attribute
-/// (tolerant to interior whitespace).
-fn source_has_feature_gate(src: &str) -> bool {
-    src.contains("cfg(feature = \"dev-connector\")")
-        || src.contains("cfg(feature=\"dev-connector\")")
+/// Cargo feature names found in `cfg(feature = "...")` attributes.
+fn source_feature_gates(src: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for raw in src.lines() {
+        let line = raw.trim();
+        if !line.contains("cfg") || !line.contains("feature") {
+            continue;
+        }
+        let Some(feature_pos) = line.find("feature") else {
+            continue;
+        };
+        let after_feature = &line[feature_pos + "feature".len()..];
+        let Some(eq_pos) = after_feature.find('=') else {
+            continue;
+        };
+        let after_eq = after_feature[eq_pos + 1..].trim_start();
+        let Some(quoted) = after_eq.strip_prefix('"') else {
+            continue;
+        };
+        let Some(end) = quoted.find('"') else {
+            continue;
+        };
+        names.push(quoted[..end].to_string());
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn source_has_feature_gate_for(src: &str, feature_name: &str) -> bool {
+    source_feature_gates(src)
+        .iter()
+        .any(|name| name == feature_name)
 }
 
 /// True when the source contains a `cfg(debug_assertions)` attribute.
@@ -339,13 +367,15 @@ fn classify_setup_from_inputs(cargo_text: &str, src_text: &str) -> SetupPattern 
     let optional = extract_cargo_dep(cargo_text, "tauri-plugin-connector")
         .map(|(_, opt)| opt)
         .unwrap_or(false);
-    let features_has_dev =
-        features_declares_dep(cargo_text, "dev-connector", "tauri-plugin-connector");
-    let cfg_feature = source_has_feature_gate(src_text);
+    let connector_features = features_declaring_dep(cargo_text, "tauri-plugin-connector");
+    let cfg_feature = connector_features
+        .iter()
+        .any(|feature| source_has_feature_gate_for(src_text, feature));
+    let any_cfg_feature = !source_feature_gates(src_text).is_empty();
     let cfg_debug = source_has_debug_assertions_gate(src_text);
 
-    let feature_gated = optional && features_has_dev && cfg_feature;
-    let legacy = !optional && !features_has_dev && cfg_debug && !cfg_feature;
+    let feature_gated = optional && !connector_features.is_empty() && cfg_feature;
+    let legacy = !optional && connector_features.is_empty() && cfg_debug && !any_cfg_feature;
 
     match (feature_gated, legacy) {
         (true, false) => SetupPattern::FeatureGated,
@@ -396,7 +426,7 @@ fn check_plugin_setup(root: &Path, pattern: SetupPattern) -> Section {
     }
 }
 
-/// `src-tauri/Cargo.toml` should declare a `dev-connector` cargo feature that
+/// `src-tauri/Cargo.toml` should declare a cargo feature that
 /// activates the optional `tauri-plugin-connector` dependency. Only emitted
 /// under the FeatureGated/Mixed patterns.
 fn check_features_block(root: &Path) -> Check {
@@ -412,12 +442,16 @@ fn check_features_block(root: &Path) -> Check {
         }
     };
 
-    if features_declares_dep(&text, "dev-connector", "tauri-plugin-connector") {
-        Check::ok("[features] dev-connector = [\"dep:tauri-plugin-connector\"]")
-            .with_detail(display)
+    let features = features_declaring_dep(&text, "tauri-plugin-connector");
+    if !features.is_empty() {
+        Check::ok(format!(
+            "[features] {} activates tauri-plugin-connector",
+            features.join(", ")
+        ))
+        .with_detail(display)
     } else {
         Check::fail(
-            "[features] block missing or does not declare `dev-connector`",
+            "[features] block missing a feature for `tauri-plugin-connector`",
             format!(
                 "add a [features] block to src-tauri/Cargo.toml so the plugin dep is opt-in:\n{}",
                 indent_snippet(SNIPPET_FEATURES_BLOCK)
@@ -442,6 +476,12 @@ fn check_runtime_add_capability(root: &Path) -> Check {
     if has_runtime_add_capability(&src) {
         Check::ok(
             "Capability loaded at runtime via app.add_capability(include_str!(\"../capabilities-dev/...\"))",
+        )
+    } else if tauri_conf_enables_connector_feature(root)
+        && capability_in_dir(root, "capabilities", "connector:default")
+    {
+        Check::ok(
+            "Default capability is loadable because tauri.conf.json build.features enables the connector feature",
         )
     } else {
         Check::warn(
@@ -491,11 +531,20 @@ fn check_dev_script_feature(root: &Path) -> Check {
         );
     };
 
-    if package_scripts_enable_feature(&value, "dev-connector") {
-        Check::ok("package.json dev script enables --features dev-connector").with_detail(display)
+    let features = connector_feature_names(root);
+    if package_scripts_enable_any_feature(&value, &features) {
+        Check::ok(format!(
+            "package.json dev script enables connector feature ({})",
+            features.join(", ")
+        ))
+        .with_detail(display)
+    } else if let Some(feature) = tauri_conf_enabled_connector_feature(root) {
+        Check::ok(format!(
+            "tauri.conf.json build.features enables connector feature ({feature})"
+        ))
     } else {
         Check::warn(
-            "package.json dev script does not enable `dev-connector`",
+            "dev command does not enable the connector cargo feature",
             format!(
                 "ensure the command you use to launch Tauri dev passes the cargo feature:\n{}",
                 indent_snippet(SNIPPET_DEV_SCRIPT)
@@ -516,6 +565,12 @@ fn package_scripts_enable_feature(value: &Value, feature_name: &str) -> bool {
             || cmd.contains(&format!("-F={feature_name}"));
         mentions_tauri_dev && (has_long || has_short)
     })
+}
+
+fn package_scripts_enable_any_feature(value: &Value, feature_names: &[String]) -> bool {
+    feature_names
+        .iter()
+        .any(|feature| package_scripts_enable_feature(value, feature))
 }
 
 /// Non-blocking nudge for projects still on the legacy `cfg(debug_assertions)`
@@ -654,7 +709,15 @@ fn extract_cargo_dep(text: &str, name: &str) -> Option<(String, bool)> {
 /// The section-header detection tolerates trailing inline comments
 /// (`[features] # generated`) but does NOT match nested sub-tables like
 /// `[features.foo]`, since those define `features.foo`, not `features`.
+#[cfg(test)]
 fn features_declares_dep(text: &str, feature_name: &str, dep_name: &str) -> bool {
+    features_declaring_dep(text, dep_name)
+        .iter()
+        .any(|name| name == feature_name)
+}
+
+fn features_declaring_dep(text: &str, dep_name: &str) -> Vec<String> {
+    let mut names = Vec::new();
     let mut in_features = false;
     for raw in text.lines() {
         let line = raw.trim();
@@ -677,13 +740,10 @@ fn features_declares_dep(text: &str, feature_name: &str, dep_name: &str) -> bool
             continue;
         }
 
-        let Some(rest) = line.strip_prefix(feature_name) else {
+        let Some((feature_name, rest)) = line.split_once('=') else {
             continue;
         };
-        let rest = rest.trim_start();
-        let Some(rest) = rest.strip_prefix('=') else {
-            continue;
-        };
+        let feature_name = feature_name.trim();
         let rest = rest.trim_start();
         if !rest.starts_with('[') {
             continue;
@@ -691,16 +751,59 @@ fn features_declares_dep(text: &str, feature_name: &str, dep_name: &str) -> bool
         let needle_dep = format!("\"dep:{dep_name}\"");
         let needle_bare = format!("\"{dep_name}\"");
         if rest.contains(&needle_dep) || rest.contains(&needle_bare) {
-            return true;
+            names.push(feature_name.to_string());
         }
     }
-    false
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn connector_feature_names(root: &Path) -> Vec<String> {
+    fs::read_to_string(root.join("src-tauri").join("Cargo.toml"))
+        .map(|text| features_declaring_dep(&text, "tauri-plugin-connector"))
+        .unwrap_or_default()
+}
+
+fn tauri_conf_enabled_connector_feature(root: &Path) -> Option<String> {
+    let features = connector_feature_names(root);
+    if features.is_empty() {
+        return None;
+    }
+    let path = root.join("src-tauri").join("tauri.conf.json");
+    let text = fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<Value>(&text).ok()?;
+    build_features(&value)
+        .into_iter()
+        .find(|feature| features.iter().any(|known| known == feature))
+}
+
+fn tauri_conf_enables_connector_feature(root: &Path) -> bool {
+    tauri_conf_enabled_connector_feature(root).is_some()
+}
+
+fn build_features(value: &Value) -> Vec<String> {
+    let Some(features) = value.get("build").and_then(|v| v.get("features")) else {
+        return Vec::new();
+    };
+    if let Some(feature) = features.as_str() {
+        return vec![feature.to_string()];
+    }
+    features
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Plugin must be registered via `tauri_plugin_connector::init()` or
 /// `ConnectorBuilder::new()...build()` in lib.rs or main.rs. Accepts either
-/// the feature-gated (`cfg(feature = "dev-connector")`) or legacy
-/// (`cfg(debug_assertions)`) cfg gate; surfaces which one was matched.
+/// a Cargo feature gate that activates the connector dependency or the legacy
+/// `cfg(debug_assertions)` gate; surfaces which one was matched.
 fn check_plugin_registration(root: &Path) -> Check {
     let candidates = [
         root.join("src-tauri").join("src").join("lib.rs"),
@@ -714,15 +817,21 @@ fn check_plugin_registration(root: &Path) -> Check {
         if !source_mentions_plugin(&text) {
             continue;
         }
-        let gate = if source_has_feature_gate(&text) {
-            Some("cfg(feature = \"dev-connector\")")
+        let connector_features = connector_feature_names(root);
+        let feature_gates = source_feature_gates(&text);
+        let feature_gate = connector_features
+            .iter()
+            .find(|feature| feature_gates.iter().any(|gate| gate == *feature))
+            .or_else(|| feature_gates.first());
+        let gate = if let Some(feature) = feature_gate {
+            Some(format!("cfg(feature = \"{feature}\")"))
         } else if source_has_debug_assertions_gate(&text) {
-            Some("cfg(debug_assertions)")
+            Some("cfg(debug_assertions)".to_string())
         } else {
             None
         };
         let label = match gate {
-            Some(g) => format!("Plugin registered in {} ({g})", rel(root, path)),
+            Some(ref g) => format!("Plugin registered in {} ({g})", rel(root, path)),
             None => format!(
                 "Plugin registered in {} (no cfg gate detected)",
                 rel(root, path)
@@ -806,6 +915,13 @@ fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
             let label_text = format!("Permission \"connector:default\" in {}", rel(root, &p));
             // Surface a Warn when the location does not match the active pattern.
             match (pattern, dir_label) {
+                (SetupPattern::FeatureGated, "capabilities")
+                    if tauri_conf_enables_connector_feature(root) =>
+                {
+                    Check::ok(label_text).with_detail(
+                        "tauri.conf.json build.features enables the connector feature for this app",
+                    )
+                }
                 (SetupPattern::FeatureGated, "capabilities") => Check::warn(
                     format!("{label_text} (expected under capabilities-dev/)"),
                     format!(
@@ -853,6 +969,30 @@ fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
             ),
         },
     }
+}
+
+fn capability_in_dir(root: &Path, dir_name: &str, permission: &str) -> bool {
+    let dir = root.join("src-tauri").join(dir_name);
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        let is_json = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.eq_ignore_ascii_case("json"))
+            .unwrap_or(false);
+        if !is_json {
+            return false;
+        }
+        let Ok(text) = fs::read_to_string(path) else {
+            return false;
+        };
+        serde_json::from_str::<Value>(&text)
+            .map(|value| permissions_contain(&value, permission))
+            .unwrap_or(false)
+    })
 }
 
 /// Walk a Tauri capability JSON and check whether `needle` appears in any
@@ -2153,6 +2293,21 @@ dev-connector = ["tauri-plugin-connector"]
     }
 
     #[test]
+    fn features_declaring_dep_returns_custom_feature_names() {
+        let toml = r#"
+[features]
+default = []
+connector = ["tauri-plugin-connector"]
+dev-connector = ["dep:tauri-plugin-connector"]
+unrelated = ["serde"]
+"#;
+        assert_eq!(
+            features_declaring_dep(toml, "tauri-plugin-connector"),
+            vec!["connector".to_string(), "dev-connector".to_string()]
+        );
+    }
+
+    #[test]
     fn features_missing_returns_false() {
         let toml = r#"
 [dependencies]
@@ -2222,6 +2377,32 @@ dev-connector = ["dep:tauri-plugin-connector"]
         ));
     }
 
+    #[test]
+    fn source_feature_gates_extracts_custom_feature_names() {
+        let src = r#"
+#[cfg(feature="connector")]
+builder = builder.plugin(tauri_plugin_connector::init());
+#[cfg(feature = "dev-connector")]
+const DEV_CONNECTOR: &str = "";
+"#;
+        assert_eq!(
+            source_feature_gates(src),
+            vec!["connector".to_string(), "dev-connector".to_string()]
+        );
+        assert!(source_has_feature_gate_for(src, "connector"));
+    }
+
+    #[test]
+    fn build_features_accepts_array_and_string_forms() {
+        let array: Value =
+            serde_json::from_str(r#"{ "build": { "features": ["connector"] } }"#).unwrap();
+        assert_eq!(build_features(&array), vec!["connector".to_string()]);
+
+        let string: Value =
+            serde_json::from_str(r#"{ "build": { "features": "connector" } }"#).unwrap();
+        assert_eq!(build_features(&string), vec!["connector".to_string()]);
+    }
+
     // ----- classify_setup_from_inputs ---------------------------------------
 
     const FEATURE_GATED_CARGO: &str = r#"
@@ -2267,6 +2448,30 @@ pub fn run() {
     fn classify_feature_gated_layout() {
         assert_eq!(
             classify_setup_from_inputs(FEATURE_GATED_CARGO, FEATURE_GATED_SRC),
+            SetupPattern::FeatureGated
+        );
+    }
+
+    #[test]
+    fn classify_feature_gated_layout_with_custom_feature_name() {
+        let cargo = r#"
+[dependencies]
+tauri-plugin-connector = { version = "0.11", optional = true }
+
+[features]
+connector = ["tauri-plugin-connector"]
+"#;
+        let src = r#"
+pub fn run() {
+    let mut builder = tauri::Builder::default();
+    #[cfg(feature = "connector")]
+    {
+        builder = builder.plugin(tauri_plugin_connector::init());
+    }
+}
+"#;
+        assert_eq!(
+            classify_setup_from_inputs(cargo, src),
             SetupPattern::FeatureGated
         );
     }

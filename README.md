@@ -370,14 +370,14 @@ Sections reported:
 | Section | Checks |
 |---|---|
 | Environment | CLI version, working directory, Tauri v2 project detection |
-| Plugin Setup | `tauri-plugin-connector` Cargo dep (with `(optional, feature-gated)` tag when applicable), plugin registered (cites the matched cfg gate), `connector:default` permission in `capabilities/` or `capabilities-dev/`, `app.withGlobalTauri: true`, `@zumer/snapdom` in `package.json`, `.mcp.json` Streamable HTTP `/mcp` entry; under feature-gated/mixed: also `[features] dev-connector`, runtime `app.add_capability(include_str!(...))`, and a dev script passing `--features dev-connector`. Legacy setups receive a non-blocking warn nudging migration. |
+| Plugin Setup | `tauri-plugin-connector` Cargo dep (with `(optional, feature-gated)` tag when applicable), plugin registered (cites the matched cfg gate), `connector:default` permission in `capabilities/` or `capabilities-dev/`, `app.withGlobalTauri: true`, `@zumer/snapdom` in `package.json`, `.mcp.json` Streamable HTTP `/mcp` entry; under feature-gated/mixed: also a Cargo feature that activates `tauri-plugin-connector`, runtime `app.add_capability(include_str!(...))` when needed, and either a dev script passing the matching `--features <name>` or `tauri.conf.json` `build.features` enabling that feature. Legacy setups receive a non-blocking warn nudging migration. |
 | Runtime | `.connector.json` PID file, PID alive, runtime metadata (`ws_port`, `mcp_port`, `bridge_port`, `log_dir`), JSONL logs initialized, WS ping on `ws_port`, bridge status, runtime/artifact/debug commands, MCP Streamable HTTP lifecycle on `mcp_port` |
 | Integration | `.claude/` auto-detect hook install status (optional) |
 
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.11.0
+tauri-connector doctor v0.11.1
 
 Plugin Setup
   ✓ Cargo dependency: tauri-plugin-connector = "0.11" (optional, feature-gated)
@@ -386,9 +386,9 @@ Plugin Setup
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
   ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
-  ✓ [features] dev-connector = ["dep:tauri-plugin-connector"]
+  ✓ [features] dev-connector activates tauri-plugin-connector
   ✓ Capability loaded at runtime via app.add_capability(include_str!("../capabilities-dev/..."))
-  ✓ package.json dev script enables --features dev-connector
+  ✓ package.json dev script enables connector feature (dev-connector)
 ```
 
 Example output for a legacy setup (passes, with the migration nudge):
