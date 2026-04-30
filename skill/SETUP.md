@@ -193,7 +193,7 @@ Add to `.mcp.json` in the project root:
 {
   "mcpServers": {
     "tauri-connector": {
-      "url": "http://127.0.0.1:9556/sse"
+      "url": "http://127.0.0.1:9556/mcp"
     }
   }
 }
@@ -212,10 +212,12 @@ Look for these log lines:
 
 ```
 [connector][bridge] Internal bridge on port 9300
-[connector][mcp] MCP ready for 'App Name' -- url: http://0.0.0.0:9556/sse
+[connector][mcp] MCP ready for 'App Name' -- url: http://127.0.0.1:9556/mcp (/sse legacy)
 [connector] Plugin ready for 'App Name' (com.app.id) -- WS on 0.0.0.0:9555
 [connector] PID file: /path/to/src-tauri/target/debug/.connector.json
 ```
+
+The PID file enables the Rust CLI, standalone MCP server, and bun scripts to auto-discover ports without configuration. Run `tauri-connector status --json` to inspect the selected endpoint and stale candidates.
 
 For a one-shot health check of the entire setup, run `tauri-connector doctor` in the project root. It auto-detects the active pattern and emits pattern-specific rows. Under the feature-gated pattern, expect:
 
@@ -247,7 +249,7 @@ tauri-connector hook remove
 
 ## Custom Configuration
 
-For localhost-only access, custom ports, or disabling the embedded MCP — substitute the cfg gate matching your active pattern:
+For localhost-only access, custom ports, or disabling the embedded MCP, substitute the cfg gate matching your active pattern:
 
 ```rust
 use tauri_plugin_connector::ConnectorBuilder;

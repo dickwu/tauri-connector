@@ -59,7 +59,7 @@ const SNIPPET_WITH_GLOBAL_TAURI: &str = r#""app": {
 
 const SNIPPET_MCP_JSON: &str = r#"{
   "mcpServers": {
-    "tauri-connector": { "url": "http://127.0.0.1:9556/sse" }
+    "tauri-connector": { "url": "http://127.0.0.1:9556/mcp" }
   }
 }"#;
 
@@ -932,7 +932,15 @@ fn check_mcp_json(root: &Path) -> Check {
                 Check::warn(
                     ".mcp.json `tauri-connector` entry has no `url`",
                     format!(
-                        "set the url in {display}:\n  \"mcpServers\": {{\n    \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/sse\" }}\n  }}"
+                        "set the url in {display}:\n  \"mcpServers\": {{\n    \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/mcp\" }}\n  }}"
+                    ),
+                )
+            } else if url.ends_with("/sse") {
+                Check::warn(
+                    ".mcp.json uses legacy /sse transport",
+                    format!(
+                        "prefer the streamable HTTP endpoint in {display}:\n  \"tauri-connector\": {{ \"url\": \"{}\" }}",
+                        url.trim_end_matches("/sse").to_string() + "/mcp"
                     ),
                 )
             } else {
@@ -943,7 +951,7 @@ fn check_mcp_json(root: &Path) -> Check {
         _ => Check::fail(
             ".mcp.json has no `tauri-connector` entry",
             format!(
-                "add a `tauri-connector` entry under `mcpServers` in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/sse\" }}"
+                "add a `tauri-connector` entry under `mcpServers` in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/mcp\" }}"
             ),
         ),
     }
@@ -976,6 +984,7 @@ fn find_pid_file(root: &Path) -> Option<PathBuf> {
             .join("target")
             .join("release")
             .join(".connector.json"),
+        root.join("target").join("release").join(".connector.json"),
     ];
     candidates.into_iter().find(|p| p.is_file())
 }
@@ -1061,16 +1070,16 @@ async fn check_runtime(project: Option<&PathBuf>, pid: Option<(PathBuf, PidInfo)
         ),
     }
 
-    // MCP reachable (TCP probe — avoids blocking on SSE semantics)
+    // MCP reachable (TCP probe — avoids blocking on HTTP semantics)
     match probe_tcp(PROBE_HOST, mcp_port).await {
         Ok(()) => checks.push(
             Check::ok(format!(
-                "MCP server http://{PROBE_HOST}:{mcp_port}/sse reachable"
+                "MCP server http://{PROBE_HOST}:{mcp_port}/mcp reachable"
             )),
         ),
         Err(e) => checks.push(
             Check::fail(
-                format!("MCP server http://{PROBE_HOST}:{mcp_port}/sse unreachable"),
+                format!("MCP server http://{PROBE_HOST}:{mcp_port}/mcp unreachable"),
                 format!(
                     "start the Tauri app in dev mode — MCP is embedded and starts automatically. If custom ports are set via ConnectorBuilder.mcp_port_range(...), update .mcp.json to match port {mcp_port}:\n  $ bun run tauri dev"
                 ),

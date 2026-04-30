@@ -2,7 +2,7 @@
 //!
 //! Calls existing handler functions directly — no WebSocket hop.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::bridge::Bridge;
 use crate::handlers;
@@ -33,12 +33,19 @@ fn to_mcp_image_or_text(response: Response) -> Value {
                 result.get("base64").and_then(|v| v.as_str()),
                 result.get("mimeType").and_then(|v| v.as_str()),
             ) {
+                let mut content = vec![json!({
+                    "type": "image",
+                    "data": base64,
+                    "mimeType": mime,
+                })];
+                if let Some(artifact) = result.get("artifact") {
+                    content.push(json!({
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(artifact).unwrap_or_default(),
+                    }));
+                }
                 json!({
-                    "content": [{
-                        "type": "image",
-                        "data": base64,
-                        "mimeType": mime,
-                    }]
+                    "content": content
                 })
             } else {
                 to_mcp_content(response)
@@ -49,7 +56,9 @@ fn to_mcp_image_or_text(response: Response) -> Value {
 }
 
 fn str_arg(args: &Value, key: &str) -> Option<String> {
-    args.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 fn num_arg(args: &Value, key: &str) -> Option<f64> {
@@ -77,12 +86,37 @@ pub async fn call_tool(
             handlers::execute_js(id, &script, &wid, bridge).await
         }
 
+        "bridge_status" => Response::success(id.to_string(), bridge.status().await),
+
         "webview_screenshot" => {
             let format = str_arg(args, "format").unwrap_or_else(|| "png".to_string());
             let quality = num_arg(args, "quality").unwrap_or(80.0) as u8;
             let max_width = num_arg(args, "maxWidth").map(|n| n as u32);
             let wid = window_id(args);
-            let resp = handlers::screenshot(id, &format, quality, max_width, &wid, bridge, app).await;
+            let save = args.get("save").and_then(|v| v.as_bool()).unwrap_or(false);
+            let output_dir = str_arg(args, "outputDir");
+            let name_hint = str_arg(args, "nameHint");
+            let overwrite = args
+                .get("overwrite")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let selector = str_arg(args, "selector");
+            let resp = handlers::screenshot(
+                id,
+                &format,
+                quality,
+                max_width,
+                &wid,
+                bridge,
+                app,
+                state,
+                save,
+                output_dir.as_deref(),
+                name_hint.as_deref(),
+                overwrite,
+                selector.as_deref(),
+            )
+            .await;
             // Return image content if base64 data is present
             return to_mcp_image_or_text(resp);
         }
@@ -93,24 +127,48 @@ pub async fn call_tool(
                 .or_else(|| str_arg(args, "type"))
                 .unwrap_or_else(|| "ai".to_string());
             let selector = str_arg(args, "selector");
-            let max_depth = num_arg(args, "max_depth").or_else(|| num_arg(args, "maxDepth")).map(|n| n as u64);
-            let max_elements = num_arg(args, "max_elements").or_else(|| num_arg(args, "maxElements")).map(|n| n as u64);
+            let max_depth = num_arg(args, "max_depth")
+                .or_else(|| num_arg(args, "maxDepth"))
+                .map(|n| n as u64);
+            let max_elements = num_arg(args, "max_elements")
+                .or_else(|| num_arg(args, "maxElements"))
+                .map(|n| n as u64);
             // Default maxTokens to 4000 for MCP callers
             let max_tokens = num_arg(args, "max_tokens")
                 .or_else(|| num_arg(args, "maxTokens"))
                 .map(|n| n as u64)
                 .or(Some(4000));
-            let react_enrich = args.get("react_enrich").or_else(|| args.get("reactEnrich"))
-                .and_then(|v| v.as_bool()).unwrap_or(true);
-            let follow_portals = args.get("follow_portals").or_else(|| args.get("followPortals"))
-                .and_then(|v| v.as_bool()).unwrap_or(true);
-            let shadow_dom = args.get("shadow_dom").or_else(|| args.get("shadowDom"))
-                .and_then(|v| v.as_bool()).unwrap_or(false);
+            let react_enrich = args
+                .get("react_enrich")
+                .or_else(|| args.get("reactEnrich"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let follow_portals = args
+                .get("follow_portals")
+                .or_else(|| args.get("followPortals"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let shadow_dom = args
+                .get("shadow_dom")
+                .or_else(|| args.get("shadowDom"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let wid = window_id(args);
             handlers::dom_snapshot(
-                id, &mode, selector.as_deref(), max_depth, max_elements, max_tokens,
-                react_enrich, follow_portals, shadow_dom, &wid, bridge, state,
-            ).await
+                id,
+                &mode,
+                selector.as_deref(),
+                max_depth,
+                max_elements,
+                max_tokens,
+                react_enrich,
+                follow_portals,
+                shadow_dom,
+                &wid,
+                bridge,
+                state,
+            )
+            .await
         }
 
         "get_cached_dom" => {
@@ -132,7 +190,7 @@ pub async fn call_tool(
                 .get("properties")
                 .and_then(|v| serde_json::from_value(v.clone()).ok());
             let wid = window_id(args);
-            handlers::get_styles(id, &selector, properties.as_deref(), &wid, bridge).await
+            handlers::get_styles(id, &selector, properties.as_deref(), &wid, bridge, state).await
         }
 
         "webview_interact" => {
@@ -149,19 +207,25 @@ pub async fn call_tool(
                 let target_y = num_arg(args, "targetY");
                 let steps = num_arg(args, "steps").unwrap_or(10.0) as u32;
                 let duration_ms = num_arg(args, "durationMs").unwrap_or(300.0) as u32;
-                let drag_strategy = str_arg(args, "dragStrategy").unwrap_or_else(|| "auto".to_string());
+                let drag_strategy =
+                    str_arg(args, "dragStrategy").unwrap_or_else(|| "auto".to_string());
                 handlers::drag(
                     id,
                     selector.as_deref(),
                     &strategy,
-                    x, y,
+                    x,
+                    y,
                     target_selector.as_deref(),
-                    target_x, target_y,
-                    steps, duration_ms,
+                    target_x,
+                    target_y,
+                    steps,
+                    duration_ms,
                     &drag_strategy,
                     &wid,
                     bridge,
-                ).await
+                    state,
+                )
+                .await
             } else {
                 let direction = str_arg(args, "direction");
                 let distance = num_arg(args, "distance");
@@ -170,12 +234,15 @@ pub async fn call_tool(
                     &action,
                     selector.as_deref(),
                     &strategy,
-                    x, y,
+                    x,
+                    y,
                     direction.as_deref(),
                     distance,
                     &wid,
                     bridge,
-                ).await
+                    state,
+                )
+                .await
             }
         }
 
@@ -205,16 +272,25 @@ pub async fn call_tool(
             let text = str_arg(args, "text");
             let timeout = num_arg(args, "timeout").unwrap_or(5000.0) as u64;
             let wid = window_id(args);
-            handlers::wait_for(id, selector.as_deref(), &strategy, text.as_deref(), timeout, &wid, bridge).await
+            handlers::wait_for(
+                id,
+                selector.as_deref(),
+                &strategy,
+                text.as_deref(),
+                timeout,
+                &wid,
+                bridge,
+                state,
+            )
+            .await
         }
 
-        "webview_get_pointed_element" => {
-            handlers::get_pointed_element(id, state).await
-        }
+        "webview_get_pointed_element" => handlers::get_pointed_element(id, state).await,
 
-        "webview_select_element" => {
-            Response::error(id.to_string(), "Select element (visual picker) not yet implemented")
-        }
+        "webview_select_element" => Response::error(
+            id.to_string(),
+            "Select element (visual picker) not yet implemented",
+        ),
 
         "manage_window" => {
             let action = str_arg(args, "action").unwrap_or_default();
@@ -231,9 +307,7 @@ pub async fn call_tool(
             }
         }
 
-        "ipc_get_backend_state" => {
-            handlers::backend_state(id, app).await
-        }
+        "ipc_get_backend_state" => handlers::backend_state(id, app).await,
 
         "ipc_execute_command" => {
             let command = str_arg(args, "command").unwrap_or_default();
@@ -251,7 +325,15 @@ pub async fn call_tool(
             let pattern = str_arg(args, "pattern");
             let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
             let since = num_arg(args, "since").map(|n| n as u64);
-            handlers::ipc_get_captured(id, filter.as_deref(), pattern.as_deref(), limit, since, state).await
+            handlers::ipc_get_captured(
+                id,
+                filter.as_deref(),
+                pattern.as_deref(),
+                limit,
+                since,
+                state,
+            )
+            .await
         }
 
         "ipc_emit_event" => {
@@ -266,7 +348,16 @@ pub async fn call_tool(
             let pattern = str_arg(args, "pattern");
             let level = str_arg(args, "level");
             let wid = window_id(args);
-            handlers::console_logs(id, lines, filter.as_deref(), pattern.as_deref(), level.as_deref(), &wid, state).await
+            handlers::console_logs(
+                id,
+                lines,
+                filter.as_deref(),
+                pattern.as_deref(),
+                level.as_deref(),
+                &wid,
+                state,
+            )
+            .await
         }
 
         "get_setup_instructions" => {
@@ -293,12 +384,23 @@ pub async fn call_tool(
             let pattern = str_arg(args, "pattern");
             let since = num_arg(args, "since").map(|n| n as u64);
             let wid = str_arg(args, "windowId");
-            handlers::read_log_file(id, &source, lines, level.as_deref(), pattern.as_deref(), since, wid.as_deref(), state).await
+            handlers::read_log_file(
+                id,
+                &source,
+                lines,
+                level.as_deref(),
+                pattern.as_deref(),
+                since,
+                wid.as_deref(),
+                state,
+            )
+            .await
         }
 
         "ipc_listen" => {
             let action = str_arg(args, "action").unwrap_or_default();
-            let events: Option<Vec<String>> = args.get("events")
+            let events: Option<Vec<String>> = args
+                .get("events")
                 .and_then(|v| serde_json::from_value(v.clone()).ok());
             handlers::ipc_listen(id, &action, events.as_deref(), state, bridge).await
         }
@@ -308,7 +410,15 @@ pub async fn call_tool(
             let pattern = str_arg(args, "pattern");
             let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
             let since = num_arg(args, "since").map(|n| n as u64);
-            handlers::event_get_captured(id, event.as_deref(), pattern.as_deref(), limit, since, state).await
+            handlers::event_get_captured(
+                id,
+                event.as_deref(),
+                pattern.as_deref(),
+                limit,
+                since,
+                state,
+            )
+            .await
         }
 
         "webview_search_snapshot" => {
@@ -341,12 +451,21 @@ pub fn tool_definitions() -> Value {
                     "windowId": { "type": "string" }
                 }, "required": ["script"] })
             ),
+            tool_def("bridge_status",
+                "Show internal JS bridge clients, pending evals, and fallback availability",
+                json!({ "type": "object", "properties": {} })
+            ),
             tool_def("webview_screenshot",
                 "Take a screenshot of the Tauri window using native xcap capture (cross-platform)",
                 json!({ "type": "object", "properties": {
                     "format": { "type": "string", "enum": ["png", "jpeg", "webp"] },
                     "quality": { "type": "number", "minimum": 0, "maximum": 100 },
                     "maxWidth": { "type": "number" },
+                    "save": { "type": "boolean" },
+                    "outputDir": { "type": "string" },
+                    "nameHint": { "type": "string" },
+                    "overwrite": { "type": "boolean" },
+                    "selector": { "type": "string", "description": "CSS selector or @ref for future element captures" },
                     "windowId": { "type": "string" }
                 } })
             ),
@@ -548,7 +667,7 @@ const SETUP_INSTRUCTIONS: &str = r#"## tauri-plugin-connector Setup
 In your Tauri app's `src-tauri/Cargo.toml`:
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.6"
+tauri-plugin-connector = "0.9"
 ```
 
 ### 2. Register the plugin (debug-only)
@@ -578,7 +697,7 @@ In `.mcp.json`:
 {
   "mcpServers": {
     "tauri-connector": {
-      "url": "http://127.0.0.1:9556/sse"
+      "url": "http://127.0.0.1:9556/mcp"
     }
   }
 }

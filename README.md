@@ -32,7 +32,7 @@ Plugin (Rust)
   |-- xcap native capture (cross-platform) --> PNG/JPEG/WebP with resize
   '-- snapdom fallback ---------------------> DOM-to-image via @zumer/snapdom
 
-Claude Code -------- SSE http://host:9556/sse -----> Embedded MCP server
+Claude Code -------- HTTP http://host:9556/mcp ----> Embedded MCP server
                                                       |-- handlers (direct, in-process)
                                                       |-- bridge.execute_js() -> JS result
                                                       '-- state.get_dom() -> cached DOM
@@ -324,7 +324,7 @@ window.snapdom = snapdom;
 {
   "mcpServers": {
     "tauri-connector": {
-      "url": "http://127.0.0.1:9556/sse"
+      "url": "http://127.0.0.1:9556/mcp"
     }
   }
 }
@@ -338,7 +338,7 @@ bun run tauri dev
 
 Look for:
 ```
-[connector][mcp] MCP ready for 'MyApp' -- url: http://0.0.0.0:9556/sse
+[connector][mcp] MCP ready for 'MyApp' -- url: http://127.0.0.1:9556/mcp (/sse legacy)
 [connector] Plugin ready for 'MyApp' (com.example.app) -- WS on 0.0.0.0:9555
 ```
 
@@ -374,7 +374,7 @@ Sections reported:
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.10.0
+tauri-connector doctor v0.10.1
 
 Plugin Setup
   ✓ Cargo dependency: tauri-plugin-connector = "0.10" (optional, feature-gated)
@@ -382,7 +382,7 @@ Plugin Setup
   ✓ Permission "connector:default" in src-tauri/capabilities-dev/dev-connector.json
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
-  ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/sse)
+  ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
   ✓ [features] dev-connector = ["dep:tauri-plugin-connector"]
   ✓ Capability loaded at runtime via app.add_capability(include_str!("../capabilities-dev/..."))
 ```
@@ -396,7 +396,7 @@ Plugin Setup
   ✓ Permission "connector:default" in src-tauri/capabilities/default.json
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
-  ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/sse)
+  ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
   ! Using legacy debug_assertions gate — consider migrating to --features dev-connector
       Fix: 1. tauri-plugin-connector = { version = "0.10", optional = true }
            2. [features] dev-connector = ["dep:tauri-plugin-connector"]
@@ -592,7 +592,7 @@ The MCP server starts automatically inside the Tauri plugin when the app runs. C
 {
   "mcpServers": {
     "tauri-connector": {
-      "url": "http://127.0.0.1:9556/sse"
+      "url": "http://127.0.0.1:9556/mcp"
     }
   }
 }
@@ -754,9 +754,9 @@ The bun scripts in `skill/scripts/` auto-discover this file, verify the PID is a
 
 ### Embedded MCP Server
 
-1. Plugin starts an SSE HTTP server on port 9556 (configurable)
-2. Claude Code connects via `GET /sse` and receives an SSE event stream
-3. Tool calls arrive via `POST /message` with JSON-RPC bodies
+1. Plugin starts a streamable HTTP MCP server on port 9556 (configurable)
+2. New clients use `POST /mcp` for JSON-RPC and can open `GET /mcp` for a stream
+3. Legacy clients can still use `GET /sse` plus `POST /message`
 4. Handlers call the bridge and plugin state directly -- zero WebSocket overhead
 
 ### Console Log Capture

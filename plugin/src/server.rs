@@ -27,9 +27,12 @@ impl Server {
         bridge: Bridge,
         state: PluginState,
     ) -> Result<Self, String> {
-        let port = find_available_port(bind_address, port_range.0, port_range.1)
-            .ok_or_else(|| {
-                format!("No available port in range {}-{}", port_range.0, port_range.1)
+        let port =
+            find_available_port(bind_address, port_range.0, port_range.1).ok_or_else(|| {
+                format!(
+                    "No available port in range {}-{}",
+                    port_range.0, port_range.1
+                )
             })?;
 
         Ok(Self {
@@ -85,7 +88,10 @@ impl Server {
                             let request: Request = match serde_json::from_str(&text) {
                                 Ok(r) => r,
                                 Err(e) => {
-                                    let resp = Response::error("unknown".to_string(), format!("Invalid request: {e}"));
+                                    let resp = Response::error(
+                                        "unknown".to_string(),
+                                        format!("Invalid request: {e}"),
+                                    );
                                     let _ = send_response(&ws_tx, &resp).await;
                                     continue;
                                 }
@@ -99,7 +105,14 @@ impl Server {
 
                             tokio::spawn(async move {
                                 let app = app_handle.lock().await;
-                                let response = handle_command(id, request.command, &bridge, app.as_ref(), &state).await;
+                                let response = handle_command(
+                                    id,
+                                    request.command,
+                                    &bridge,
+                                    app.as_ref(),
+                                    &state,
+                                )
+                                .await;
                                 let _ = send_response(&ws_tx, &response).await;
                             });
                         }
@@ -129,52 +142,187 @@ async fn handle_command(
         Command::ExecuteJs { script, window_id } => {
             handlers::execute_js(&id, &script, &window_id, bridge).await
         }
+        Command::BridgeStatus => Response::success(id, bridge.status().await),
 
         // Screenshot
-        Command::Screenshot { format, quality, max_width, window_id } => {
-            handlers::screenshot(&id, &format, quality, max_width, &window_id, bridge, app).await
+        Command::Screenshot {
+            format,
+            quality,
+            max_width,
+            window_id,
+            save,
+            output_dir,
+            name_hint,
+            overwrite,
+            selector,
+        } => {
+            handlers::screenshot(
+                &id,
+                &format,
+                quality,
+                max_width,
+                &window_id,
+                bridge,
+                app,
+                state,
+                save.unwrap_or(false),
+                output_dir.as_deref(),
+                name_hint.as_deref(),
+                overwrite.unwrap_or(false),
+                selector.as_deref(),
+            )
+            .await
         }
 
         // DOM
-        Command::DomSnapshot { snapshot_type, selector, max_tokens, no_split, window_id } => {
-            let mt = if no_split.unwrap_or(false) { Some(0) } else { max_tokens };
-            handlers::dom_snapshot(&id, &snapshot_type, selector.as_deref(), None, None, mt, true, true, false, &window_id, bridge, state).await
+        Command::DomSnapshot {
+            mode,
+            snapshot_type,
+            selector,
+            max_depth,
+            max_elements,
+            max_tokens,
+            no_split,
+            react_enrich,
+            follow_portals,
+            shadow_dom,
+            window_id,
+        } => {
+            let mode = mode.or(snapshot_type).unwrap_or_else(|| "ai".to_string());
+            let mt = if no_split.unwrap_or(false) {
+                Some(0)
+            } else {
+                max_tokens.or(Some(4000))
+            };
+            handlers::dom_snapshot(
+                &id,
+                &mode,
+                selector.as_deref(),
+                max_depth,
+                max_elements,
+                mt,
+                react_enrich.unwrap_or(true),
+                follow_portals.unwrap_or(true),
+                shadow_dom.unwrap_or(false),
+                &window_id,
+                bridge,
+                state,
+            )
+            .await
         }
         Command::GetCachedDom { window_id } => {
             handlers::get_cached_dom(&id, &window_id, state).await
         }
 
         // Element Operations
-        Command::FindElement { selector, strategy, target, window_id } => {
-            handlers::find_element(&id, &selector, &strategy, target.as_deref(), &window_id, bridge).await
+        Command::FindElement {
+            selector,
+            strategy,
+            target,
+            window_id,
+        } => {
+            handlers::find_element(
+                &id,
+                &selector,
+                &strategy,
+                target.as_deref(),
+                &window_id,
+                bridge,
+            )
+            .await
         }
-        Command::GetStyles { selector, properties, window_id } => {
-            handlers::get_styles(&id, &selector, properties.as_deref(), &window_id, bridge).await
+        Command::GetStyles {
+            selector,
+            properties,
+            window_id,
+        } => {
+            handlers::get_styles(
+                &id,
+                &selector,
+                properties.as_deref(),
+                &window_id,
+                bridge,
+                state,
+            )
+            .await
         }
         Command::SelectElement { .. } => {
             Response::error(id, "Select element (visual picker) not yet implemented")
         }
-        Command::GetPointedElement { .. } => {
-            handlers::get_pointed_element(&id, state).await
-        }
+        Command::GetPointedElement { .. } => handlers::get_pointed_element(&id, state).await,
 
         // Interaction
-        Command::Interact { action, selector, strategy, x, y, direction, distance, window_id } => {
-            handlers::interact(&id, &action, selector.as_deref(), &strategy, x, y, direction.as_deref(), distance, &window_id, bridge).await
+        Command::Interact {
+            action,
+            selector,
+            strategy,
+            x,
+            y,
+            direction,
+            distance,
+            window_id,
+        } => {
+            handlers::interact(
+                &id,
+                &action,
+                selector.as_deref(),
+                &strategy,
+                x,
+                y,
+                direction.as_deref(),
+                distance,
+                &window_id,
+                bridge,
+                state,
+            )
+            .await
         }
-        Command::Keyboard { action, text, key, modifiers, window_id } => {
-            handlers::keyboard(&id, &action, text.as_deref(), key.as_deref(), modifiers.as_deref(), &window_id, bridge).await
+        Command::Keyboard {
+            action,
+            text,
+            key,
+            modifiers,
+            window_id,
+        } => {
+            handlers::keyboard(
+                &id,
+                &action,
+                text.as_deref(),
+                key.as_deref(),
+                modifiers.as_deref(),
+                &window_id,
+                bridge,
+            )
+            .await
         }
-        Command::WaitFor { selector, strategy, text, timeout, window_id } => {
-            handlers::wait_for(&id, selector.as_deref(), &strategy, text.as_deref(), timeout, &window_id, bridge).await
+        Command::WaitFor {
+            selector,
+            strategy,
+            text,
+            timeout,
+            window_id,
+        } => {
+            handlers::wait_for(
+                &id,
+                selector.as_deref(),
+                &strategy,
+                text.as_deref(),
+                timeout,
+                &window_id,
+                bridge,
+                state,
+            )
+            .await
         }
 
         // Window Management
         Command::WindowList => handlers::window_list(&id, app).await,
         Command::WindowInfo { window_id } => handlers::window_info(&id, &window_id, app).await,
-        Command::WindowResize { window_id, width, height } => {
-            handlers::window_resize(&id, &window_id, width, height, app).await
-        }
+        Command::WindowResize {
+            window_id,
+            width,
+            height,
+        } => handlers::window_resize(&id, &window_id, width, height, app).await,
 
         // IPC
         Command::BackendState => handlers::backend_state(&id, app).await,
@@ -182,43 +330,103 @@ async fn handle_command(
             handlers::ipc_execute_command(&id, &command, args.as_ref(), "main", bridge).await
         }
         Command::IpcMonitor { action } => handlers::ipc_monitor(&id, &action, state, bridge).await,
-        Command::IpcGetCaptured { filter, pattern, limit, since } => {
-            handlers::ipc_get_captured(&id, filter.as_deref(), pattern.as_deref(), limit, since, state).await
+        Command::IpcGetCaptured {
+            filter,
+            pattern,
+            limit,
+            since,
+        } => {
+            handlers::ipc_get_captured(
+                &id,
+                filter.as_deref(),
+                pattern.as_deref(),
+                limit,
+                since,
+                state,
+            )
+            .await
         }
-        Command::IpcEmitEvent { event_name, payload } => {
-            handlers::ipc_emit_event(&id, &event_name, payload.as_ref(), app).await
-        }
+        Command::IpcEmitEvent {
+            event_name,
+            payload,
+        } => handlers::ipc_emit_event(&id, &event_name, payload.as_ref(), app).await,
 
         // Logs
-        Command::ConsoleLogs { lines, filter, level, pattern, window_id } => {
-            handlers::console_logs(&id, lines, filter.as_deref(), pattern.as_deref(), level.as_deref(), &window_id, state).await
+        Command::ConsoleLogs {
+            lines,
+            filter,
+            level,
+            pattern,
+            window_id,
+        } => {
+            handlers::console_logs(
+                &id,
+                lines,
+                filter.as_deref(),
+                pattern.as_deref(),
+                level.as_deref(),
+                &window_id,
+                state,
+            )
+            .await
         }
-        Command::ClearLogs { source } => {
-            handlers::clear_logs(&id, &source, state).await
-        }
-        Command::ReadLogFile { source, lines, level, pattern, since, window_id } => {
-            handlers::read_log_file(&id, &source, lines, level.as_deref(), pattern.as_deref(), since, window_id.as_deref(), state).await
+        Command::ClearLogs { source } => handlers::clear_logs(&id, &source, state).await,
+        Command::ReadLogFile {
+            source,
+            lines,
+            level,
+            pattern,
+            since,
+            window_id,
+        } => {
+            handlers::read_log_file(
+                &id,
+                &source,
+                lines,
+                level.as_deref(),
+                pattern.as_deref(),
+                since,
+                window_id.as_deref(),
+                state,
+            )
+            .await
         }
 
         // Event Capture
         Command::IpcListen { action, events } => {
             handlers::ipc_listen(&id, &action, events.as_deref(), state, bridge).await
         }
-        Command::EventGetCaptured { event, pattern, limit, since } => {
-            handlers::event_get_captured(&id, event.as_deref(), pattern.as_deref(), limit, since, state).await
+        Command::EventGetCaptured {
+            event,
+            pattern,
+            limit,
+            since,
+        } => {
+            handlers::event_get_captured(
+                &id,
+                event.as_deref(),
+                pattern.as_deref(),
+                limit,
+                since,
+                state,
+            )
+            .await
         }
 
         // Search
-        Command::SearchSnapshot { pattern, context, mode, window_id } => {
-            handlers::search_snapshot(&id, &pattern, context, &mode, &window_id, state, bridge).await
+        Command::SearchSnapshot {
+            pattern,
+            context,
+            mode,
+            window_id,
+        } => {
+            handlers::search_snapshot(&id, &pattern, context, &mode, &window_id, state, bridge)
+                .await
         }
     }
 }
 
-async fn send_response<S>(
-    ws_tx: &Arc<Mutex<S>>,
-    response: &Response,
-) -> Result<(), String>
+async fn send_response<S>(ws_tx: &Arc<Mutex<S>>, response: &Response) -> Result<(), String>
 where
     S: futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
 {

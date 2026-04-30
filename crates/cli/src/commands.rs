@@ -1,9 +1,14 @@
 //! CLI command implementations.
 
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use connector_client::discovery::ConnectorInstance;
 use connector_client::ConnectorClient;
 use serde_json::{json, Value};
 
-use crate::snapshot::{build_resolve_and_act_script, build_snapshot_script, RefMap, SnapshotOptions};
+use crate::snapshot::{build_resolve_and_act_script, RefMap};
 
 /// Execute JS in the webview via the connector.
 async fn exec_js(client: &ConnectorClient, script: &str, timeout_ms: u64) -> Result<Value, String> {
@@ -30,25 +35,35 @@ pub async fn snapshot(
     max_tokens: usize,
     no_split: bool,
 ) -> Result<RefMap, String> {
-    let opts = SnapshotOptions {
-        interactive,
-        compact,
-        max_depth,
-        max_elements,
-        selector,
-        mode,
-        react_enrich,
-        follow_portals,
-        max_tokens,
-        no_split,
-    };
-    let script = build_snapshot_script(&opts);
-    let result = exec_js(client, &script, 30_000).await?;
+    let mut cmd = json!({
+        "type": "dom_snapshot",
+        "mode": mode.unwrap_or_else(|| if interactive { "ai".to_string() } else { "accessibility".to_string() }),
+        "max_depth": max_depth as u64,
+        "max_elements": max_elements as u64,
+        "max_tokens": max_tokens as u64,
+        "no_split": no_split,
+        "react_enrich": react_enrich,
+        "follow_portals": follow_portals,
+        "window_id": "main",
+    });
+    if let Some(selector) = selector {
+        cmd["selector"] = json!(selector);
+    }
+    let result = client.send_with_timeout(cmd, 30_000).await?;
 
-    let snapshot_text = result
+    let mut snapshot_text = result
         .get("snapshot")
         .and_then(|v| v.as_str())
-        .unwrap_or("(no snapshot)");
+        .unwrap_or("(no snapshot)")
+        .to_string();
+
+    if compact {
+        snapshot_text = snapshot_text
+            .lines()
+            .filter(|line| line.contains("ref=") || line.contains('"') || line.contains("subtree:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
 
     println!("{snapshot_text}");
 
@@ -61,7 +76,10 @@ pub async fn snapshot(
             if let Some(files) = meta.get("subtreeFiles").and_then(|v| v.as_array()) {
                 for f in files {
                     let label = f.get("label").and_then(|v| v.as_str()).unwrap_or("?");
-                    let tokens = f.get("estimatedTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let tokens = f
+                        .get("estimatedTokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
                     let path = f.get("path").and_then(|v| v.as_str()).unwrap_or("");
                     eprintln!("  {} ({} tokens) -> {}", label, tokens, path);
                 }
@@ -80,12 +98,9 @@ pub async fn snapshot(
     Ok(refs)
 }
 
-/// List recent snapshot sessions from the temp directory.
-pub fn snapshots_list() -> Result<(), String> {
-    let pid = std::process::id();
-    let dir = std::env::temp_dir()
-        .join(format!("tauri-connector-{pid}"))
-        .join("snapshots");
+/// List recent snapshot sessions from the app snapshot directory.
+pub fn snapshots_list(instance: Option<&ConnectorInstance>) -> Result<(), String> {
+    let dir = snapshots_dir(instance);
     if !dir.exists() {
         println!("No snapshots found");
         return Ok(());
@@ -95,9 +110,7 @@ pub fn snapshots_list() -> Result<(), String> {
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
         .collect();
-    entries.sort_by_key(|e| {
-        std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok()))
-    });
+    entries.sort_by_key(|e| std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok())));
     for entry in entries.iter().take(10) {
         let name = entry.file_name();
         let meta_path = entry.path().join("meta.json");
@@ -116,12 +129,12 @@ pub fn snapshots_list() -> Result<(), String> {
 }
 
 /// Read a subtree file from a snapshot session.
-pub fn snapshots_read(uuid: &str, file: Option<&str>) -> Result<(), String> {
-    let pid = std::process::id();
-    let dir = std::env::temp_dir()
-        .join(format!("tauri-connector-{pid}"))
-        .join("snapshots")
-        .join(uuid);
+pub fn snapshots_read(
+    instance: Option<&ConnectorInstance>,
+    uuid: &str,
+    file: Option<&str>,
+) -> Result<(), String> {
+    let dir = snapshots_dir(instance).join(uuid);
     if !dir.exists() {
         return Err(format!("Snapshot {uuid} not found"));
     }
@@ -140,6 +153,16 @@ pub fn snapshots_read(uuid: &str, file: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+fn snapshots_dir(instance: Option<&ConnectorInstance>) -> PathBuf {
+    instance
+        .map(ConnectorInstance::snapshots_dir)
+        .unwrap_or_else(|| {
+            std::env::temp_dir()
+                .join(format!("tauri-connector-{}", std::process::id()))
+                .join("snapshots")
+        })
+}
+
 /// Click an element by ref or selector.
 pub async fn click(client: &ConnectorClient, refs: &RefMap, target: &str) -> Result<(), String> {
     let script = build_resolve_and_act_script(
@@ -152,7 +175,10 @@ pub async fn click(client: &ConnectorClient, refs: &RefMap, target: &str) -> Res
     "#,
     );
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -167,7 +193,10 @@ pub async fn dblclick(client: &ConnectorClient, refs: &RefMap, target: &str) -> 
     "#,
     );
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -184,7 +213,10 @@ pub async fn hover(client: &ConnectorClient, refs: &RefMap, target: &str) -> Res
     "#,
     );
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -265,7 +297,10 @@ pub async fn drag(
 
     let timeout = duration_ms as u64 + 10_000;
     let result = exec_js(client, &script, timeout).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -273,9 +308,9 @@ pub async fn drag(
 fn resolve_to_selector(target: &str, refs: &RefMap) -> Result<String, String> {
     match crate::snapshot::parse_ref(target) {
         Some(ref_id) => {
-            let entry = refs.get(&ref_id).ok_or_else(|| {
-                format!("Unknown ref: {ref_id}. Run snapshot first.")
-            })?;
+            let entry = refs
+                .get(&ref_id)
+                .ok_or_else(|| format!("Unknown ref: {ref_id}. Run snapshot first."))?;
             Ok(entry.selector.clone())
         }
         None => Ok(target.to_string()),
@@ -310,7 +345,10 @@ pub async fn focus(client: &ConnectorClient, refs: &RefMap, target: &str) -> Res
         "el.focus(); return { action: 'focus', tag: el.tagName.toLowerCase() };",
     );
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -336,7 +374,10 @@ pub async fn fill(
     );
     let script = build_resolve_and_act_script(target, refs, &action);
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -366,7 +407,10 @@ pub async fn type_text(
     );
     let script = build_resolve_and_act_script(target, refs, &action);
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -378,7 +422,10 @@ pub async fn check(client: &ConnectorClient, refs: &RefMap, target: &str) -> Res
         "if (!el.checked) el.click(); return { action: 'check', checked: el.checked };",
     );
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -390,7 +437,10 @@ pub async fn uncheck(client: &ConnectorClient, refs: &RefMap, target: &str) -> R
         "if (el.checked) el.click(); return { action: 'uncheck', checked: el.checked };",
     );
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -419,7 +469,10 @@ pub async fn select(
     );
     let script = build_resolve_and_act_script(target, refs, &action);
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -455,7 +508,10 @@ pub async fn scroll(
         exec_js(client, &script, 30_000).await?
     };
 
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -471,7 +527,10 @@ pub async fn scroll_into_view(
         "el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return { action: 'scrollintoview', tag: el.tagName.toLowerCase() };",
     );
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -486,7 +545,10 @@ pub async fn press(client: &ConnectorClient, key: &str) -> Result<(), String> {
     }})()"#
     );
     let result = exec_js(client, &script, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -528,7 +590,7 @@ pub async fn get_prop(
 
     let Some(t) = target else {
         return Err(
-            "Usage: get <text|html|value|attr|box|styles> <@ref|selector> [attr-name]".to_string()
+            "Usage: get <text|html|value|attr|box|styles> <@ref|selector> [attr-name]".to_string(),
         );
     };
 
@@ -551,7 +613,10 @@ pub async fn get_prop(
 
     match &result {
         Value::String(s) => println!("{s}"),
-        _ => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+        _ => println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        ),
     }
     Ok(())
 }
@@ -575,7 +640,10 @@ pub async fn wait(
         cmd["text"] = json!(t);
     }
     let result = client.send_with_timeout(cmd, timeout_ms + 5000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -584,7 +652,10 @@ pub async fn eval_js(client: &ConnectorClient, script: &str) -> Result<(), Strin
     let result = exec_js(client, script, 30_000).await?;
     match &result {
         Value::String(s) => println!("{s}"),
-        _ => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+        _ => println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        ),
     }
     Ok(())
 }
@@ -598,9 +669,15 @@ pub async fn logs(
     pattern: Option<&str>,
 ) -> Result<(), String> {
     let mut cmd = json!({ "type": "console_logs", "lines": lines, "window_id": "main" });
-    if let Some(f) = filter { cmd["filter"] = json!(f); }
-    if let Some(l) = level { cmd["level"] = json!(l); }
-    if let Some(p) = pattern { cmd["pattern"] = json!(p); }
+    if let Some(f) = filter {
+        cmd["filter"] = json!(f);
+    }
+    if let Some(l) = level {
+        cmd["level"] = json!(l);
+    }
+    if let Some(p) = pattern {
+        cmd["pattern"] = json!(p);
+    }
 
     let result = client.send(cmd).await?;
     if let Some(logs) = result.get("logs").and_then(|v| v.as_array()) {
@@ -615,7 +692,10 @@ pub async fn logs(
             println!("{h:02}:{m:02}:{s:02} {:<5} {msg}", lvl.to_uppercase());
         }
     } else {
-        println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        );
     }
     Ok(())
 }
@@ -623,24 +703,45 @@ pub async fn logs(
 /// Get app backend state.
 pub async fn state(client: &ConnectorClient) -> Result<(), String> {
     let result = client.send(json!({ "type": "backend_state" })).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
+    Ok(())
+}
+
+/// Show bridge connection status.
+pub async fn bridge_status(client: &ConnectorClient) -> Result<(), String> {
+    let result = client.send(json!({ "type": "bridge_status" })).await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
 /// List app windows.
 pub async fn windows(client: &ConnectorClient) -> Result<(), String> {
     let result = client.send(json!({ "type": "window_list" })).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
 /// Take a screenshot and save to file.
+#[allow(clippy::too_many_arguments)]
 pub async fn screenshot(
     client: &ConnectorClient,
-    output: &str,
+    output: Option<&str>,
     format: &str,
     quality: u8,
     max_width: Option<u32>,
+    overwrite: bool,
+    output_dir: Option<&Path>,
+    name_hint: Option<&str>,
+    instance: Option<&ConnectorInstance>,
 ) -> Result<(), String> {
     let mut cmd = json!({
         "type": "screenshot",
@@ -659,13 +760,246 @@ pub async fn screenshot(
         .ok_or_else(|| "No base64 data in screenshot response".to_string())?;
 
     let bytes = b64_decode(base64_data)?;
-    std::fs::write(output, &bytes).map_err(|e| format!("Failed to write {output}: {e}"))?;
+    let target = resolve_screenshot_path(output, output_dir, format, name_hint, instance)?;
+    let artifact = write_screenshot_artifact(&target, &bytes, overwrite)?;
 
     let width = result.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
     let height = result.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
     let size_kb = bytes.len() / 1024;
-    eprintln!("Saved {output} ({width}x{height}, {size_kb}KB)");
+    if artifact.resolved_from_collision {
+        eprintln!(
+            "Requested path existed; saved unique screenshot to {}",
+            artifact.path.display()
+        );
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "path": artifact.path,
+            "requestedPath": artifact.requested_path,
+            "resolvedFromCollision": artifact.resolved_from_collision,
+            "overwrote": artifact.overwrote,
+            "sha256": sha256_hex(&bytes),
+            "width": width,
+            "height": height,
+            "sizeKb": size_kb,
+        }))
+        .unwrap_or_default()
+    );
     Ok(())
+}
+
+struct ArtifactWrite {
+    path: PathBuf,
+    requested_path: PathBuf,
+    resolved_from_collision: bool,
+    overwrote: bool,
+}
+
+fn resolve_screenshot_path(
+    output: Option<&str>,
+    output_dir: Option<&Path>,
+    format: &str,
+    name_hint: Option<&str>,
+    instance: Option<&ConnectorInstance>,
+) -> Result<PathBuf, String> {
+    if let Some(output) = output {
+        let path = PathBuf::from(output);
+        if path.extension().is_some() {
+            return Ok(path);
+        }
+        return Ok(path.join(default_screenshot_name(format, name_hint, instance)));
+    }
+
+    let dir = output_dir.map(Path::to_path_buf).unwrap_or_else(|| {
+        instance
+            .and_then(|i| i.log_dir.clone())
+            .unwrap_or_else(|| std::env::temp_dir().join("tauri-connector"))
+            .join("artifacts")
+            .join("screenshots")
+    });
+    Ok(dir.join(default_screenshot_name(format, name_hint, instance)))
+}
+
+fn default_screenshot_name(
+    format: &str,
+    name_hint: Option<&str>,
+    instance: Option<&ConnectorInstance>,
+) -> String {
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let app = instance
+        .and_then(|i| i.app_name.as_deref().or(i.app_id.as_deref()))
+        .map(slug)
+        .unwrap_or_else(|| "app".to_string());
+    let hint = name_hint.map(slug).unwrap_or_else(|| "full".to_string());
+    let ext = match format {
+        "jpeg" | "jpg" => "jpg",
+        "webp" => "webp",
+        _ => "png",
+    };
+    format!("{created}-{app}-main-{hint}-{}.{}", uuid8(), ext)
+}
+
+fn write_screenshot_artifact(
+    target: &Path,
+    bytes: &[u8],
+    overwrite: bool,
+) -> Result<ArtifactWrite, String> {
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+    }
+
+    if overwrite {
+        std::fs::write(target, bytes)
+            .map_err(|e| format!("Failed to write {}: {e}", target.display()))?;
+        return Ok(ArtifactWrite {
+            path: target.to_path_buf(),
+            requested_path: target.to_path_buf(),
+            resolved_from_collision: false,
+            overwrote: true,
+        });
+    }
+
+    for attempt in 0..50 {
+        let candidate = if attempt == 0 {
+            target.to_path_buf()
+        } else {
+            collision_path(target, attempt)
+        };
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut f) => {
+                f.write_all(bytes)
+                    .map_err(|e| format!("Failed to write {}: {e}", candidate.display()))?;
+                let _ = f.sync_all();
+                return Ok(ArtifactWrite {
+                    path: candidate,
+                    requested_path: target.to_path_buf(),
+                    resolved_from_collision: attempt > 0,
+                    overwrote: false,
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Failed to write {}: {e}", candidate.display())),
+        }
+    }
+    Err("failed to allocate unique screenshot path after 50 attempts".to_string())
+}
+
+fn collision_path(path: &Path, attempt: usize) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("screenshot");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("png");
+    let suffix = uuid8();
+    path.with_file_name(format!("{stem}-{attempt:04}-{suffix}.{ext}"))
+}
+
+fn slug(input: &str) -> String {
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').chars().take(48).collect()
+}
+
+fn uuid8() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{:08x}", (nanos as u64) ^ u64::from(std::process::id()))[0..8].to_string()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    let bit_len = (bytes.len() as u64).wrapping_mul(8);
+    let mut msg = bytes.to_vec();
+    msg.push(0x80);
+    while !(msg.len() + 8).is_multiple_of(64) {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+
+    for chunk in msg.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for (i, word) in w.iter_mut().take(16).enumerate() {
+            let offset = i * 4;
+            *word = u32::from_be_bytes([
+                chunk[offset],
+                chunk[offset + 1],
+                chunk[offset + 2],
+                chunk[offset + 3],
+            ]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = h;
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let temp1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[i])
+                .wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+
+    h.iter().map(|word| format!("{word:08x}")).collect()
 }
 
 /// Get cached DOM snapshot pushed from frontend.
@@ -675,17 +1009,16 @@ pub async fn cached_dom(client: &ConnectorClient, window_id: &str) -> Result<(),
         .await?;
     match &result {
         Value::String(s) => println!("{s}"),
-        _ => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+        _ => println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        ),
     }
     Ok(())
 }
 
 /// Find elements by CSS selector, XPath, or text.
-pub async fn find(
-    client: &ConnectorClient,
-    selector: &str,
-    strategy: &str,
-) -> Result<(), String> {
+pub async fn find(client: &ConnectorClient, selector: &str, strategy: &str) -> Result<(), String> {
     let result = client
         .send(json!({
             "type": "find_element",
@@ -694,7 +1027,10 @@ pub async fn find(
             "window_id": "main",
         }))
         .await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -703,7 +1039,10 @@ pub async fn pointed(client: &ConnectorClient) -> Result<(), String> {
     let result = client
         .send(json!({ "type": "get_pointed_element" }))
         .await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -722,7 +1061,10 @@ pub async fn resize(
             "height": height,
         }))
         .await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -744,7 +1086,10 @@ pub async fn ipc_exec(
         cmd["args"] = a;
     }
     let result = client.send_with_timeout(cmd, 30_000).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -753,7 +1098,10 @@ pub async fn ipc_monitor(client: &ConnectorClient, action: &str) -> Result<(), S
     let result = client
         .send(json!({ "type": "ipc_monitor", "action": action }))
         .await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -766,11 +1114,20 @@ pub async fn ipc_captured(
     limit: usize,
 ) -> Result<(), String> {
     let mut cmd = json!({ "type": "ipc_get_captured", "limit": limit });
-    if let Some(f) = filter { cmd["filter"] = json!(f); }
-    if let Some(p) = pattern { cmd["pattern"] = json!(p); }
-    if let Some(s) = since { cmd["since"] = json!(s); }
+    if let Some(f) = filter {
+        cmd["filter"] = json!(f);
+    }
+    if let Some(p) = pattern {
+        cmd["pattern"] = json!(p);
+    }
+    if let Some(s) = since {
+        cmd["since"] = json!(s);
+    }
     let result = client.send(cmd).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -792,19 +1149,27 @@ pub async fn ipc_emit(
         cmd["payload"] = p;
     }
     let result = client.send(cmd).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
 /// Start listening for Tauri events.
 pub async fn event_listen(client: &ConnectorClient, events: &str) -> Result<(), String> {
     let event_list: Vec<String> = events.split(',').map(|s| s.trim().to_string()).collect();
-    let result = client.send(json!({
-        "type": "ipc_listen",
-        "action": "start",
-        "events": event_list,
-    })).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    let result = client
+        .send(json!({
+            "type": "ipc_listen",
+            "action": "start",
+            "events": event_list,
+        }))
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -816,20 +1181,32 @@ pub async fn event_captured(
     limit: usize,
 ) -> Result<(), String> {
     let mut cmd = json!({ "type": "event_get_captured", "limit": limit });
-    if let Some(p) = pattern { cmd["pattern"] = json!(p); }
-    if let Some(s) = since { cmd["since"] = json!(s); }
+    if let Some(p) = pattern {
+        cmd["pattern"] = json!(p);
+    }
+    if let Some(s) = since {
+        cmd["since"] = json!(s);
+    }
     let result = client.send(cmd).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
 /// Stop listening for events.
 pub async fn event_stop(client: &ConnectorClient) -> Result<(), String> {
-    let result = client.send(json!({
-        "type": "ipc_listen",
-        "action": "stop",
-    })).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    let result = client
+        .send(json!({
+            "type": "ipc_listen",
+            "action": "stop",
+        }))
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -840,10 +1217,19 @@ pub async fn clear_logs(client: &ConnectorClient, target: &str) -> Result<(), St
         "ipc" => "ipc",
         "events" => "events",
         "all" => "all",
-        _ => return Err(format!("Unknown target: {target}. Use: logs, ipc, events, all")),
+        _ => {
+            return Err(format!(
+                "Unknown target: {target}. Use: logs, ipc, events, all"
+            ))
+        }
     };
-    let result = client.send(json!({ "type": "clear_logs", "source": source })).await?;
-    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    let result = client
+        .send(json!({ "type": "clear_logs", "source": source }))
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -876,4 +1262,17 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sha256_hex;
+
+    #[test]
+    fn sha256_hex_matches_known_vector() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 }

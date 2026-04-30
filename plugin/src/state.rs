@@ -51,6 +51,16 @@ pub struct DomEntry {
     pub snapshot_id: Option<String>,
 }
 
+impl DomEntry {
+    pub fn timestamp_ms(&self) -> u64 {
+        if self.timestamp < 10_000_000_000 {
+            self.timestamp.saturating_mul(1000)
+        } else {
+            self.timestamp
+        }
+    }
+}
+
 /// A captured console log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
@@ -96,8 +106,7 @@ pub struct PluginState {
 impl PluginState {
     /// Create a new `PluginState` backed by JSONL files under `log_dir`.
     pub fn new(log_dir: PathBuf) -> Result<Self, String> {
-        fs::create_dir_all(&log_dir)
-            .map_err(|e| format!("failed to create log dir: {e}"))?;
+        fs::create_dir_all(&log_dir).map_err(|e| format!("failed to create log dir: {e}"))?;
 
         let open_append = |name: &str| -> Result<File, String> {
             OpenOptions::new()

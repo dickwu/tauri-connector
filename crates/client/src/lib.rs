@@ -14,6 +14,8 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
+pub mod discovery;
+
 const DEFAULT_TIMEOUT_MS: u64 = 35_000;
 
 type _WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -77,15 +79,9 @@ impl ConnectorClient {
                         let mut pending = pending.lock().await;
                         if let Some(req) = pending.remove(&id) {
                             let result = if let Some(error) = response.get("error") {
-                                Err(error
-                                    .as_str()
-                                    .unwrap_or("Unknown error")
-                                    .to_string())
+                                Err(error.as_str().unwrap_or("Unknown error").to_string())
                             } else {
-                                Ok(response
-                                    .get("result")
-                                    .cloned()
-                                    .unwrap_or(Value::Null))
+                                Ok(response.get("result").cloned().unwrap_or(Value::Null))
                             };
                             let _ = req.tx.send(result);
                         }

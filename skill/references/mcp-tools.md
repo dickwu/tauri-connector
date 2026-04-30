@@ -1,12 +1,12 @@
 # MCP Tools Reference
 
-Complete parameter tables for all 25 tauri-connector MCP tools. Configure in `.mcp.json`:
+Complete parameter tables for tauri-connector MCP tools. Configure in `.mcp.json`:
 
 ```json
-{ "mcpServers": { "tauri-connector": { "url": "http://127.0.0.1:9556/sse" } } }
+{ "mcpServers": { "tauri-connector": { "url": "http://127.0.0.1:9556/mcp" } } }
 ```
 
-The standalone MCP server (`tauri-connector-mcp`) adds one additional tool: `driver_session`.
+The standalone MCP server (`tauri-connector-mcp`) adds one additional tool: `driver_session`. Legacy `/sse` remains available for older clients.
 
 ---
 
@@ -150,6 +150,13 @@ Native window capture via `xcap`. Falls back to `@zumer/snapdom` if unavailable.
 | `quality` | number | 80 | JPEG/WebP quality (0-100) |
 | `maxWidth` | number | | Max width in pixels (maintains aspect ratio) |
 | `windowId` | string | | Target window |
+| `selector` | string | | Optional CSS selector or `@eN` ref for element-scoped capture |
+| `save` | boolean | false | Save the capture as an artifact |
+| `outputDir` | string | connector artifact dir | Directory for saved artifacts |
+| `nameHint` | string | | Slug included in generated artifact filenames |
+| `overwrite` | boolean | false | Allow replacing the requested artifact path |
+
+When `save` is true, the response includes artifact metadata with the final path, `sha256`, collision status, and source selector/window.
 
 ### webview_get_pointed_element
 

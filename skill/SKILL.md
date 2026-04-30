@@ -410,7 +410,7 @@ For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill def
 5. Set `"withGlobalTauri": true` in `tauri.conf.json`
 6. Install `@zumer/snapdom` for screenshot fallback
 7. Add `"tauri:dev": "tauri dev --features dev-connector"` to `package.json`
-8. Add `"url": "http://127.0.0.1:9556/sse"` to `.mcp.json`
+8. Add `"url": "http://127.0.0.1:9556/mcp"` to `.mcp.json`
 
 For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.10"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
 
@@ -467,6 +467,6 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | Refs not found | DOM changed since snapshot. Re-run snapshot for fresh refs |
 | Drag not working | Try explicit `--strategy pointer` or `html5dnd`. Increase `--steps` (>5) and `--duration` |
 | Screenshot blank | Install `@zumer/snapdom` for DOM-based fallback capture |
-| No MCP tools | Verify `.mcp.json` has `"url": "http://127.0.0.1:9556/sse"` and app is running |
+| No MCP tools | Verify `.mcp.json` has `"url": "http://127.0.0.1:9556/mcp"` and app is running |
 | Bridge not connecting | Check `withGlobalTauri: true` in tauri.conf.json. Bridge auto-reconnects every 1s |
 | Logs empty | Console interception starts on bridge connect. Ensure plugin is registered before app loads |
