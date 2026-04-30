@@ -16,6 +16,8 @@ use protocol::{JsonRpcRequest, JsonRpcResponse};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 9555;
+const PROTOCOL_LATEST: &str = "2025-11-25";
+const PROTOCOL_SUPPORTED: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
 
 #[tokio::main]
 async fn main() {
@@ -101,15 +103,32 @@ async fn handle_request(
 ) -> JsonRpcResponse {
     match request.method.as_str() {
         "initialize" => {
+            let requested = request
+                .params
+                .as_ref()
+                .and_then(|params| params.get("protocolVersion"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(PROTOCOL_LATEST);
+            if !PROTOCOL_SUPPORTED.contains(&requested) {
+                return JsonRpcResponse::error(
+                    id,
+                    -32002,
+                    format!("Unsupported protocol version: {requested}"),
+                );
+            }
             let result = json!({
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": requested,
                 "capabilities": {
-                    "tools": {}
+                    "tools": {
+                        "listChanged": false
+                    }
                 },
                 "serverInfo": {
                     "name": "tauri-connector",
+                    "title": "Tauri Connector",
                     "version": env!("CARGO_PKG_VERSION")
-                }
+                },
+                "instructions": "Use webview_dom_snapshot, webview_interact, read_logs, ipc_* and bridge_status to debug the running Tauri app."
             });
             JsonRpcResponse::success(id, result)
         }

@@ -30,11 +30,23 @@ Port layout:
 |---|---|
 | 9300--9400 | Internal bridge (plugin <-> webview JS) |
 | 9555--9655 | External WebSocket (CLI + bun scripts) |
-| 9556--9656 | Embedded MCP SSE server (Claude Code) |
+| 9556--9656 | Embedded MCP HTTP server: `/mcp` Streamable HTTP, `/sse` legacy HTTP+SSE |
 
-## Core Loop: Snapshot -> Act -> Verify
+## Core Loop: Debug Snapshot -> Act And Verify
 
-Almost every task follows this pattern:
+Start with the high-level tools when debugging an unknown UI issue:
+
+```bash
+# MCP
+debug_snapshot(includeDom: true, includeLogs: true, includeRuntime: true, includeScreenshot: true)
+webview_act_and_verify(action: "click", selector: "@e5", waitForText: "Success", includeLogs: true, includeIpc: true, includeRuntime: true)
+
+# CLI
+tauri-connector debug snapshot --dom --logs --runtime --screenshot
+tauri-connector act click @e5 --wait-text Success --logs --ipc --runtime
+```
+
+Fallback to the manual Snapshot -> Act -> Verify loop when you need finer control:
 
 1. **Snapshot** the DOM to see what's on screen and get ref IDs
 2. **Act** on elements using those refs (click, fill, drag, type, etc.)
@@ -119,8 +131,8 @@ tauri-connector events stop
 
 ```bash
 # Native pixel-accurate screenshot (xcap, falls back to snapdom)
-webview_screenshot(format: "png", maxWidth: 1280)
-tauri-connector screenshot /tmp/debug.png -m 1280
+webview_screenshot(format: "png", maxWidth: 1280, save: true, nameHint: "debug")
+tauri-connector screenshot --name-hint debug -m 1280
 
 # DOM snapshot shows full element tree with refs
 webview_dom_snapshot(mode: "ai")
@@ -155,17 +167,11 @@ tauri-connector get count ".item"   # Count matching elements
 
 ### Full Debug Recipe
 
-When investigating a bug, follow this sequence:
+When investigating a bug, use `debug_snapshot` first to collect app/bridge state, DOM, logs, runtime captures, and optional screenshot in one call. For a failing interaction, use `webview_act_and_verify` to mark, act, wait, and collect log/IPC/runtime diffs. If the verdict is inconclusive, fall back to the manual loop:
 
-1. `read_logs(level: "error")` -- check for existing errors
-2. `ipc_monitor(action: "start")` -- start capturing IPC traffic
-3. `webview_dom_snapshot(mode: "ai")` -- snapshot before the action
-4. Trigger the failing action (click, navigate, submit, etc.)
-5. `read_logs(level: "error,warn", lines: 20)` -- check new errors
-6. `ipc_get_captured()` -- see what IPC calls happened (and which failed)
-7. `webview_dom_snapshot(mode: "ai")` -- snapshot after to compare DOM state
-8. `webview_screenshot()` -- visual evidence
-9. `ipc_monitor(action: "stop")` -- clean up
+1. `debug_snapshot(includeDom: true, includeLogs: true, includeRuntime: true)`
+2. `webview_act_and_verify(action: "...", selector: "@eN", waitForText: "...", includeLogs: true, includeIpc: true, includeRuntime: true)`
+3. Manual fallback: `webview_dom_snapshot` -> `ipc_monitor(start)` -> action -> `read_logs` / `runtime_get_captured` / `ipc_get_captured` -> `webview_screenshot` -> `ipc_monitor(stop)`
 
 For more recipes: read `skill/references/debug-playbook.md`
 
@@ -325,7 +331,7 @@ For complex apps, DOM snapshots can exceed AI tool result limits. The snapshot e
 - **Default behavior**: `maxTokens: 4000` over MCP -- large DOMs return a layout skeleton (inline) plus `file=subtree-K.txt` markers pointing at on-disk subtree files.
 - **WebSocket / Bun / internal callers**: default `maxTokens: 0` (full output) for backward compatibility. Pass `max_tokens` explicitly to opt in.
 - **Unlimited on MCP**: set `maxTokens: 0` or `noSplit: true` to restore legacy behavior.
-- **Subtree files**: written atomically to `$TMPDIR/tauri-connector-<pid>/snapshots/<uuid>/` (`0700` dir on unix). `meta.subtreeFiles[].path` gives the absolute path; `allRefsPath` points to `refs.json` when the ref map also spills.
+- **Subtree files**: written atomically under `<log_dir>/snapshots/<snapshotId>/` (`0700` dir on unix). The active `log_dir` is exposed in `.connector.json` and backend/debug state; if it cannot be initialized, the plugin falls back to a temp `.tauri-connector` directory. `meta.subtreeFiles[].path` gives the absolute path; `allRefsPath` points to `refs.json` when the ref map also spills.
 - **Reading subtrees**: use the `Read` tool on the `path` field, or the CLI's `snapshots read <uuid> <file>` (canonicalized -- rejects path traversal). Old sessions are auto-pruned by mtime (keeps newest 5).
 - **Search stays complete**: `webview_search_snapshot` matches against merged full text (skeleton + every subtree), so filters never hide inside spilled content.
 - **Repeating siblings**: runs of 5+ siblings with the same tag + role + ARIA state collapse to 2 examples + a marker; the collapsed rows are written to a subtree file whenever the budget is active.
@@ -403,7 +409,7 @@ bun run $SCRIPTS/events.ts listen user:login  # Listen for events
 
 For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
 
-1. `tauri-plugin-connector = { version = "0.10", optional = true }` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = { version = "0.11", optional = true }` in `src-tauri/Cargo.toml`
 2. Declare the cargo feature: `[features] dev-connector = ["dep:tauri-plugin-connector"]`
 3. Register the plugin with `#[cfg(feature = "dev-connector")]` guard
 4. Drop the dev capability JSON at `src-tauri/capabilities-dev/dev-connector.json` (outside the default `capabilities/` glob), and register it at runtime via `app.add_capability(include_str!("../capabilities-dev/dev-connector.json"))` inside the same `cfg(feature = "dev-connector")`
@@ -412,11 +418,11 @@ For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill def
 7. Add `"tauri:dev": "tauri dev --features dev-connector"` to `package.json`
 8. Add `"url": "http://127.0.0.1:9556/mcp"` to `.mcp.json`
 
-For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.10"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
+For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.11"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 
-### Verify setup with `doctor` (v0.9+)
+### Verify setup with `doctor` (v0.11+)
 
 Before troubleshooting a broken connection, DOM bridge timeout, or missing MCP tools, run `tauri-connector doctor` from the project root. It validates every setup step in one pass and prints a concrete `Fix:` line for anything missing or misconfigured -- faster than walking `.mcp.json`, `tauri.conf.json`, capabilities, etc. by hand.
 
@@ -433,11 +439,11 @@ What it verifies:
 | Section | Checks |
 |---|---|
 | Environment | CLI version, working directory, Tauri v2 project detection (walks up to find `src-tauri/tauri.conf.json`) |
-| Plugin Setup | `tauri-plugin-connector` in `src-tauri/Cargo.toml` (with `(optional, feature-gated)` tag when applicable); plugin registered via `init()` / `ConnectorBuilder` in `lib.rs`/`main.rs` (cites the matched cfg gate); `"connector:default"` in `src-tauri/capabilities/*.json` **or** `src-tauri/capabilities-dev/*.json`; `app.withGlobalTauri: true`; `@zumer/snapdom` in `package.json`; `.mcp.json` registers `tauri-connector`. Under feature-gated/mixed: also verifies `[features] dev-connector` declares the dep and that `app.add_capability(include_str!(...))` registers the dev capability at runtime. Legacy setups receive a non-blocking warn nudging migration. |
-| Runtime | `.connector.json` PID file under `target/`, PID alive, WebSocket ping on `ws_port`, MCP TCP probe on `mcp_port` |
+| Plugin Setup | `tauri-plugin-connector` in `src-tauri/Cargo.toml` (with `(optional, feature-gated)` tag when applicable); plugin registered via `init()` / `ConnectorBuilder` in `lib.rs`/`main.rs` (cites the matched cfg gate); `"connector:default"` in `src-tauri/capabilities/*.json` **or** `src-tauri/capabilities-dev/*.json`; `app.withGlobalTauri: true`; `@zumer/snapdom` in `package.json`; `.mcp.json` registers `/mcp`. Under feature-gated/mixed: also verifies `[features] dev-connector`, runtime `app.add_capability(include_str!(...))`, and a package script that passes `--features dev-connector`. Legacy setups receive a non-blocking warn nudging migration. |
+| Runtime | `.connector.json` PID file under `target/`, PID alive, runtime metadata/log_dir/log files, WebSocket ping on `ws_port`, bridge status, runtime/artifact/debug command availability, and MCP Streamable HTTP lifecycle (`initialize`, notification 202, ping, GET 405, DELETE) on `mcp_port` |
 | Integration | `.claude/` auto-detect hook install status (optional) |
 
-Exit code is non-zero when any required check fails, so `doctor --json` drops cleanly into CI or pre-commit. Use `--no-runtime` when the Tauri app isn't running (offline setup validation).
+Exit code is non-zero when any required check fails, so `doctor --json` drops cleanly into CI or pre-commit. The JSON payload includes a top-level `fixes` array with every warning/failure remediation. Use `--no-runtime` when the Tauri app isn't running (offline setup validation).
 
 First move when something looks wrong: `tauri-connector doctor`. Second move: read the `Fix:` line.
 
@@ -447,7 +453,7 @@ For full parameter tables and extended workflows:
 
 | File | Contents |
 |---|---|
-| `skill/references/mcp-tools.md` | All 25 MCP tool parameter tables with types and defaults |
+| `skill/references/mcp-tools.md` | MCP tool parameter tables with types and defaults |
 | `skill/references/cli-commands.md` | Every CLI subcommand with all flags and examples |
 | `skill/references/debug-playbook.md` | Step-by-step recipes for common debug scenarios |
 | `skill/references/code-review-playbook.md` | Code review workflow recipes and checklists |

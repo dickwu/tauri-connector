@@ -3,7 +3,7 @@
 use base64::Engine;
 use regex::Regex;
 use std::fs::{self, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{BufRead, Seek, SeekFrom, Write};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
@@ -11,7 +11,9 @@ use tauri::{Emitter, Manager};
 use std::os::unix::fs::DirBuilderExt;
 
 use crate::bridge::Bridge;
-use crate::protocol::{AppInfo, BackendState, EnvInfo, Response, TauriInfo, WindowEntry};
+use crate::protocol::{
+    AppInfo, BackendState, EnvInfo, Response, ResponsePayload, TauriInfo, WindowEntry,
+};
 #[allow(unused_imports)]
 use crate::state::{DomEntry, EventEntry, PluginState, RefEntry, RefMap, SnapshotMeta};
 
@@ -1487,6 +1489,31 @@ pub async fn screenshot(
     overwrite: bool,
     selector: Option<&str>,
 ) -> Response {
+    if let Some(selector) = selector {
+        match snapdom_element_screenshot(
+            selector, "css", format, quality, max_width, window_id, bridge, state,
+        )
+        .await
+        {
+            Ok(result) => {
+                return finish_screenshot_response(
+                    id,
+                    result,
+                    save,
+                    output_dir,
+                    name_hint,
+                    overwrite,
+                    Some(selector),
+                    window_id,
+                    state,
+                );
+            }
+            Err(e) => {
+                return Response::error(id.to_string(), format!("Element screenshot failed: {e}"));
+            }
+        }
+    }
+
     // Tier 1: xcap native capture (cross-platform, pixel-accurate)
     #[cfg(feature = "xcap")]
     if let Some(app) = app {
@@ -1640,6 +1667,79 @@ async fn snapdom_screenshot(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn snapdom_element_screenshot(
+    selector: &str,
+    strategy: &str,
+    format: &str,
+    quality: u8,
+    max_width: Option<u32>,
+    window_id: &str,
+    bridge: &Bridge,
+    state: &PluginState,
+) -> Result<serde_json::Value, String> {
+    let mime = match format {
+        "jpeg" | "jpg" => "image/jpeg",
+        "webp" => "image/webp",
+        _ => "image/png",
+    };
+    let quality_f = f64::from(quality) / 100.0;
+    let max_w = max_width.unwrap_or(0);
+    let resolver = element_resolver_block(state, window_id, selector, strategy, "target").await?;
+
+    let selector_js = js_string(selector);
+    let script = format!(
+        r#"(async () => {{
+            {resolver}
+            let snapdomFn;
+            try {{
+                const mod = await import('@zumer/snapdom');
+                snapdomFn = mod.snapdom || mod.default;
+            }} catch (_) {{
+                if (typeof window.snapdom === 'function') {{
+                    snapdomFn = window.snapdom;
+                }} else if (typeof window.snapdom === 'object' && typeof window.snapdom.snapdom === 'function') {{
+                    snapdomFn = window.snapdom.snapdom;
+                }}
+            }}
+            if (!snapdomFn) {{
+                throw new Error('snapdom not available — install @zumer/snapdom in your frontend project');
+            }}
+            const rect = target.getBoundingClientRect();
+            const result = await snapdomFn(target);
+            const canvas = await result.toCanvas();
+            let finalCanvas = canvas;
+            const maxW = {max_w};
+            if (maxW > 0 && canvas.width > maxW) {{
+                const ratio = maxW / canvas.width;
+                const newH = Math.round(canvas.height * ratio);
+                finalCanvas = document.createElement('canvas');
+                finalCanvas.width = maxW;
+                finalCanvas.height = newH;
+                const ctx = finalCanvas.getContext('2d');
+                ctx.drawImage(canvas, 0, 0, maxW, newH);
+            }}
+            const dataUrl = finalCanvas.toDataURL('{mime}', {quality_f});
+            const base64 = dataUrl.split(',')[1] || '';
+            return {{
+                base64: base64,
+                mimeType: '{mime}',
+                width: finalCanvas.width,
+                height: finalCanvas.height,
+                method: 'snapdom',
+                captureKind: 'element',
+                selector: {selector_js},
+                rectCssPx: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }},
+                devicePixelRatio: window.devicePixelRatio || 1
+            }};
+        }})()"#
+    );
+
+    bridge
+        .execute_js_for_window(&script, 30_000, window_id)
+        .await
+}
+
+#[allow(clippy::too_many_arguments)]
 fn finish_screenshot_response(
     id: &str,
     mut result: serde_json::Value,
@@ -1705,8 +1805,9 @@ fn save_screenshot_artifact(
         .map(slug)
         .unwrap_or_else(|| "full".to_string());
     let created_at = now_ms();
+    let window_slug = slug(window_id);
     let requested = dir.join(format!(
-        "{created_at}-app-{window_id}-{}-{hint}-{}.{}",
+        "{created_at}-app-{window_slug}-{}-{hint}-{}.{}",
         if selector.is_some() {
             "element"
         } else {
@@ -1717,18 +1818,68 @@ fn save_screenshot_artifact(
     ));
     let (path, resolved_from_collision, overwrote) =
         write_unique_artifact(&requested, &bytes, overwrite)?;
-    Ok(serde_json::json!({
-        "id": path.file_stem().and_then(|s| s.to_str()).unwrap_or("screenshot"),
+    let artifact_id = format!(
+        "shot_{}",
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("screenshot")
+    );
+    let capture_kind = if selector.is_some() {
+        "element"
+    } else {
+        "full"
+    };
+    let artifact = serde_json::json!({
+        "artifactId": artifact_id.clone(),
+        "id": artifact_id,
+        "kind": "screenshot",
+        "captureKind": capture_kind,
         "path": path.to_string_lossy(),
-        "sha256": sha256_hex(&bytes),
-        "createdAt": created_at,
-        "overwrote": overwrote,
         "requestedPath": requested.to_string_lossy(),
         "resolvedFromCollision": resolved_from_collision,
+        "overwrote": overwrote,
+        "sha256": sha256_hex(&bytes),
+        "bytes": bytes.len(),
+        "width": result.get("width").and_then(|v| v.as_u64()).unwrap_or(0),
+        "height": result.get("height").and_then(|v| v.as_u64()).unwrap_or(0),
+        "format": ext,
+        "createdAt": created_at,
+        "createdAtMs": created_at,
         "source": if selector.is_some() { "selector" } else { "full_window" },
         "selector": selector,
         "windowId": window_id,
-    }))
+        "rectCssPx": result.get("rectCssPx").cloned().unwrap_or(serde_json::Value::Null),
+        "devicePixelRatio": result.get("devicePixelRatio").cloned().unwrap_or(serde_json::Value::Null),
+    });
+    append_artifact_manifest(state, &artifact)?;
+    Ok(artifact)
+}
+
+fn artifact_manifest_path(state: &PluginState) -> std::path::PathBuf {
+    state.log_dir.join("artifacts").join("manifest.jsonl")
+}
+
+fn append_artifact_manifest(
+    state: &PluginState,
+    artifact: &serde_json::Value,
+) -> Result<(), String> {
+    let path = artifact_manifest_path(state);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create artifact manifest dir {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("Failed to open artifact manifest {}: {e}", path.display()))?;
+    let line = serde_json::to_string(artifact).map_err(|e| e.to_string())?;
+    writeln!(file, "{line}")
+        .map_err(|e| format!("Failed to write artifact manifest {}: {e}", path.display()))
 }
 
 fn write_unique_artifact(
@@ -1877,6 +2028,267 @@ fn sha256_hex(bytes: &[u8]) -> String {
     h.iter().map(|word| format!("{word:08x}")).collect()
 }
 
+pub async fn artifact_list(
+    id: &str,
+    kind: Option<&str>,
+    limit: usize,
+    state: &PluginState,
+) -> Response {
+    let mut entries = read_artifact_manifest(state);
+    if let Some(kind) = kind {
+        entries.retain(|entry| {
+            entry
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .or_else(|| entry.get("captureKind").and_then(|v| v.as_str()))
+                == Some(kind)
+        });
+    }
+    entries.sort_by_key(|entry| {
+        std::cmp::Reverse(
+            entry
+                .get("createdAtMs")
+                .or_else(|| entry.get("createdAt"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+        )
+    });
+    entries.truncate(limit);
+    Response::success(
+        id.to_string(),
+        serde_json::json!({ "count": entries.len(), "artifacts": entries }),
+    )
+}
+
+pub async fn artifact_read(id: &str, artifact: &str, state: &PluginState) -> Response {
+    let Some(entry) = find_artifact_entry(state, artifact) else {
+        return Response::error(id.to_string(), format!("Artifact not found: {artifact}"));
+    };
+    let Some(path) = entry.get("path").and_then(|v| v.as_str()) else {
+        return Response::error(id.to_string(), "Artifact entry has no path");
+    };
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return Response::error(id.to_string(), format!("Failed to read {path}: {e}"));
+        }
+    };
+    Response::success(
+        id.to_string(),
+        serde_json::json!({
+            "artifact": entry,
+            "base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+        }),
+    )
+}
+
+pub async fn artifact_compare(
+    id: &str,
+    before: &str,
+    after: &str,
+    threshold: f64,
+    state: &PluginState,
+) -> Response {
+    let before_path = match resolve_artifact_or_path(state, before) {
+        Some(path) => path,
+        None => return Response::error(id.to_string(), format!("Artifact not found: {before}")),
+    };
+    let after_path = match resolve_artifact_or_path(state, after) {
+        Some(path) => path,
+        None => return Response::error(id.to_string(), format!("Artifact not found: {after}")),
+    };
+    if same_path(&before_path, &after_path) {
+        return Response::error(id.to_string(), "Refusing to compare the same path");
+    }
+    let before_bytes = match fs::read(&before_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return Response::error(
+                id.to_string(),
+                format!("Failed to read {}: {e}", before_path.display()),
+            );
+        }
+    };
+    let after_bytes = match fs::read(&after_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return Response::error(
+                id.to_string(),
+                format!("Failed to read {}: {e}", after_path.display()),
+            );
+        }
+    };
+    let max_len = before_bytes.len().max(after_bytes.len()).max(1);
+    let shared_different = before_bytes
+        .iter()
+        .zip(after_bytes.iter())
+        .filter(|(a, b)| a != b)
+        .count();
+    let pixels_different = shared_different + before_bytes.len().abs_diff(after_bytes.len());
+    let percent = pixels_different as f64 / max_len as f64;
+    Response::success(
+        id.to_string(),
+        serde_json::json!({
+            "pixelsDifferent": pixels_different,
+            "percentDifferent": percent,
+            "threshold": threshold,
+            "passed": percent <= threshold,
+            "beforePath": before_path,
+            "afterPath": after_path,
+            "metric": "byte-diff"
+        }),
+    )
+}
+
+pub async fn artifact_prune(
+    id: &str,
+    keep: usize,
+    kind: Option<&str>,
+    delete_files: bool,
+    state: &PluginState,
+) -> Response {
+    let path = artifact_manifest_path(state);
+    let mut entries = read_artifact_manifest(state);
+    let matches_kind = |entry: &serde_json::Value| {
+        let Some(kind) = kind else {
+            return true;
+        };
+        entry
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .or_else(|| entry.get("captureKind").and_then(|v| v.as_str()))
+            == Some(kind)
+    };
+
+    entries.sort_by_key(|entry| {
+        std::cmp::Reverse(
+            entry
+                .get("createdAtMs")
+                .or_else(|| entry.get("createdAt"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+        )
+    });
+
+    let mut kept = Vec::with_capacity(entries.len());
+    let mut pruned = Vec::new();
+    let mut matched = 0usize;
+    for entry in entries {
+        if matches_kind(&entry) {
+            if matched < keep {
+                matched += 1;
+                kept.push(entry);
+            } else {
+                pruned.push(entry);
+            }
+        } else {
+            kept.push(entry);
+        }
+    }
+
+    let mut deleted_files = 0usize;
+    let mut delete_errors = Vec::new();
+    if delete_files {
+        for entry in &pruned {
+            let Some(path) = entry.get("path").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            match fs::remove_file(path) {
+                Ok(()) => deleted_files += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => delete_errors.push(format!("{path}: {e}")),
+            }
+        }
+    }
+
+    if let Some(parent) = path.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        return Response::error(
+            id.to_string(),
+            format!(
+                "Failed to create artifact manifest dir {}: {e}",
+                parent.display()
+            ),
+        );
+    }
+    let manifest = match kept
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(lines) => {
+            if lines.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", lines.join("\n"))
+            }
+        }
+        Err(e) => return Response::error(id.to_string(), e.to_string()),
+    };
+    if let Err(e) = fs::write(&path, manifest) {
+        return Response::error(
+            id.to_string(),
+            format!("Failed to write artifact manifest {}: {e}", path.display()),
+        );
+    }
+
+    Response::success(
+        id.to_string(),
+        serde_json::json!({
+            "kept": kept.len(),
+            "pruned": pruned.len(),
+            "deletedFiles": deleted_files,
+            "deleteErrors": delete_errors,
+            "manifest": path,
+        }),
+    )
+}
+
+fn read_artifact_manifest(state: &PluginState) -> Vec<serde_json::Value> {
+    let path = artifact_manifest_path(state);
+    let Ok(file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let reader = std::io::BufReader::new(file);
+    reader
+        .lines()
+        .map_while(Result::ok)
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
+        .collect()
+}
+
+fn find_artifact_entry(state: &PluginState, id_or_path: &str) -> Option<serde_json::Value> {
+    read_artifact_manifest(state).into_iter().find(|entry| {
+        entry
+            .get("artifactId")
+            .or_else(|| entry.get("id"))
+            .and_then(|v| v.as_str())
+            == Some(id_or_path)
+            || entry.get("path").and_then(|v| v.as_str()) == Some(id_or_path)
+    })
+}
+
+fn resolve_artifact_or_path(state: &PluginState, id_or_path: &str) -> Option<std::path::PathBuf> {
+    let direct = std::path::PathBuf::from(id_or_path);
+    if direct.exists() {
+        return Some(direct);
+    }
+    find_artifact_entry(state, id_or_path).and_then(|entry| {
+        entry
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(std::path::PathBuf::from)
+    })
+}
+
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 #[cfg(feature = "xcap")]
 /// Encode an RgbaImage to the requested format, optionally resizing.
 fn encode_image(
@@ -1931,15 +2343,17 @@ pub async fn clear_logs(id: &str, source: &str, state: &PluginState) -> Response
         "console" => clear(&state.console_writer).await,
         "ipc" => clear(&state.ipc_writer).await,
         "events" => clear(&state.event_writer).await,
+        "runtime" => clear(&state.runtime_writer).await,
         "all" => {
             clear(&state.console_writer).await;
             clear(&state.ipc_writer).await;
             clear(&state.event_writer).await;
+            clear(&state.runtime_writer).await;
         }
         _ => {
             return Response::error(
                 id.to_string(),
-                format!("Unknown source: {source}. Use: console, ipc, events, all"),
+                format!("Unknown source: {source}. Use: console, ipc, events, runtime, all"),
             );
         }
     }
@@ -1965,6 +2379,7 @@ pub async fn read_log_file(
         "console" => (state.log_dir.join("console.log"), &state.console_writer),
         "ipc" => (state.log_dir.join("ipc.log"), &state.ipc_writer),
         "events" => (state.log_dir.join("events.log"), &state.event_writer),
+        "runtime" => (state.log_dir.join("runtime.log"), &state.runtime_writer),
         _ => return Response::error(id.to_string(), format!("Unknown source: {source}")),
     };
 
@@ -2024,6 +2439,402 @@ pub async fn read_log_file(
         id.to_string(),
         serde_json::json!({ "source": source, "count": entries.len(), "entries": entries }),
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn runtime_get_captured(
+    id: &str,
+    kind: Option<&str>,
+    level: Option<&str>,
+    pattern: Option<&str>,
+    since: Option<u64>,
+    since_mark: Option<&str>,
+    limit: usize,
+    window_id: Option<&str>,
+    state: &PluginState,
+) -> Response {
+    let since = resolve_since_mark(state, since, since_mark).await;
+    let re = match pattern {
+        Some(p) => match Regex::new(p) {
+            Ok(r) => Some(r),
+            Err(e) => return Response::error(id.to_string(), format!("Invalid regex: {e}")),
+        },
+        None => None,
+    };
+    let kinds: Option<Vec<String>> =
+        kind.map(|k| k.split(',').map(|s| s.trim().to_lowercase()).collect());
+    let levels: Option<Vec<String>> =
+        level.map(|l| l.split(',').map(|s| s.trim().to_lowercase()).collect());
+    let wid = window_id.map(|s| s.to_string());
+    let path = state.log_dir.join("runtime.log");
+    let _writer = state.runtime_writer.lock().await;
+    let entries = crate::state::read_jsonl_filtered::<crate::state::RuntimeEntry>(
+        &path,
+        |line| {
+            if let Some(ts) = since
+                && let Some(pos) = line.find("\"timestamp\":")
+            {
+                let rest = &line[pos + 12..];
+                if let Some(val) = rest.split(|c: char| !c.is_ascii_digit()).next()
+                    && let Ok(t) = val.parse::<u64>()
+                    && t < ts
+                {
+                    return false;
+                }
+            }
+            if let Some(ref kinds) = kinds {
+                let matched = kinds
+                    .iter()
+                    .any(|k| line.contains(&format!("\"kind\":\"{}\"", k)));
+                if !matched {
+                    return false;
+                }
+            }
+            if let Some(ref levels) = levels {
+                let matched = levels
+                    .iter()
+                    .any(|l| line.contains(&format!("\"level\":\"{}\"", l)));
+                if !matched {
+                    return false;
+                }
+            }
+            if let Some(ref wid) = wid
+                && !line.contains(&format!("\"window_id\":\"{}\"", wid))
+            {
+                return false;
+            }
+            if let Some(ref re) = re {
+                return re.is_match(line);
+            }
+            true
+        },
+        limit,
+    );
+    drop(_writer);
+
+    match serde_json::to_value(&entries) {
+        Ok(v) => Response::success(
+            id.to_string(),
+            serde_json::json!({ "count": entries.len(), "entries": v }),
+        ),
+        Err(e) => Response::error(id.to_string(), format!("Serialization error: {e}")),
+    }
+}
+
+pub async fn debug_mark(id: &str, label: Option<&str>, state: &PluginState) -> Response {
+    let timestamp_ms = now_ms();
+    let mark_id = format!(
+        "mark_{}_{}",
+        timestamp_ms,
+        label.map(slug).unwrap_or_else(|| "debug".to_string())
+    );
+    state
+        .debug_marks
+        .lock()
+        .await
+        .insert(mark_id.clone(), timestamp_ms);
+    Response::success(
+        id.to_string(),
+        serde_json::json!({
+            "markId": mark_id,
+            "label": label,
+            "timestampMs": timestamp_ms
+        }),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn debug_snapshot(
+    id: &str,
+    window_id: &str,
+    include_dom: bool,
+    include_screenshot: bool,
+    include_logs: bool,
+    include_ipc: bool,
+    include_events: bool,
+    include_runtime: bool,
+    since: Option<u64>,
+    since_mark: Option<&str>,
+    max_tokens: Option<u64>,
+    screenshot_name_hint: Option<&str>,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+    state: &PluginState,
+) -> Response {
+    let since = resolve_since_mark(state, since, since_mark).await;
+    let mut out = serde_json::json!({
+        "timestampMs": now_ms(),
+        "bridge": bridge.status().await,
+        "windowId": window_id,
+    });
+
+    if let Some(obj) = out.as_object_mut() {
+        if let Some(app) = app {
+            obj.insert("app".to_string(), backend_state_value(app));
+        }
+        if include_dom {
+            let dom = dom_snapshot(
+                id,
+                "ai",
+                None,
+                None,
+                None,
+                max_tokens.or(Some(4000)),
+                true,
+                true,
+                false,
+                window_id,
+                bridge,
+                state,
+            )
+            .await;
+            obj.insert("dom".to_string(), response_to_value(dom));
+        }
+        if include_screenshot {
+            let shot = screenshot(
+                id,
+                "png",
+                80,
+                None,
+                window_id,
+                bridge,
+                app,
+                state,
+                true,
+                None,
+                screenshot_name_hint.or(Some("debug-snapshot")),
+                false,
+                None,
+            )
+            .await;
+            obj.insert("screenshot".to_string(), response_to_value(shot));
+        }
+        if include_logs {
+            obj.insert(
+                "logs".to_string(),
+                response_to_value(
+                    console_logs(id, 100, None, None, Some("error,warn"), window_id, state).await,
+                ),
+            );
+        }
+        if include_ipc {
+            obj.insert(
+                "ipc".to_string(),
+                response_to_value(ipc_get_captured(id, None, None, 100, since, state).await),
+            );
+        }
+        if include_events {
+            obj.insert(
+                "events".to_string(),
+                response_to_value(event_get_captured(id, None, None, 100, since, state).await),
+            );
+        }
+        if include_runtime {
+            obj.insert(
+                "runtime".to_string(),
+                response_to_value(
+                    runtime_get_captured(
+                        id,
+                        None,
+                        None,
+                        None,
+                        since,
+                        None,
+                        100,
+                        Some(window_id),
+                        state,
+                    )
+                    .await,
+                ),
+            );
+        }
+    }
+
+    Response::success(id.to_string(), out)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn webview_act_and_verify(
+    id: &str,
+    action: &str,
+    selector: Option<&str>,
+    text: Option<&str>,
+    key: Option<&str>,
+    target_selector: Option<&str>,
+    wait_for_selector: Option<&str>,
+    wait_for_text: Option<&str>,
+    timeout: u64,
+    verify_dom: bool,
+    verify_screenshot: bool,
+    include_logs: bool,
+    include_ipc: bool,
+    include_runtime: bool,
+    window_id: &str,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+    state: &PluginState,
+) -> Response {
+    let mark = debug_mark(id, Some("act-and-verify"), state).await;
+    let mark_value = response_to_value(mark);
+    let since = mark_value
+        .get("timestampMs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_else(now_ms);
+
+    let action_result = match action {
+        "fill" | "type" => {
+            keyboard(
+                id,
+                if action == "fill" { "type" } else { action },
+                text,
+                None,
+                None,
+                window_id,
+                bridge,
+            )
+            .await
+        }
+        "press" => keyboard(id, "press", None, key, None, window_id, bridge).await,
+        "drag" => {
+            drag(
+                id,
+                selector,
+                "css",
+                None,
+                None,
+                target_selector,
+                None,
+                None,
+                10,
+                300,
+                "auto",
+                window_id,
+                bridge,
+                state,
+            )
+            .await
+        }
+        _ => {
+            interact(
+                id, action, selector, "css", None, None, None, None, window_id, bridge, state,
+            )
+            .await
+        }
+    };
+
+    let action_value = response_to_value(action_result);
+    let action_failed = action_value.get("error").is_some();
+    let wait_result = if wait_for_selector.is_some() || wait_for_text.is_some() {
+        response_to_value(
+            wait_for(
+                id,
+                wait_for_selector,
+                "css",
+                wait_for_text,
+                timeout,
+                window_id,
+                bridge,
+                state,
+            )
+            .await,
+        )
+    } else {
+        serde_json::json!({ "skipped": true })
+    };
+    let wait_failed = wait_result.get("error").is_some();
+
+    let snapshot = debug_snapshot(
+        id,
+        window_id,
+        verify_dom,
+        verify_screenshot,
+        include_logs,
+        include_ipc,
+        false,
+        include_runtime,
+        Some(since),
+        None,
+        Some(4000),
+        Some("act-and-verify"),
+        bridge,
+        app,
+        state,
+    )
+    .await;
+    let snapshot_value = response_to_value(snapshot);
+
+    let mut suggestions = Vec::new();
+    if action_failed {
+        suggestions.push(
+            "Action failed; re-run webview_dom_snapshot and verify the selector/ref.".to_string(),
+        );
+    }
+    if wait_failed {
+        suggestions.push("Wait condition did not pass before timeout.".to_string());
+    }
+    if include_runtime
+        && snapshot_value
+            .pointer("/runtime/count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            > 0
+    {
+        suggestions.push("Runtime errors were captured; inspect runtime_get_captured.".to_string());
+    }
+
+    let verdict = if action_failed || wait_failed {
+        "failed"
+    } else if wait_for_selector.is_none() && wait_for_text.is_none() {
+        "inconclusive"
+    } else {
+        "passed"
+    };
+
+    Response::success(
+        id.to_string(),
+        serde_json::json!({
+            "verdict": verdict,
+            "mark": mark_value,
+            "actionResult": action_value,
+            "waitResult": wait_result,
+            "snapshot": snapshot_value,
+            "suggestions": suggestions,
+        }),
+    )
+}
+
+async fn resolve_since_mark(
+    state: &PluginState,
+    since: Option<u64>,
+    since_mark: Option<&str>,
+) -> Option<u64> {
+    if since.is_some() {
+        return since;
+    }
+    let mark = since_mark?;
+    state.debug_marks.lock().await.get(mark).copied()
+}
+
+fn response_to_value(response: Response) -> serde_json::Value {
+    match response.payload {
+        ResponsePayload::Success { result } => result,
+        ResponsePayload::Error { error } => serde_json::json!({ "error": error }),
+    }
+}
+
+fn backend_state_value(app: &tauri::AppHandle) -> serde_json::Value {
+    let package_info = app.package_info();
+    serde_json::json!({
+        "app": {
+            "name": package_info.name,
+            "version": package_info.version.to_string(),
+        },
+        "env": {
+            "debug": cfg!(debug_assertions),
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+        }
+    })
 }
 
 // ============ Event Listeners ============
@@ -2276,7 +3087,8 @@ pub async fn search_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::sha256_hex;
+    use super::{same_path, sha256_hex};
+    use std::path::Path;
 
     #[test]
     fn sha256_hex_matches_known_vector() {
@@ -2284,5 +3096,13 @@ mod tests {
             sha256_hex(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn artifact_compare_same_path_guard_detects_identical_paths() {
+        assert!(same_path(
+            Path::new("/tmp/connector-shot.png"),
+            Path::new("/tmp/connector-shot.png")
+        ));
     }
 }

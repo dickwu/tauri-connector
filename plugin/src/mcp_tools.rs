@@ -421,6 +421,146 @@ pub async fn call_tool(
             .await
         }
 
+        "runtime_get_captured" => {
+            let kind = str_arg(args, "kind");
+            let level = str_arg(args, "level");
+            let pattern = str_arg(args, "pattern");
+            let since = num_arg(args, "since").map(|n| n as u64);
+            let since_mark = str_arg(args, "sinceMark");
+            let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
+            let wid = str_arg(args, "windowId");
+            handlers::runtime_get_captured(
+                id,
+                kind.as_deref(),
+                level.as_deref(),
+                pattern.as_deref(),
+                since,
+                since_mark.as_deref(),
+                limit,
+                wid.as_deref(),
+                state,
+            )
+            .await
+        }
+
+        "runtime_clear" => handlers::clear_logs(id, "runtime", state).await,
+
+        "artifact_list" => {
+            let kind = str_arg(args, "kind");
+            let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
+            handlers::artifact_list(id, kind.as_deref(), limit, state).await
+        }
+
+        "artifact_read" => {
+            let artifact = str_arg(args, "artifact")
+                .or_else(|| str_arg(args, "artifactId"))
+                .unwrap_or_default();
+            handlers::artifact_read(id, &artifact, state).await
+        }
+
+        "artifact_compare" => {
+            let before = str_arg(args, "before").unwrap_or_default();
+            let after = str_arg(args, "after").unwrap_or_default();
+            let threshold = num_arg(args, "threshold").unwrap_or(0.0);
+            handlers::artifact_compare(id, &before, &after, threshold, state).await
+        }
+
+        "artifact_prune" => {
+            let keep = num_arg(args, "keep").unwrap_or(50.0) as usize;
+            let kind = str_arg(args, "kind");
+            let delete_files = args
+                .get("deleteFiles")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            handlers::artifact_prune(id, keep, kind.as_deref(), delete_files, state).await
+        }
+
+        "debug_mark" => {
+            let label = str_arg(args, "label");
+            handlers::debug_mark(id, label.as_deref(), state).await
+        }
+
+        "debug_snapshot" => {
+            let wid = window_id(args);
+            let since = num_arg(args, "since").map(|n| n as u64);
+            let since_mark = str_arg(args, "sinceMark");
+            let max_tokens = num_arg(args, "maxTokens").map(|n| n as u64);
+            let screenshot_name_hint = str_arg(args, "screenshotNameHint");
+            handlers::debug_snapshot(
+                id,
+                &wid,
+                args.get("includeDom")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                args.get("includeScreenshot")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                args.get("includeLogs")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                args.get("includeIpc")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                args.get("includeEvents")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                args.get("includeRuntime")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                since,
+                since_mark.as_deref(),
+                max_tokens,
+                screenshot_name_hint.as_deref(),
+                bridge,
+                app,
+                state,
+            )
+            .await
+        }
+
+        "webview_act_and_verify" => {
+            let action = str_arg(args, "action").unwrap_or_default();
+            let selector = str_arg(args, "selector");
+            let text = str_arg(args, "text");
+            let key = str_arg(args, "key");
+            let target_selector = str_arg(args, "targetSelector");
+            let wait_for_selector = str_arg(args, "waitForSelector");
+            let wait_for_text = str_arg(args, "waitForText");
+            let timeout = num_arg(args, "timeout").unwrap_or(5000.0) as u64;
+            let wid = window_id(args);
+            handlers::webview_act_and_verify(
+                id,
+                &action,
+                selector.as_deref(),
+                text.as_deref(),
+                key.as_deref(),
+                target_selector.as_deref(),
+                wait_for_selector.as_deref(),
+                wait_for_text.as_deref(),
+                timeout,
+                args.get("verifyDom")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                args.get("verifyScreenshot")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                args.get("includeLogs")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                args.get("includeIpc")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                args.get("includeRuntime")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                &wid,
+                bridge,
+                app,
+                state,
+            )
+            .await
+        }
+
         "webview_search_snapshot" => {
             let pattern = str_arg(args, "pattern").unwrap_or_default();
             let context = num_arg(args, "context").unwrap_or(2.0) as usize;
@@ -480,6 +620,7 @@ pub fn tool_definitions() -> Value {
                     "followPortals": { "type": "boolean", "description": "Stitch portals to their triggers (default: true)" },
                     "shadowDom": { "type": "boolean", "description": "Traverse shadow DOM (default: false)" },
                     "maxTokens": { "type": "number", "description": "Token budget for inline result (default 4000, 0 for unlimited)" },
+                    "noSplit": { "type": "boolean", "description": "Disable snapshot subtree splitting and return the full inline snapshot" },
                     "windowId": { "type": "string" }
                 } })
             ),
@@ -612,15 +753,15 @@ pub fn tool_definitions() -> Value {
                 json!({ "type": "object", "properties": {} })
             ),
             tool_def("clear_logs",
-                "Clear log files. Specify source: console, ipc, events, or all.",
+                "Clear log files. Specify source: console, ipc, events, runtime, or all.",
                 json!({ "type": "object", "properties": {
-                    "source": { "type": "string", "enum": ["console", "ipc", "events", "all"], "default": "all" }
+                    "source": { "type": "string", "enum": ["console", "ipc", "events", "runtime", "all"], "default": "all" }
                 } })
             ),
             tool_def("read_log_file",
                 "Read historical log files (persisted across app restarts). Supports regex and timestamp filtering.",
                 json!({ "type": "object", "properties": {
-                    "source": { "type": "string", "enum": ["console", "ipc", "events"] },
+                    "source": { "type": "string", "enum": ["console", "ipc", "events", "runtime"] },
                     "lines": { "type": "number", "description": "Max entries from tail (default 100)" },
                     "level": { "type": "string", "description": "Level filter (console only)" },
                     "pattern": { "type": "string", "description": "Regex on serialized entry" },
@@ -643,6 +784,93 @@ pub fn tool_definitions() -> Value {
                     "limit": { "type": "number" },
                     "since": { "type": "number", "description": "Epoch ms floor" }
                 } })
+            ),
+            tool_def("runtime_get_captured",
+                "Retrieve captured frontend runtime failures: window errors, unhandled rejections, network failures, navigation, and resource errors.",
+                json!({ "type": "object", "properties": {
+                    "kind": { "type": "string", "description": "Filter by kind: window_error, unhandledrejection, network, navigation, resource_error" },
+                    "level": { "type": "string", "description": "Filter by level: error, warn, info. Comma-separated." },
+                    "pattern": { "type": "string", "description": "Regex on full entry" },
+                    "since": { "type": "number", "description": "Epoch ms floor" },
+                    "sinceMark": { "type": "string" },
+                    "limit": { "type": "number" },
+                    "windowId": { "type": "string" }
+                } })
+            ),
+            tool_def("runtime_clear",
+                "Clear captured frontend runtime entries.",
+                json!({ "type": "object", "properties": {} })
+            ),
+            tool_def("artifact_list",
+                "List connector artifacts from the manifest registry.",
+                json!({ "type": "object", "properties": {
+                    "kind": { "type": "string" },
+                    "limit": { "type": "number" }
+                } })
+            ),
+            tool_def("artifact_read",
+                "Read an artifact by artifactId or path.",
+                json!({ "type": "object", "properties": {
+                    "artifact": { "type": "string" },
+                    "artifactId": { "type": "string" }
+                } })
+            ),
+            tool_def("artifact_compare",
+                "Compare two screenshot artifacts or paths. Refuses same-path comparisons.",
+                json!({ "type": "object", "properties": {
+                    "before": { "type": "string" },
+                    "after": { "type": "string" },
+                    "threshold": { "type": "number" }
+                }, "required": ["before", "after"] })
+            ),
+            tool_def("artifact_prune",
+                "Prune old artifact manifest entries and optionally delete artifact files.",
+                json!({ "type": "object", "properties": {
+                    "keep": { "type": "number" },
+                    "kind": { "type": "string" },
+                    "deleteFiles": { "type": "boolean" }
+                } })
+            ),
+            tool_def("debug_mark",
+                "Create a timestamp mark for later log/ipc/event/runtime filtering.",
+                json!({ "type": "object", "properties": {
+                    "label": { "type": "string" }
+                } })
+            ),
+            tool_def("debug_snapshot",
+                "Collect a bundled debug context: bridge/app state, DOM, screenshot, logs, IPC, events, and runtime captures.",
+                json!({ "type": "object", "properties": {
+                    "windowId": { "type": "string" },
+                    "includeDom": { "type": "boolean" },
+                    "includeScreenshot": { "type": "boolean" },
+                    "includeLogs": { "type": "boolean" },
+                    "includeIpc": { "type": "boolean" },
+                    "includeEvents": { "type": "boolean" },
+                    "includeRuntime": { "type": "boolean" },
+                    "since": { "type": "number" },
+                    "sinceMark": { "type": "string" },
+                    "maxTokens": { "type": "number" },
+                    "screenshotNameHint": { "type": "string" }
+                } })
+            ),
+            tool_def("webview_act_and_verify",
+                "Perform an action, wait for text/selector, and collect fresh debug evidence in one call.",
+                json!({ "type": "object", "properties": {
+                    "action": { "type": "string", "enum": ["click", "fill", "type", "press", "drag", "hover"] },
+                    "selector": { "type": "string" },
+                    "text": { "type": "string" },
+                    "key": { "type": "string" },
+                    "targetSelector": { "type": "string" },
+                    "waitForSelector": { "type": "string" },
+                    "waitForText": { "type": "string" },
+                    "timeout": { "type": "number" },
+                    "verifyDom": { "type": "boolean" },
+                    "verifyScreenshot": { "type": "boolean" },
+                    "includeLogs": { "type": "boolean" },
+                    "includeIpc": { "type": "boolean" },
+                    "includeRuntime": { "type": "boolean" },
+                    "windowId": { "type": "string" }
+                }, "required": ["action"] })
             ),
             tool_def("webview_search_snapshot",
                 "Search DOM snapshot with regex. Returns matched lines with context. Uses cached snapshot if fresh (<10s).",
@@ -667,13 +895,13 @@ const SETUP_INSTRUCTIONS: &str = r#"## tauri-plugin-connector Setup
 In your Tauri app's `src-tauri/Cargo.toml`:
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.9"
+tauri-plugin-connector = "0.11"
 ```
 
-### 2. Register the plugin (debug-only)
+### 2. Register the plugin (feature-gated dev tooling)
 In `src-tauri/src/lib.rs`, add before `.invoke_handler()`:
 ```rust
-#[cfg(debug_assertions)]
+#[cfg(feature = "dev-connector")]
 {
     builder = builder.plugin(tauri_plugin_connector::init());
 }
@@ -705,3 +933,34 @@ In `.mcp.json`:
 
 The MCP server starts automatically when the Tauri app runs. No separate command needed.
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool(name: &str) -> Value {
+        tool_definitions()["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing tool {name}"))
+    }
+
+    #[test]
+    fn runtime_schema_supports_mark_and_window_filters() {
+        let tool = tool("runtime_get_captured");
+        let props = &tool["inputSchema"]["properties"];
+        assert!(props.get("sinceMark").is_some());
+        assert!(props.get("windowId").is_some());
+    }
+
+    #[test]
+    fn artifact_schema_exposes_prune() {
+        let tool = tool("artifact_prune");
+        let props = &tool["inputSchema"]["properties"];
+        assert!(props.get("keep").is_some());
+        assert!(props.get("deleteFiles").is_some());
+    }
+}

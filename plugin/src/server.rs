@@ -260,22 +260,48 @@ async fn handle_command(
             y,
             direction,
             distance,
+            target_selector,
+            target_x,
+            target_y,
+            steps,
+            duration_ms,
+            drag_strategy,
             window_id,
         } => {
-            handlers::interact(
-                &id,
-                &action,
-                selector.as_deref(),
-                &strategy,
-                x,
-                y,
-                direction.as_deref(),
-                distance,
-                &window_id,
-                bridge,
-                state,
-            )
-            .await
+            if action == "drag" {
+                handlers::drag(
+                    &id,
+                    selector.as_deref(),
+                    &strategy,
+                    x,
+                    y,
+                    target_selector.as_deref(),
+                    target_x,
+                    target_y,
+                    steps.unwrap_or(10),
+                    duration_ms.unwrap_or(300),
+                    drag_strategy.as_deref().unwrap_or("auto"),
+                    &window_id,
+                    bridge,
+                    state,
+                )
+                .await
+            } else {
+                handlers::interact(
+                    &id,
+                    &action,
+                    selector.as_deref(),
+                    &strategy,
+                    x,
+                    y,
+                    direction.as_deref(),
+                    distance,
+                    &window_id,
+                    bridge,
+                    state,
+                )
+                .await
+            }
         }
         Command::Keyboard {
             action,
@@ -408,6 +434,116 @@ async fn handle_command(
                 pattern.as_deref(),
                 limit,
                 since,
+                state,
+            )
+            .await
+        }
+
+        Command::RuntimeGetCaptured {
+            kind,
+            level,
+            pattern,
+            since,
+            since_mark,
+            limit,
+            window_id,
+        } => {
+            handlers::runtime_get_captured(
+                &id,
+                kind.as_deref(),
+                level.as_deref(),
+                pattern.as_deref(),
+                since,
+                since_mark.as_deref(),
+                limit,
+                window_id.as_deref(),
+                state,
+            )
+            .await
+        }
+
+        Command::ArtifactList { kind, limit } => {
+            handlers::artifact_list(&id, kind.as_deref(), limit, state).await
+        }
+        Command::ArtifactRead { artifact } => handlers::artifact_read(&id, &artifact, state).await,
+        Command::ArtifactCompare {
+            before,
+            after,
+            threshold,
+        } => handlers::artifact_compare(&id, &before, &after, threshold, state).await,
+        Command::ArtifactPrune {
+            keep,
+            kind,
+            delete_files,
+        } => handlers::artifact_prune(&id, keep, kind.as_deref(), delete_files, state).await,
+
+        Command::DebugMark { label } => handlers::debug_mark(&id, label.as_deref(), state).await,
+        Command::DebugSnapshot {
+            window_id,
+            include_dom,
+            include_screenshot,
+            include_logs,
+            include_ipc,
+            include_events,
+            include_runtime,
+            since,
+            since_mark,
+            max_tokens,
+            screenshot_name_hint,
+        } => {
+            handlers::debug_snapshot(
+                &id,
+                &window_id,
+                include_dom,
+                include_screenshot,
+                include_logs,
+                include_ipc,
+                include_events,
+                include_runtime,
+                since,
+                since_mark.as_deref(),
+                max_tokens,
+                screenshot_name_hint.as_deref(),
+                bridge,
+                app,
+                state,
+            )
+            .await
+        }
+        Command::WebviewActAndVerify {
+            action,
+            selector,
+            text,
+            key,
+            target_selector,
+            wait_for_selector,
+            wait_for_text,
+            timeout,
+            verify_dom,
+            verify_screenshot,
+            include_logs,
+            include_ipc,
+            include_runtime,
+            window_id,
+        } => {
+            handlers::webview_act_and_verify(
+                &id,
+                &action,
+                selector.as_deref(),
+                text.as_deref(),
+                key.as_deref(),
+                target_selector.as_deref(),
+                wait_for_selector.as_deref(),
+                wait_for_text.as_deref(),
+                timeout,
+                verify_dom,
+                verify_screenshot,
+                include_logs,
+                include_ipc,
+                include_runtime,
+                &window_id,
+                bridge,
+                app,
                 state,
             )
             .await

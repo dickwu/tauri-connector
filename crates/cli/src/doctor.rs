@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use connector_client::ConnectorClient;
 
@@ -63,6 +64,10 @@ const SNIPPET_MCP_JSON: &str = r#"{
   }
 }"#;
 
+const SNIPPET_DEV_SCRIPT: &str = r#""scripts": {
+  "tauri:dev": "tauri dev --features dev-connector"
+}"#;
+
 /// Short version hint used in Cargo.toml fix snippets (e.g. "0.9" from "0.9.0").
 fn cargo_version_hint() -> String {
     let mut parts: Vec<&str> = CURRENT_VERSION.split('.').collect();
@@ -79,7 +84,7 @@ fn indent_snippet(s: &str) -> String {
         .join("\n")
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Status {
     Ok,
     Fail,
@@ -377,6 +382,7 @@ fn check_plugin_setup(root: &Path, pattern: SetupPattern) -> Section {
     if matches!(pattern, SetupPattern::FeatureGated | SetupPattern::Mixed) {
         checks.push(check_features_block(root));
         checks.push(check_runtime_add_capability(root));
+        checks.push(check_dev_script_feature(root));
     }
 
     // Legacy users get a non-blocking nudge to migrate.
@@ -461,13 +467,64 @@ fn has_runtime_add_capability(src: &str) -> bool {
         && src.contains("capabilities-dev")
 }
 
+/// Feature-gated installs need a dev command that actually enables the cargo
+/// feature; otherwise the dependency is optional but never compiled in.
+fn check_dev_script_feature(root: &Path) -> Check {
+    let path = root.join("package.json");
+    let display = rel(root, &path);
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => {
+            return Check::warn(
+                "package.json not found for dev script check",
+                format!(
+                    "add a dev script in your frontend package.json so the plugin feature is enabled:\n{}",
+                    indent_snippet(SNIPPET_DEV_SCRIPT)
+                ),
+            )
+        }
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return Check::warn(
+            "package.json is not valid JSON for dev script check",
+            format!("fix the JSON in {display}:\n  $ jq . {display}"),
+        );
+    };
+
+    if package_scripts_enable_feature(&value, "dev-connector") {
+        Check::ok("package.json dev script enables --features dev-connector").with_detail(display)
+    } else {
+        Check::warn(
+            "package.json dev script does not enable `dev-connector`",
+            format!(
+                "ensure the command you use to launch Tauri dev passes the cargo feature:\n{}",
+                indent_snippet(SNIPPET_DEV_SCRIPT)
+            ),
+        )
+    }
+}
+
+fn package_scripts_enable_feature(value: &Value, feature_name: &str) -> bool {
+    let Some(scripts) = value.get("scripts").and_then(|v| v.as_object()) else {
+        return false;
+    };
+    scripts.values().filter_map(|v| v.as_str()).any(|cmd| {
+        let mentions_tauri_dev = cmd.contains("tauri dev") || cmd.contains("cargo tauri dev");
+        let has_long = cmd.contains(&format!("--features {feature_name}"))
+            || cmd.contains(&format!("--features={feature_name}"));
+        let has_short = cmd.contains(&format!("-F {feature_name}"))
+            || cmd.contains(&format!("-F={feature_name}"));
+        mentions_tauri_dev && (has_long || has_short)
+    })
+}
+
 /// Non-blocking nudge for projects still on the legacy `cfg(debug_assertions)`
 /// pattern. Emitted after the per-check helpers so the migration tip appears
 /// at the bottom of the Plugin Setup section.
 fn legacy_migration_warn() -> Check {
     Check::warn(
         "Using legacy debug_assertions gate — consider migrating to --features dev-connector",
-        "the feature-gated pattern keeps the plugin dep (and its xcap / aws-sdk-s3 transitive deps) out of release builds. Migration:\n  1. src-tauri/Cargo.toml dep: tauri-plugin-connector = { version = \"0.9\", optional = true }\n  2. add to Cargo.toml:\n     [features]\n     dev-connector = [\"dep:tauri-plugin-connector\"]\n  3. replace `#[cfg(debug_assertions)]` with `#[cfg(feature = \"dev-connector\")]` in lib.rs/main.rs\n  4. move `connector:default` permission to src-tauri/capabilities-dev/dev-connector.json\n  5. register at runtime in setup():\n       #[cfg(feature = \"dev-connector\")]\n       app.add_capability(include_str!(\"../capabilities-dev/dev-connector.json\"))?;\n  6. add to package.json: \"tauri:dev\": \"tauri dev --features dev-connector\"\nSee README \"Quick Start\" / skill/SETUP.md for the full guide.",
+        "the feature-gated pattern keeps the plugin dep (and its xcap / aws-sdk-s3 transitive deps) out of release builds. Migration:\n  1. src-tauri/Cargo.toml dep: tauri-plugin-connector = { version = \"0.11\", optional = true }\n  2. add to Cargo.toml:\n     [features]\n     dev-connector = [\"dep:tauri-plugin-connector\"]\n  3. replace `#[cfg(debug_assertions)]` with `#[cfg(feature = \"dev-connector\")]` in lib.rs/main.rs\n  4. move `connector:default` permission to src-tauri/capabilities-dev/dev-connector.json\n  5. register at runtime in setup():\n       #[cfg(feature = \"dev-connector\")]\n       app.add_capability(include_str!(\"../capabilities-dev/dev-connector.json\"))?;\n  6. add to package.json: \"tauri:dev\": \"tauri dev --features dev-connector\"\nSee README \"Quick Start\" / skill/SETUP.md for the full guide.",
     )
 }
 
@@ -924,29 +981,32 @@ fn check_mcp_json(root: &Path) -> Check {
         );
     };
 
-    let entry = value.pointer("/mcpServers/tauri-connector");
+    check_mcp_entry(value.pointer("/mcpServers/tauri-connector"), &display)
+}
+
+fn check_mcp_entry(entry: Option<&Value>, display: &str) -> Check {
     match entry {
         Some(Value::Object(obj)) => {
             let url = obj.get("url").and_then(|v| v.as_str()).unwrap_or("");
-            if url.is_empty() {
-                Check::warn(
-                    ".mcp.json `tauri-connector` entry has no `url`",
-                    format!(
-                        "set the url in {display}:\n  \"mcpServers\": {{\n    \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/mcp\" }}\n  }}"
-                    ),
-                )
-            } else if url.ends_with("/sse") {
-                Check::warn(
-                    ".mcp.json uses legacy /sse transport",
-                    format!(
-                        "prefer the streamable HTTP endpoint in {display}:\n  \"tauri-connector\": {{ \"url\": \"{}\" }}",
-                        url.trim_end_matches("/sse").to_string() + "/mcp"
-                    ),
-                )
-            } else {
-                Check::ok(format!(".mcp.json registers tauri-connector ({url})"))
-                    .with_detail(display)
+            if !url.is_empty() {
+                return check_mcp_url(display, url);
             }
+            if obj.get("command").and_then(|v| v.as_str()).is_some() {
+                return Check::warn(
+                    ".mcp.json uses standalone command transport",
+                    format!(
+                        "the embedded plugin now exposes Streamable HTTP directly; prefer this url in {display}:\n{}",
+                        indent_snippet(SNIPPET_MCP_JSON)
+                    ),
+                );
+            }
+            Check::fail(
+                ".mcp.json `tauri-connector` entry has no `url` or `command`",
+                format!(
+                    "set the embedded MCP Streamable HTTP url in {display}:\n{}",
+                    indent_snippet(SNIPPET_MCP_JSON)
+                ),
+            )
         }
         _ => Check::fail(
             ".mcp.json has no `tauri-connector` entry",
@@ -957,14 +1017,43 @@ fn check_mcp_json(root: &Path) -> Check {
     }
 }
 
+fn check_mcp_url(display: &str, url: &str) -> Check {
+    if url.ends_with("/sse") {
+        return Check::warn(
+            ".mcp.json uses legacy /sse transport",
+            format!(
+                "prefer the Streamable HTTP endpoint in {display}:\n  \"tauri-connector\": {{ \"url\": \"{}\" }}",
+                url.trim_end_matches("/sse").to_string() + "/mcp"
+            ),
+        );
+    }
+    if !url.ends_with("/mcp") {
+        return Check::fail(
+            ".mcp.json URL does not target /mcp",
+            format!(
+                "set the embedded MCP Streamable HTTP endpoint in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/mcp\" }}"
+            ),
+        );
+    }
+    if !(url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:")) {
+        return Check::warn(
+            ".mcp.json URL is not loopback",
+            "use a loopback URL so MCP does not expose local app control outside this machine:\n  \"tauri-connector\": { \"url\": \"http://127.0.0.1:9556/mcp\" }",
+        );
+    }
+    Check::ok(format!(".mcp.json registers tauri-connector ({url})")).with_detail(display)
+}
+
 // ----- section: runtime ----------------------------------------------------
 
 struct PidInfo {
     pid: Option<u64>,
     ws_port: Option<u16>,
     mcp_port: Option<u16>,
+    bridge_port: Option<u16>,
     app_name: Option<String>,
     app_id: Option<String>,
+    log_dir: Option<PathBuf>,
 }
 
 fn find_pid_file(root: &Path) -> Option<PathBuf> {
@@ -1002,6 +1091,10 @@ fn read_pid_file(path: &Path) -> Option<PidInfo> {
             .get("mcp_port")
             .and_then(|v| v.as_u64())
             .and_then(|n| u16::try_from(n).ok()),
+        bridge_port: value
+            .get("bridge_port")
+            .and_then(|v| v.as_u64())
+            .and_then(|n| u16::try_from(n).ok()),
         app_name: value
             .get("app_name")
             .and_then(|v| v.as_str())
@@ -1010,6 +1103,10 @@ fn read_pid_file(path: &Path) -> Option<PidInfo> {
             .get("app_id")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
+        log_dir: value
+            .get("log_dir")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from),
     })
 }
 
@@ -1056,11 +1153,45 @@ async fn check_runtime(project: Option<&PathBuf>, pid: Option<(PathBuf, PidInfo)
         }
     };
 
+    if let Some((_, info)) = &pid {
+        checks.push(check_pid_alive(info));
+        checks.push(check_pid_metadata(info));
+        checks.push(check_log_dir(info));
+    }
+
     // WebSocket reachable
     match probe_ws(PROBE_HOST, ws_port).await {
-        Ok(()) => checks.push(
-            Check::ok(format!("WebSocket ws://{PROBE_HOST}:{ws_port} reachable")),
-        ),
+        Ok(()) => {
+            checks.push(Check::ok(format!(
+                "WebSocket ws://{PROBE_HOST}:{ws_port} reachable"
+            )));
+            match probe_ws_features(PROBE_HOST, ws_port).await {
+                Ok(features) => {
+                    checks.push(
+                        Check::ok("Bridge status command reachable").with_detail(format!(
+                            "{} webview bridge client(s), pending {}",
+                            features.bridge_clients, features.pending_evals
+                        )),
+                    );
+                    if features.bridge_clients == 0 {
+                        checks.push(Check::warn(
+                            "No webview bridge clients connected",
+                            "open the Tauri window and confirm the connector plugin is registered before the app is built; if this persists, verify app.withGlobalTauri=true and the 9300-9400 bridge port range is not blocked",
+                        ));
+                    }
+                    checks.push(Check::ok(
+                        "Runtime, artifact, and debug WebSocket commands are available",
+                    ));
+                }
+                Err(e) => checks.push(
+                    Check::fail(
+                        "Runtime/artifact/debug WebSocket commands unavailable",
+                        "update the app to tauri-plugin-connector 0.11+, restart the Tauri process, then re-run doctor. These commands power `runtime`, `artifacts`, `debug snapshot`, and `act`.",
+                    )
+                    .with_detail(e),
+                ),
+            }
+        }
         Err(e) => checks.push(
             Check::fail(
                 format!("WebSocket ws://{PROBE_HOST}:{ws_port} unreachable"),
@@ -1070,18 +1201,22 @@ async fn check_runtime(project: Option<&PathBuf>, pid: Option<(PathBuf, PidInfo)
         ),
     }
 
-    // MCP reachable (TCP probe — avoids blocking on HTTP semantics)
-    match probe_tcp(PROBE_HOST, mcp_port).await {
-        Ok(()) => checks.push(
+    // MCP Streamable HTTP reachable and protocol-correct.
+    match probe_mcp_streamable(PROBE_HOST, mcp_port).await {
+        Ok(probe) => checks.push(
             Check::ok(format!(
-                "MCP server http://{PROBE_HOST}:{mcp_port}/mcp reachable"
+                "MCP Streamable HTTP http://{PROBE_HOST}:{mcp_port}/mcp protocol OK"
+            ))
+            .with_detail(format!(
+                "protocol {}, session {}, initialize 200, notification 202, ping 200, GET /mcp 405, DELETE 204",
+                probe.protocol_version, probe.session_id
             )),
         ),
         Err(e) => checks.push(
             Check::fail(
-                format!("MCP server http://{PROBE_HOST}:{mcp_port}/mcp unreachable"),
+                format!("MCP Streamable HTTP http://{PROBE_HOST}:{mcp_port}/mcp protocol failed"),
                 format!(
-                    "start the Tauri app in dev mode — MCP is embedded and starts automatically. If custom ports are set via ConnectorBuilder.mcp_port_range(...), update .mcp.json to match port {mcp_port}:\n  $ bun run tauri dev"
+                    "start the Tauri app in dev mode and ensure `.mcp.json` points at the Streamable HTTP endpoint. If custom ports are set via ConnectorBuilder.mcp_port_range(...), update .mcp.json to match port {mcp_port}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:{mcp_port}/mcp\" }}\n  $ bun run tauri dev"
                 ),
             )
             .with_detail(e),
@@ -1091,6 +1226,101 @@ async fn check_runtime(project: Option<&PathBuf>, pid: Option<(PathBuf, PidInfo)
     Section {
         name: "Runtime",
         checks,
+    }
+}
+
+fn check_pid_alive(info: &PidInfo) -> Check {
+    let Some(pid) = info.pid else {
+        return Check::warn(
+            ".connector.json has no pid",
+            "restart the Tauri app with tauri-plugin-connector 0.11+ so the runtime PID file includes process metadata",
+        );
+    };
+    if process_alive(pid) {
+        Check::ok(format!("Runtime process {pid} is alive"))
+    } else {
+        Check::fail(
+            format!("Runtime process {pid} is not alive"),
+            "remove the stale `.connector.json`, restart the Tauri app, then re-run doctor:\n  $ rm -f src-tauri/target/.connector.json src-tauri/target/debug/.connector.json\n  $ bun run tauri dev",
+        )
+    }
+}
+
+fn process_alive(pid: u64) -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("kill")
+            .arg("-0")
+            .arg(pid.to_string())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
+fn check_pid_metadata(info: &PidInfo) -> Check {
+    let mut missing = Vec::new();
+    if info.ws_port.is_none() {
+        missing.push("ws_port");
+    }
+    if info.mcp_port.is_none() {
+        missing.push("mcp_port");
+    }
+    if info.bridge_port.is_none() {
+        missing.push("bridge_port");
+    }
+    if info.app_name.as_deref().unwrap_or("").is_empty() {
+        missing.push("app_name");
+    }
+    if info.app_id.as_deref().unwrap_or("").is_empty() {
+        missing.push("app_id");
+    }
+    if info.log_dir.is_none() {
+        missing.push("log_dir");
+    }
+
+    if missing.is_empty() {
+        Check::ok(".connector.json exposes runtime ports, app identity, and log_dir")
+    } else {
+        Check::warn(
+            format!(".connector.json missing {}", missing.join(", ")),
+            "restart the app with the current tauri-plugin-connector. Older PID files cannot support precise doctor/runtime/artifact checks.",
+        )
+    }
+}
+
+fn check_log_dir(info: &PidInfo) -> Check {
+    let Some(log_dir) = info.log_dir.as_ref() else {
+        return Check::warn(
+            "Runtime log_dir not reported",
+            "restart the app with tauri-plugin-connector 0.11+ so doctor can verify console/ipc/events/runtime logs and artifacts",
+        );
+    };
+    if !log_dir.is_dir() {
+        return Check::fail(
+            format!("Runtime log_dir does not exist ({})", log_dir.display()),
+            "the PID file is stale or the app cannot create its connector data directory. Restart the app and check filesystem permissions for the app data directory.",
+        );
+    }
+    let mut missing = Vec::new();
+    for file in ["console.log", "ipc.log", "events.log", "runtime.log"] {
+        if !log_dir.join(file).is_file() {
+            missing.push(file);
+        }
+    }
+    if missing.is_empty() {
+        Check::ok("Connector JSONL logs initialized").with_detail(log_dir.display().to_string())
+    } else {
+        Check::warn(
+            format!("Connector log files missing: {}", missing.join(", ")),
+            "restart the app with the current plugin. The connector should initialize console.log, ipc.log, events.log, and runtime.log under log_dir.",
+        )
+        .with_detail(log_dir.display().to_string())
     }
 }
 
@@ -1107,13 +1337,309 @@ async fn probe_ws(host: &str, port: u16) -> Result<(), String> {
     Ok(())
 }
 
-async fn probe_tcp(host: &str, port: u16) -> Result<(), String> {
-    let addr = (host, port);
-    tokio::time::timeout(Duration::from_secs(2), tokio::net::TcpStream::connect(addr))
+struct WsFeatureProbe {
+    bridge_clients: usize,
+    pending_evals: u64,
+}
+
+async fn probe_ws_features(host: &str, port: u16) -> Result<WsFeatureProbe, String> {
+    let mut client = ConnectorClient::new();
+    tokio::time::timeout(Duration::from_secs(2), client.connect(host, port))
         .await
-        .map_err(|_| "connect timed out after 2s".to_string())?
-        .map_err(|e| format!("tcp connect failed: {e}"))?;
-    Ok(())
+        .map_err(|_| "connect timed out after 2s".to_string())??;
+
+    let bridge = client
+        .send_with_timeout(json!({ "type": "bridge_status" }), 2_000)
+        .await
+        .map_err(|e| format!("bridge_status failed: {e}"))?;
+    client
+        .send_with_timeout(json!({ "type": "runtime_get_captured", "limit": 1 }), 2_000)
+        .await
+        .map_err(|e| format!("runtime_get_captured failed: {e}"))?;
+    client
+        .send_with_timeout(json!({ "type": "artifact_list", "limit": 1 }), 2_000)
+        .await
+        .map_err(|e| format!("artifact_list failed: {e}"))?;
+    client
+        .send_with_timeout(
+            json!({
+                "type": "debug_snapshot",
+                "include_dom": false,
+                "include_screenshot": false,
+                "include_logs": false,
+                "include_ipc": false,
+                "include_events": false,
+                "include_runtime": false
+            }),
+            2_000,
+        )
+        .await
+        .map_err(|e| format!("debug_snapshot failed: {e}"))?;
+    client.disconnect().await;
+
+    let bridge_clients = bridge
+        .get("clients")
+        .and_then(|v| v.as_array())
+        .map(Vec::len)
+        .unwrap_or(0);
+    let pending_evals = bridge
+        .get("pending")
+        .or_else(|| bridge.get("pendingEvals"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    Ok(WsFeatureProbe {
+        bridge_clients,
+        pending_evals,
+    })
+}
+
+struct McpProbe {
+    protocol_version: String,
+    session_id: String,
+}
+
+async fn probe_mcp_streamable(host: &str, port: u16) -> Result<McpProbe, String> {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {
+                "name": "tauri-connector-doctor",
+                "version": CURRENT_VERSION
+            }
+        }
+    })
+    .to_string();
+    let init = raw_http_request(
+        host,
+        port,
+        "POST",
+        "/mcp",
+        &[
+            ("Accept", "application/json, text/event-stream"),
+            ("Content-Type", "application/json"),
+        ],
+        Some(&body),
+    )
+    .await?;
+    if init.status_code() != Some(200) {
+        return Err(format!(
+            "expected initialize HTTP 200, got {}",
+            init.status_line
+        ));
+    }
+
+    let session_id = init
+        .header("mcp-session-id")
+        .ok_or_else(|| "initialize response missing MCP-Session-Id header".to_string())?;
+    let header_protocol = init.header("mcp-protocol-version");
+
+    let response: Value = serde_json::from_str(&init.body)
+        .map_err(|e| format!("initialize response body was not JSON: {e}"))?;
+    let protocol = response
+        .pointer("/result/protocolVersion")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "initialize response missing result.protocolVersion".to_string())?;
+    if !matches!(protocol, "2025-11-25" | "2025-06-18" | "2025-03-26") {
+        return Err(format!("unsupported protocolVersion returned: {protocol}"));
+    }
+    if let Some(header_protocol) = header_protocol.as_deref() {
+        if header_protocol != protocol {
+            return Err(format!(
+                "MCP-Protocol-Version header {header_protocol} did not match initialize result {protocol}"
+            ));
+        }
+    }
+
+    let initialized_body = json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {}
+    })
+    .to_string();
+    let initialized = raw_http_request(
+        host,
+        port,
+        "POST",
+        "/mcp",
+        &[
+            ("Accept", "application/json, text/event-stream"),
+            ("Content-Type", "application/json"),
+            ("MCP-Session-Id", &session_id),
+            ("MCP-Protocol-Version", protocol),
+        ],
+        Some(&initialized_body),
+    )
+    .await?;
+    if initialized.status_code() != Some(202) || !initialized.body.trim().is_empty() {
+        return Err(format!(
+            "expected initialized notification 202 with empty body, got {} body {:?}",
+            initialized.status_line, initialized.body
+        ));
+    }
+
+    let ping_body = json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "ping"
+    })
+    .to_string();
+    let ping = raw_http_request(
+        host,
+        port,
+        "POST",
+        "/mcp",
+        &[
+            ("Accept", "application/json, text/event-stream"),
+            ("Content-Type", "application/json"),
+            ("MCP-Session-Id", &session_id),
+            ("MCP-Protocol-Version", protocol),
+        ],
+        Some(&ping_body),
+    )
+    .await?;
+    if ping.status_code() != Some(200) {
+        return Err(format!("expected ping HTTP 200, got {}", ping.status_line));
+    }
+    let ping_json: Value =
+        serde_json::from_str(&ping.body).map_err(|e| format!("ping response was not JSON: {e}"))?;
+    if ping_json.pointer("/result").is_none() {
+        return Err("ping response missing JSON-RPC result".to_string());
+    }
+
+    let get = raw_http_request(
+        host,
+        port,
+        "GET",
+        "/mcp",
+        &[("Accept", "text/event-stream")],
+        None,
+    )
+    .await?;
+    if get.status_code() != Some(405) || !get.header_contains("allow", "POST") {
+        return Err(format!(
+            "expected GET /mcp 405 with Allow: POST, DELETE; got {}",
+            get.status_line
+        ));
+    }
+
+    let delete = raw_http_request(
+        host,
+        port,
+        "DELETE",
+        "/mcp",
+        &[("MCP-Session-Id", &session_id)],
+        None,
+    )
+    .await?;
+    if delete.status_code() != Some(204) {
+        return Err(format!(
+            "expected DELETE /mcp HTTP 204, got {}",
+            delete.status_line
+        ));
+    }
+
+    Ok(McpProbe {
+        protocol_version: protocol.to_string(),
+        session_id,
+    })
+}
+
+struct RawHttpResponse {
+    status_line: String,
+    headers: Vec<(String, String)>,
+    body: String,
+}
+
+impl RawHttpResponse {
+    fn status_code(&self) -> Option<u16> {
+        self.status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u16>().ok())
+    }
+
+    fn header(&self, name: &str) -> Option<String> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    }
+
+    fn header_contains(&self, name: &str, needle: &str) -> bool {
+        self.header(name)
+            .map(|value| {
+                value
+                    .to_ascii_lowercase()
+                    .contains(&needle.to_ascii_lowercase())
+            })
+            .unwrap_or(false)
+    }
+}
+
+async fn raw_http_request(
+    host: &str,
+    port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> Result<RawHttpResponse, String> {
+    let body = body.unwrap_or("");
+    let mut request =
+        format!("{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n");
+    for (key, value) in headers {
+        request.push_str(&format!("{key}: {value}\r\n"));
+    }
+    if !body.is_empty() {
+        request.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    request.push_str("\r\n");
+    request.push_str(body);
+
+    let mut stream = tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::TcpStream::connect((host, port)),
+    )
+    .await
+    .map_err(|_| "connect timed out after 2s".to_string())?
+    .map_err(|e| format!("tcp connect failed: {e}"))?;
+
+    tokio::time::timeout(Duration::from_secs(2), stream.write_all(request.as_bytes()))
+        .await
+        .map_err(|_| "HTTP write timed out after 2s".to_string())?
+        .map_err(|e| format!("HTTP write failed: {e}"))?;
+
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), stream.read_to_end(&mut bytes))
+        .await
+        .map_err(|_| "HTTP read timed out after 2s".to_string())?
+        .map_err(|e| format!("HTTP read failed: {e}"))?;
+
+    let raw = String::from_utf8(bytes).map_err(|e| format!("HTTP response was not UTF-8: {e}"))?;
+    let (head, body) = raw
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "HTTP response missing header/body separator".to_string())?;
+    let mut lines = head.lines();
+    let status_line = lines
+        .next()
+        .ok_or_else(|| "HTTP response missing status line".to_string())?
+        .to_string();
+    let headers = lines
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            Some((key.trim().to_string(), value.trim().to_string()))
+        })
+        .collect();
+    Ok(RawHttpResponse {
+        status_line,
+        headers,
+        body: body.to_string(),
+    })
 }
 
 // ----- section: integration ------------------------------------------------
@@ -1222,6 +1748,7 @@ fn print_json(sections: &[Section], pattern: SetupPattern) {
         "cli_version": CURRENT_VERSION,
         "setup_pattern": pattern.as_str(),
         "summary": { "ok": ok, "fail": fail, "warn": warn, "passed": fail == 0 },
+        "fixes": fix_suggestions(sections),
         "sections": sections.iter().map(|s| json!({
             "name": s.name,
             "checks": s.checks.iter().map(|c| json!({
@@ -1236,6 +1763,24 @@ fn print_json(sections: &[Section], pattern: SetupPattern) {
         Ok(s) => println!("{s}"),
         Err(e) => eprintln!("Failed to serialize doctor JSON: {e}"),
     }
+}
+
+fn fix_suggestions(sections: &[Section]) -> Vec<Value> {
+    sections
+        .iter()
+        .flat_map(|section| {
+            section.checks.iter().filter_map(move |check| {
+                check.fix.as_ref().map(|fix| {
+                    json!({
+                        "section": section.name,
+                        "label": check.label,
+                        "status": check.status.as_str(),
+                        "fix": fix,
+                    })
+                })
+            })
+        })
+        .collect()
 }
 
 fn tally(sections: &[Section]) -> (usize, usize, usize) {
@@ -1372,6 +1917,91 @@ tauri-plugin-connector = "0.8"
     }
 
     #[test]
+    fn package_scripts_detect_dev_connector_feature() {
+        let pkg: Value = serde_json::from_str(
+            r#"{ "scripts": { "tauri:dev": "tauri dev --features dev-connector" } }"#,
+        )
+        .unwrap();
+        assert!(package_scripts_enable_feature(&pkg, "dev-connector"));
+    }
+
+    #[test]
+    fn package_scripts_accept_short_feature_flag() {
+        let pkg: Value =
+            serde_json::from_str(r#"{ "scripts": { "dev": "cargo tauri dev -F dev-connector" } }"#)
+                .unwrap();
+        assert!(package_scripts_enable_feature(&pkg, "dev-connector"));
+    }
+
+    #[test]
+    fn package_scripts_reject_missing_feature_flag() {
+        let pkg: Value =
+            serde_json::from_str(r#"{ "scripts": { "tauri:dev": "tauri dev" } }"#).unwrap();
+        assert!(!package_scripts_enable_feature(&pkg, "dev-connector"));
+    }
+
+    #[test]
+    fn mcp_url_must_target_streamable_mcp() {
+        let bad_path = check_mcp_url(".mcp.json", "http://127.0.0.1:9556/message");
+        assert_eq!(bad_path.status, Status::Fail);
+        assert!(bad_path.fix.unwrap().contains("/mcp"));
+
+        let legacy = check_mcp_url(".mcp.json", "http://127.0.0.1:9556/sse");
+        assert_eq!(legacy.status, Status::Warn);
+        assert!(legacy.fix.unwrap().contains("9556/mcp"));
+
+        let ok = check_mcp_url(".mcp.json", "http://127.0.0.1:9556/mcp");
+        assert_eq!(ok.status, Status::Ok);
+    }
+
+    #[test]
+    fn mcp_command_transport_gets_fix_suggestion() {
+        let value: Value = serde_json::from_str(
+            r#"{ "command": "tauri-connector-mcp", "args": ["--port", "9555"] }"#,
+        )
+        .unwrap();
+        let check = check_mcp_entry(Some(&value), ".mcp.json");
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.fix.unwrap().contains("127.0.0.1:9556/mcp"));
+    }
+
+    #[test]
+    fn read_pid_file_parses_new_runtime_metadata() {
+        let dir = std::env::temp_dir().join(format!(
+            "tauri-connector-doctor-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".connector.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "pid": 123,
+              "ws_port": 9555,
+              "mcp_port": 9556,
+              "bridge_port": 9300,
+              "app_name": "Example",
+              "app_id": "com.example",
+              "log_dir": "/tmp/example-connector"
+            }"#,
+        )
+        .unwrap();
+        let info = read_pid_file(&path).unwrap();
+        assert_eq!(info.pid, Some(123));
+        assert_eq!(info.ws_port, Some(9555));
+        assert_eq!(info.mcp_port, Some(9556));
+        assert_eq!(info.bridge_port, Some(9300));
+        assert_eq!(info.app_name.as_deref(), Some("Example"));
+        assert_eq!(info.app_id.as_deref(), Some("com.example"));
+        assert_eq!(
+            info.log_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/example-connector"))
+        );
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir(dir);
+    }
+
+    #[test]
     fn settings_detects_connector_hook() {
         let v: Value = serde_json::from_str(
             r#"{ "hooks": { "UserPromptSubmit": [
@@ -1393,6 +2023,24 @@ tauri-plugin-connector = "0.8"
     #[test]
     fn indent_snippet_prefixes_two_spaces() {
         assert_eq!(indent_snippet("a\nb"), "  a\n  b");
+    }
+
+    #[test]
+    fn json_fix_suggestions_collects_warn_and_fail_fixes() {
+        let sections = vec![Section {
+            name: "Test",
+            checks: vec![
+                Check::ok("ok"),
+                Check::warn("warn", "do warn"),
+                Check::fail("fail", "do fail"),
+            ],
+        }];
+        let fixes = fix_suggestions(&sections);
+        assert_eq!(fixes.len(), 2);
+        assert_eq!(fixes[0]["status"], "warn");
+        assert_eq!(fixes[0]["fix"], "do warn");
+        assert_eq!(fixes[1]["status"], "fail");
+        assert_eq!(fixes[1]["fix"], "do fail");
     }
 
     #[test]

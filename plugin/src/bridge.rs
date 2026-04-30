@@ -431,6 +431,140 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
   // Expose logs for retrieval
   window.__CONNECTOR_LOGS__ = consoleLogs;
 
+  // === Runtime Capture ===
+  window.__CONNECTOR_RUNTIME__ = window.__CONNECTOR_RUNTIME__ || [];
+  const runtimeEntries = window.__CONNECTOR_RUNTIME__;
+  function runtimeIpc() {{
+    return window.__CONNECTOR_ORIG_INVOKE__ ||
+      (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) ||
+      (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke);
+  }}
+  function captureRuntime(kind, level, message, data) {{
+    const entry = {{
+      kind: kind,
+      level: level || 'info',
+      message: String(message || ''),
+      timestamp: Date.now(),
+      windowId: WINDOW_ID,
+      data: data || {{}}
+    }};
+    runtimeEntries.push(entry);
+    if (runtimeEntries.length > 1000) runtimeEntries.shift();
+    const ipc = runtimeIpc();
+    if (ipc) {{
+      ipc('plugin:connector|push_runtime', {{ payload: entry }}).catch(function(){{}});
+    }}
+  }}
+  if (!window.__CONNECTOR_RUNTIME_LISTENERS__) {{
+    window.__CONNECTOR_RUNTIME_LISTENERS__ = true;
+    window.addEventListener('error', function(e) {{
+      const target = e.target;
+      if (target && target !== window && (target.tagName || target.src || target.href)) {{
+        captureRuntime('resource_error', 'error', 'Resource failed to load', {{
+          tag: target.tagName || '',
+          src: target.src || target.href || '',
+          outerHTML: target.outerHTML ? target.outerHTML.substring(0, 500) : ''
+        }});
+        return;
+      }}
+      captureRuntime('window_error', 'error', e.message || 'window error', {{
+        filename: e.filename || '',
+        lineno: e.lineno || 0,
+        colno: e.colno || 0,
+        stack: e.error && e.error.stack ? String(e.error.stack) : ''
+      }});
+    }}, true);
+    window.addEventListener('unhandledrejection', function(e) {{
+      const reason = e.reason || {{}};
+      captureRuntime('unhandledrejection', 'error', reason.message || String(reason), {{
+        stack: reason.stack ? String(reason.stack) : '',
+        reason: typeof reason === 'object' ? String(reason) : reason
+      }});
+    }});
+    window.addEventListener('popstate', function() {{
+      captureRuntime('navigation', 'info', 'popstate', {{ url: String(location.href || '') }});
+    }});
+    window.addEventListener('hashchange', function() {{
+      captureRuntime('navigation', 'info', 'hashchange', {{ url: String(location.href || '') }});
+    }});
+  }}
+  if (typeof window.fetch === 'function' && !window.__CONNECTOR_FETCH_WRAPPED__) {{
+    window.__CONNECTOR_FETCH_WRAPPED__ = true;
+    const origFetch = window.fetch;
+    window.fetch = async function(input, init) {{
+      const t0 = Date.now();
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      try {{
+        const res = await origFetch.apply(this, arguments);
+        if (!res.ok) {{
+          captureRuntime('network', 'warn', 'fetch returned HTTP ' + res.status, {{
+            url: String(url),
+            status: res.status,
+            ok: res.ok,
+            durationMs: Date.now() - t0
+          }});
+        }}
+        return res;
+      }} catch (err) {{
+        captureRuntime('network', 'error', err && err.message ? err.message : String(err), {{
+          url: String(url),
+          durationMs: Date.now() - t0
+        }});
+        throw err;
+      }}
+    }};
+  }}
+  if (window.XMLHttpRequest && !window.__CONNECTOR_XHR_WRAPPED__) {{
+    window.__CONNECTOR_XHR_WRAPPED__ = true;
+    const OrigXHR = window.XMLHttpRequest;
+    window.XMLHttpRequest = function() {{
+      const xhr = new OrigXHR();
+      let method = '';
+      let url = '';
+      let t0 = 0;
+      const origOpen = xhr.open;
+      xhr.open = function(m, u) {{
+        method = m || '';
+        url = u || '';
+        return origOpen.apply(xhr, arguments);
+      }};
+      const origSend = xhr.send;
+      xhr.send = function() {{
+        t0 = Date.now();
+        xhr.addEventListener('loadend', function() {{
+          if (xhr.status >= 400 || xhr.status === 0) {{
+            captureRuntime('network', xhr.status === 0 ? 'error' : 'warn', 'xhr completed with status ' + xhr.status, {{
+              method: method,
+              url: String(url),
+              status: xhr.status,
+              durationMs: Date.now() - t0
+            }});
+          }}
+        }});
+        xhr.addEventListener('error', function() {{
+          captureRuntime('network', 'error', 'xhr network error', {{
+            method: method,
+            url: String(url),
+            durationMs: Date.now() - t0
+          }});
+        }});
+        return origSend.apply(xhr, arguments);
+      }};
+      return xhr;
+    }};
+  }}
+  ['pushState', 'replaceState'].forEach(function(name) {{
+    if (!history[name].__connectorWrapped) {{
+      const orig = history[name];
+      const wrapped = function() {{
+        const result = orig.apply(this, arguments);
+        captureRuntime('navigation', 'info', name, {{ url: String(location.href || '') }});
+        return result;
+      }};
+      wrapped.__connectorWrapped = true;
+      history[name] = wrapped;
+    }}
+  }});
   // === IPC Invoke Wrapper (for monitoring) ===
   if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {{
     const _origInvoke = window.__TAURI_INTERNALS__.invoke;
@@ -1217,7 +1351,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       }});
       ipc.invoke('plugin:connector|push_dom', {{
         payload: {{
-          windowId: 'main',
+          windowId: WINDOW_ID,
           html: document.body.innerHTML.substring(0, 500000),
           textContent: document.body.innerText.substring(0, 200000),
           snapshot: result.snapshot || '',
@@ -1254,7 +1388,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     if (consoleLogs.length <= lastLogPushIndex) return;
 
     const newEntries = consoleLogs.slice(lastLogPushIndex).map(function(l) {{
-      return {{ level: l.level, message: l.message, timestamp: l.timestamp, windowId: 'main' }};
+      return {{ level: l.level, message: l.message, timestamp: l.timestamp, windowId: WINDOW_ID }};
     }});
     lastLogPushIndex = consoleLogs.length;
 

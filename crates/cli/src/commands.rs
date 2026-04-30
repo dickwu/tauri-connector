@@ -3,18 +3,29 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use connector_client::discovery::ConnectorInstance;
 use connector_client::ConnectorClient;
 use serde_json::{json, Value};
 
-use crate::snapshot::{build_resolve_and_act_script, RefMap};
+use crate::snapshot::{build_resolve_and_act_script, RefMap, SnapshotRefs};
+
+static WINDOW_ID: OnceLock<String> = OnceLock::new();
+
+pub fn set_window_id(window_id: String) {
+    let _ = WINDOW_ID.set(window_id);
+}
+
+fn window_id() -> &'static str {
+    WINDOW_ID.get().map(String::as_str).unwrap_or("main")
+}
 
 /// Execute JS in the webview via the connector.
 async fn exec_js(client: &ConnectorClient, script: &str, timeout_ms: u64) -> Result<Value, String> {
     client
         .send_with_timeout(
-            json!({ "type": "execute_js", "script": script, "window_id": "main" }),
+            json!({ "type": "execute_js", "script": script, "window_id": window_id() }),
             timeout_ms,
         )
         .await
@@ -34,17 +45,24 @@ pub async fn snapshot(
     follow_portals: bool,
     max_tokens: usize,
     no_split: bool,
-) -> Result<RefMap, String> {
+) -> Result<SnapshotRefs, String> {
+    let snapshot_mode = mode.unwrap_or_else(|| {
+        if interactive {
+            "ai".to_string()
+        } else {
+            "accessibility".to_string()
+        }
+    });
     let mut cmd = json!({
         "type": "dom_snapshot",
-        "mode": mode.unwrap_or_else(|| if interactive { "ai".to_string() } else { "accessibility".to_string() }),
+        "mode": snapshot_mode,
         "max_depth": max_depth as u64,
         "max_elements": max_elements as u64,
         "max_tokens": max_tokens as u64,
         "no_split": no_split,
         "react_enrich": react_enrich,
         "follow_portals": follow_portals,
-        "window_id": "main",
+        "window_id": window_id(),
     });
     if let Some(selector) = selector {
         cmd["selector"] = json!(selector);
@@ -95,7 +113,16 @@ pub async fn snapshot(
     let count = refs.len();
     eprintln!("\n{count} refs captured");
 
-    Ok(refs)
+    let snapshot_id = result
+        .pointer("/meta/snapshotId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(SnapshotRefs {
+        refs,
+        snapshot_id,
+        snapshot_mode,
+    })
 }
 
 /// List recent snapshot sessions from the app snapshot directory.
@@ -631,7 +658,7 @@ pub async fn wait(
     let mut cmd = json!({
         "type": "wait_for",
         "timeout": timeout_ms,
-        "window_id": "main",
+        "window_id": window_id(),
     });
     if let Some(s) = selector {
         cmd["selector"] = json!(s);
@@ -668,7 +695,7 @@ pub async fn logs(
     level: Option<&str>,
     pattern: Option<&str>,
 ) -> Result<(), String> {
-    let mut cmd = json!({ "type": "console_logs", "lines": lines, "window_id": "main" });
+    let mut cmd = json!({ "type": "console_logs", "lines": lines, "window_id": window_id() });
     if let Some(f) = filter {
         cmd["filter"] = json!(f);
     }
@@ -735,6 +762,7 @@ pub async fn windows(client: &ConnectorClient) -> Result<(), String> {
 pub async fn screenshot(
     client: &ConnectorClient,
     output: Option<&str>,
+    selector: Option<&str>,
     format: &str,
     quality: u8,
     max_width: Option<u32>,
@@ -747,10 +775,13 @@ pub async fn screenshot(
         "type": "screenshot",
         "format": format,
         "quality": quality,
-        "window_id": "main",
+        "window_id": window_id(),
     });
     if let Some(w) = max_width {
         cmd["max_width"] = json!(w);
+    }
+    if let Some(selector) = selector {
+        cmd["selector"] = json!(selector);
     }
     let result = client.send_with_timeout(cmd, 60_000).await?;
 
@@ -760,11 +791,49 @@ pub async fn screenshot(
         .ok_or_else(|| "No base64 data in screenshot response".to_string())?;
 
     let bytes = b64_decode(base64_data)?;
-    let target = resolve_screenshot_path(output, output_dir, format, name_hint, instance)?;
+    let target =
+        resolve_screenshot_path(output, output_dir, format, name_hint, selector, instance)?;
     let artifact = write_screenshot_artifact(&target, &bytes, overwrite)?;
 
     let width = result.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
     let height = result.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+    let capture_kind = if selector.is_some() {
+        "element"
+    } else {
+        "full"
+    };
+    let created_at = now_ms();
+    let artifact_id = format!(
+        "shot_{}",
+        artifact
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("screenshot")
+    );
+    let metadata = json!({
+        "artifactId": artifact_id.clone(),
+        "id": artifact_id,
+        "kind": "screenshot",
+        "captureKind": capture_kind,
+        "path": artifact.path.to_string_lossy(),
+        "requestedPath": artifact.requested_path.to_string_lossy(),
+        "resolvedFromCollision": artifact.resolved_from_collision,
+        "overwrote": artifact.overwrote,
+        "sha256": sha256_hex(&bytes),
+        "bytes": bytes.len(),
+        "width": width,
+        "height": height,
+        "format": format,
+        "createdAt": created_at,
+        "createdAtMs": created_at,
+        "source": if selector.is_some() { "selector" } else { "full_window" },
+        "selector": selector,
+        "windowId": window_id(),
+        "rectCssPx": result.get("rectCssPx").cloned().unwrap_or(Value::Null),
+        "devicePixelRatio": result.get("devicePixelRatio").cloned().unwrap_or(Value::Null),
+    });
+    append_cli_artifact_manifest(instance, &metadata)?;
     let size_kb = bytes.len() / 1024;
     if artifact.resolved_from_collision {
         eprintln!(
@@ -779,10 +848,11 @@ pub async fn screenshot(
             "requestedPath": artifact.requested_path,
             "resolvedFromCollision": artifact.resolved_from_collision,
             "overwrote": artifact.overwrote,
-            "sha256": sha256_hex(&bytes),
+        "sha256": metadata.get("sha256").cloned().unwrap_or(Value::Null),
             "width": width,
             "height": height,
             "sizeKb": size_kb,
+            "artifact": metadata,
         }))
         .unwrap_or_default()
     );
@@ -801,6 +871,7 @@ fn resolve_screenshot_path(
     output_dir: Option<&Path>,
     format: &str,
     name_hint: Option<&str>,
+    selector: Option<&str>,
     instance: Option<&ConnectorInstance>,
 ) -> Result<PathBuf, String> {
     if let Some(output) = output {
@@ -808,7 +879,9 @@ fn resolve_screenshot_path(
         if path.extension().is_some() {
             return Ok(path);
         }
-        return Ok(path.join(default_screenshot_name(format, name_hint, instance)));
+        return Ok(path.join(default_screenshot_name(
+            format, name_hint, selector, instance,
+        )));
     }
 
     let dir = output_dir.map(Path::to_path_buf).unwrap_or_else(|| {
@@ -818,29 +891,80 @@ fn resolve_screenshot_path(
             .join("artifacts")
             .join("screenshots")
     });
-    Ok(dir.join(default_screenshot_name(format, name_hint, instance)))
+    Ok(dir.join(default_screenshot_name(
+        format, name_hint, selector, instance,
+    )))
 }
 
 fn default_screenshot_name(
     format: &str,
     name_hint: Option<&str>,
+    selector: Option<&str>,
     instance: Option<&ConnectorInstance>,
 ) -> String {
-    let created = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+    let created = now_ms();
     let app = instance
         .and_then(|i| i.app_name.as_deref().or(i.app_id.as_deref()))
         .map(slug)
         .unwrap_or_else(|| "app".to_string());
-    let hint = name_hint.map(slug).unwrap_or_else(|| "full".to_string());
+    let kind = if selector.is_some() {
+        "element"
+    } else {
+        "full"
+    };
+    let hint = name_hint
+        .or(selector)
+        .map(slug)
+        .unwrap_or_else(|| kind.to_string());
     let ext = match format {
         "jpeg" | "jpg" => "jpg",
         "webp" => "webp",
         _ => "png",
     };
-    format!("{created}-{app}-main-{hint}-{}.{}", uuid8(), ext)
+    format!(
+        "{created}-{app}-{}-{kind}-{hint}-{}.{}",
+        slug(window_id()),
+        uuid8(),
+        ext
+    )
+}
+
+fn cli_artifact_manifest_path(instance: Option<&ConnectorInstance>) -> PathBuf {
+    instance
+        .and_then(|i| i.log_dir.clone())
+        .unwrap_or_else(|| std::env::temp_dir().join("tauri-connector"))
+        .join("artifacts")
+        .join("manifest.jsonl")
+}
+
+fn append_cli_artifact_manifest(
+    instance: Option<&ConnectorInstance>,
+    artifact: &Value,
+) -> Result<(), String> {
+    let path = cli_artifact_manifest_path(instance);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create artifact manifest dir {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("Failed to open artifact manifest {}: {e}", path.display()))?;
+    let line = serde_json::to_string(artifact).map_err(|e| e.to_string())?;
+    writeln!(file, "{line}")
+        .map_err(|e| format!("Failed to write artifact manifest {}: {e}", path.display()))
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn write_screenshot_artifact(
@@ -1024,7 +1148,7 @@ pub async fn find(client: &ConnectorClient, selector: &str, strategy: &str) -> R
             "type": "find_element",
             "selector": selector,
             "strategy": strategy,
-            "window_id": "main",
+            "window_id": window_id(),
         }))
         .await?;
     println!(
@@ -1216,16 +1340,231 @@ pub async fn clear_logs(client: &ConnectorClient, target: &str) -> Result<(), St
         "logs" => "console",
         "ipc" => "ipc",
         "events" => "events",
+        "runtime" => "runtime",
         "all" => "all",
         _ => {
             return Err(format!(
-                "Unknown target: {target}. Use: logs, ipc, events, all"
+                "Unknown target: {target}. Use: logs, ipc, events, runtime, all"
             ))
         }
     };
     let result = client
         .send(json!({ "type": "clear_logs", "source": source }))
         .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
+    Ok(())
+}
+
+/// Get captured frontend runtime events.
+#[allow(clippy::too_many_arguments)]
+pub async fn runtime(
+    client: &ConnectorClient,
+    limit: usize,
+    kind: Option<&str>,
+    level: Option<&str>,
+    pattern: Option<&str>,
+    since: Option<u64>,
+    since_mark: Option<&str>,
+    window_id: &str,
+) -> Result<(), String> {
+    let mut cmd = json!({
+        "type": "runtime_get_captured",
+        "limit": limit,
+        "window_id": window_id,
+    });
+    if let Some(kind) = kind {
+        cmd["kind"] = json!(kind);
+    }
+    if let Some(level) = level {
+        cmd["level"] = json!(level);
+    }
+    if let Some(pattern) = pattern {
+        cmd["pattern"] = json!(pattern);
+    }
+    if let Some(since) = since {
+        cmd["since"] = json!(since);
+    }
+    if let Some(since_mark) = since_mark {
+        cmd["since_mark"] = json!(since_mark);
+    }
+    let result = client.send(cmd).await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
+    Ok(())
+}
+
+pub async fn artifacts_list(
+    client: &ConnectorClient,
+    kind: Option<&str>,
+    limit: usize,
+) -> Result<(), String> {
+    let mut cmd = json!({ "type": "artifact_list", "limit": limit });
+    if let Some(kind) = kind {
+        cmd["kind"] = json!(kind);
+    }
+    print_json_result(client.send(cmd).await)
+}
+
+pub async fn artifact_show(
+    client: &ConnectorClient,
+    artifact: &str,
+    include_base64: bool,
+) -> Result<(), String> {
+    let mut result = client
+        .send(json!({ "type": "artifact_read", "artifact": artifact }))
+        .await?;
+    if !include_base64 {
+        if let Some(obj) = result.as_object_mut() {
+            obj.remove("base64");
+        }
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
+    Ok(())
+}
+
+pub async fn artifact_prune(
+    client: &ConnectorClient,
+    keep: usize,
+    kind: Option<&str>,
+    delete_files: bool,
+) -> Result<(), String> {
+    let mut cmd = json!({
+        "type": "artifact_prune",
+        "keep": keep,
+        "delete_files": delete_files,
+    });
+    if let Some(kind) = kind {
+        cmd["kind"] = json!(kind);
+    }
+    print_json_result(client.send(cmd).await)
+}
+
+pub async fn artifact_compare(
+    client: &ConnectorClient,
+    before: &str,
+    after: &str,
+    threshold: f64,
+) -> Result<(), String> {
+    print_json_result(
+        client
+            .send(json!({
+                "type": "artifact_compare",
+                "before": before,
+                "after": after,
+                "threshold": threshold,
+            }))
+            .await,
+    )
+}
+
+pub async fn debug_mark(client: &ConnectorClient, label: Option<&str>) -> Result<(), String> {
+    let mut cmd = json!({ "type": "debug_mark" });
+    if let Some(label) = label {
+        cmd["label"] = json!(label);
+    }
+    print_json_result(client.send(cmd).await)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn debug_snapshot(
+    client: &ConnectorClient,
+    window_id: &str,
+    include_dom: bool,
+    include_screenshot: bool,
+    include_logs: bool,
+    include_ipc: bool,
+    include_events: bool,
+    include_runtime: bool,
+    since: Option<u64>,
+    since_mark: Option<&str>,
+    max_tokens: Option<u64>,
+    screenshot_name_hint: Option<&str>,
+) -> Result<(), String> {
+    let mut cmd = json!({
+        "type": "debug_snapshot",
+        "window_id": window_id,
+        "include_dom": include_dom,
+        "include_screenshot": include_screenshot,
+        "include_logs": include_logs,
+        "include_ipc": include_ipc,
+        "include_events": include_events,
+        "include_runtime": include_runtime,
+    });
+    if let Some(since) = since {
+        cmd["since"] = json!(since);
+    }
+    if let Some(since_mark) = since_mark {
+        cmd["since_mark"] = json!(since_mark);
+    }
+    if let Some(max_tokens) = max_tokens {
+        cmd["max_tokens"] = json!(max_tokens);
+    }
+    if let Some(name_hint) = screenshot_name_hint {
+        cmd["screenshot_name_hint"] = json!(name_hint);
+    }
+    print_json_result(client.send_with_timeout(cmd, 60_000).await)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn act_and_verify(
+    client: &ConnectorClient,
+    action: &str,
+    selector: Option<&str>,
+    text: Option<&str>,
+    key: Option<&str>,
+    target_selector: Option<&str>,
+    wait_for_selector: Option<&str>,
+    wait_for_text: Option<&str>,
+    timeout: u64,
+    verify_dom: bool,
+    verify_screenshot: bool,
+    include_logs: bool,
+    include_ipc: bool,
+    include_runtime: bool,
+    window_id: &str,
+) -> Result<(), String> {
+    let mut cmd = json!({
+        "type": "webview_act_and_verify",
+        "action": action,
+        "timeout": timeout,
+        "verify_dom": verify_dom,
+        "verify_screenshot": verify_screenshot,
+        "include_logs": include_logs,
+        "include_ipc": include_ipc,
+        "include_runtime": include_runtime,
+        "window_id": window_id,
+    });
+    if let Some(selector) = selector {
+        cmd["selector"] = json!(selector);
+    }
+    if let Some(text) = text {
+        cmd["text"] = json!(text);
+    }
+    if let Some(key) = key {
+        cmd["key"] = json!(key);
+    }
+    if let Some(target_selector) = target_selector {
+        cmd["target_selector"] = json!(target_selector);
+    }
+    if let Some(wait_for_selector) = wait_for_selector {
+        cmd["wait_for_selector"] = json!(wait_for_selector);
+    }
+    if let Some(wait_for_text) = wait_for_text {
+        cmd["wait_for_text"] = json!(wait_for_text);
+    }
+    print_json_result(client.send_with_timeout(cmd, timeout + 60_000).await)
+}
+
+fn print_json_result(result: Result<Value, String>) -> Result<(), String> {
+    let result = result?;
     println!(
         "{}",
         serde_json::to_string_pretty(&result).unwrap_or_default()

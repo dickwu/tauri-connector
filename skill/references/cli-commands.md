@@ -21,11 +21,12 @@ Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-
 tauri-connector status
 tauri-connector status --json
 tauri-connector --app-id com.example.app logs -l error
+tauri-connector --window-id settings snapshot -i
 tauri-connector --pid-file src-tauri/target/.connector.json snapshot -i
 tauri-connector bridge
 ```
 
-`status` lists live and stale candidates. `bridge` shows connected webviews, pending evals, and whether eval fallback is available.
+`status` lists live and stale candidates. `bridge` shows connected webviews, pending evals, and whether eval fallback is available. `--window-id` is global and scopes snapshots, refs, interactions, screenshots, logs, and window operations to a specific Tauri window label.
 
 ---
 
@@ -277,20 +278,37 @@ tauri-connector screenshot [output-path] [FLAGS]
 | `--format` | `-f` | `png` | `png`, `jpeg`, `webp` |
 | `--quality` | `-q` | 80 | JPEG/WebP quality (0-100) |
 | `--max-width` | `-m` | | Max width in pixels (maintains aspect ratio) |
+| `--selector` | `-s` | | CSS selector or `@eN` ref for element-scoped capture |
 | `--overwrite` | | false | Allow replacing an existing output path |
 | `--output-dir` | | connector artifact dir | Directory for auto-generated names |
 | `--name-hint` | | `full` | Slug included in generated filenames |
 
 Examples:
 ```bash
-tauri-connector screenshot /tmp/shot.png -m 1280
-tauri-connector screenshot /tmp/shot.png             # If it exists, writes a unique sibling
-tauri-connector screenshot --name-hint login-before  # Auto artifact path
+tauri-connector screenshot --name-hint login-before -m 1280  # Auto artifact path
+tauri-connector screenshot /tmp/shot.png                     # If it exists, writes a unique sibling
+tauri-connector screenshot /tmp/shot.png --overwrite          # Explicitly replace that path
+tauri-connector screenshot --selector @e5 --name-hint submit  # Element capture
 tauri-connector screenshot /tmp/s.webp -f webp
 tauri-connector screenshot /tmp/s.jpg -f jpeg -q 60
 ```
 
 The command prints the final resolved path and `sha256` as JSON. Do not assume a reused requested path is the latest capture unless `--overwrite` was used.
+
+### artifacts
+
+List, inspect, prune, and compare screenshot artifacts from the connector manifest.
+
+```bash
+tauri-connector artifacts list --kind screenshot
+tauri-connector artifacts show shot_...
+tauri-connector artifacts show shot_... --base64
+tauri-connector artifacts compare shot_before shot_after --threshold 0.01
+tauri-connector artifacts prune --keep 50
+tauri-connector artifacts prune --keep 50 --manifest-only
+```
+
+`prune` removes older manifest entries and deletes their files by default. Use `--manifest-only` to rewrite only the registry.
 
 ---
 
@@ -310,6 +328,36 @@ tauri-connector logs [FLAGS]
 | `--filter` | `-f` | | Substring match |
 | `--level` | `-l` | | Comma-separated: `log`, `info`, `warn`, `error`, `debug` |
 | `--pattern` | `-p` | | Regex match |
+
+### runtime
+
+Read runtime-level frontend captures: window errors, unhandled promise rejections, network failures/statuses, navigation changes, and resource load failures.
+
+```bash
+tauri-connector runtime -n 100 --kind network --pattern "500|timeout"
+tauri-connector runtime -l error --since-mark mark_...
+tauri-connector clear runtime
+```
+
+### debug
+
+Create marks and collect bundled debug context.
+
+```bash
+tauri-connector debug mark before-login-click
+tauri-connector debug snapshot --dom --screenshot --logs --ipc --runtime
+tauri-connector debug snapshot --runtime --since-mark mark_...
+```
+
+### act
+
+Perform an action, wait for a visible result, and collect fresh evidence in one call.
+
+```bash
+tauri-connector act click @e5 --wait-text Success --screenshot --logs --ipc --runtime
+tauri-connector act fill @e3 "user@example.com" --wait-selector ".valid" --dom
+tauri-connector act press Enter --wait-selector ".submitted" --runtime
+```
 
 ### eval
 
@@ -475,8 +523,8 @@ tauri-connector examples
 Diagnose the current project's tauri-connector setup. Walks `src-tauri/`, the
 frontend `package.json`, `.mcp.json`, and the runtime `.connector.json` PID
 file, then probes the WebSocket + MCP ports. Each missing piece is reported
-with a concrete Fix line. Exits non-zero when one or more required checks
-fail, so it works in CI.
+with a concrete Fix line, and `--json` includes a top-level `fixes` array for
+CI/reporting. Exits non-zero when one or more required checks fail.
 
 ```bash
 tauri-connector doctor                     # full checklist
@@ -491,5 +539,7 @@ What it verifies:
 - `app.withGlobalTauri: true` in `src-tauri/tauri.conf.json`
 - `@zumer/snapdom` in root `package.json` (any dependency bucket)
 - `.mcp.json` registers `tauri-connector`
-- `.connector.json` PID file + live WS ping + MCP TCP probe
+- `.connector.json` PID file + live WS ping + MCP Streamable HTTP initialize POST
+- PID liveness, runtime metadata/log_dir, JSONL log files, bridge status, runtime/artifact/debug WS commands
+- MCP Streamable HTTP lifecycle: initialize 200, notification 202 empty body, ping 200, GET /mcp 405, DELETE 204
 - `.claude/` auto-detect hook installation (optional)

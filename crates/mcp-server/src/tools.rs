@@ -68,6 +68,8 @@ pub fn tool_definitions() -> Value {
                         "reactEnrich": { "type": "boolean", "description": "Include React component names (default: true)" },
                         "followPortals": { "type": "boolean", "description": "Stitch portals to their triggers (default: true)" },
                         "shadowDom": { "type": "boolean", "description": "Traverse shadow DOM (default: false)" },
+                        "maxTokens": { "type": "number", "description": "Token budget for inline result (default 4000, 0 for unlimited)" },
+                        "noSplit": { "type": "boolean", "description": "Disable snapshot subtree splitting and return the full inline snapshot" },
                         "windowId": { "type": "string" }
                     }
                 })
@@ -107,17 +109,23 @@ pub fn tool_definitions() -> Value {
                 })
             ),
             tool_def("webview_interact",
-                "Perform gestures on elements. hover fires full pointer+mouse event sequence; hover-off fires leave events to dismiss dropdowns/tooltips",
+                "Perform gestures on elements. drag simulates drag-and-drop (pointer-based or HTML5 DnD with auto-detection); hover fires full pointer+mouse event sequence; hover-off fires leave events to dismiss dropdowns/tooltips",
                 json!({
                     "type": "object",
                     "properties": {
-                        "action": { "type": "string", "enum": ["click", "double-click", "dblclick", "focus", "scroll", "hover", "hover-off"] },
-                        "selector": { "type": "string" },
+                        "action": { "type": "string", "enum": ["click", "double-click", "dblclick", "focus", "scroll", "hover", "hover-off", "drag"] },
+                        "selector": { "type": "string", "description": "Source element (CSS selector, XPath, or text)" },
                         "strategy": { "type": "string", "enum": ["css", "xpath", "text"] },
-                        "x": { "type": "number" },
-                        "y": { "type": "number" },
+                        "x": { "type": "number", "description": "Source x coordinate (alternative to selector)" },
+                        "y": { "type": "number", "description": "Source y coordinate (alternative to selector)" },
                         "direction": { "type": "string", "enum": ["up", "down", "left", "right"] },
                         "distance": { "type": "number" },
+                        "targetSelector": { "type": "string", "description": "Drag target element (CSS selector). Required for drag." },
+                        "targetX": { "type": "number", "description": "Drag target x coordinate (alternative to targetSelector)" },
+                        "targetY": { "type": "number", "description": "Drag target y coordinate (alternative to targetSelector)" },
+                        "steps": { "type": "number", "description": "Number of intermediate move events for drag (default 10)" },
+                        "durationMs": { "type": "number", "description": "Total drag duration in ms (default 300)" },
+                        "dragStrategy": { "type": "string", "enum": ["auto", "pointer", "html5dnd"], "description": "Drag strategy: auto detects from element draggable attribute (default auto)" },
                         "windowId": { "type": "string" }
                     },
                     "required": ["action"]
@@ -243,11 +251,11 @@ pub fn tool_definitions() -> Value {
                 })
             ),
             tool_def("clear_logs",
-                "Clear log files. Specify source: console, ipc, events, or all.",
+                "Clear log files. Specify source: console, ipc, events, runtime, or all.",
                 json!({
                     "type": "object",
                     "properties": {
-                        "source": { "type": "string", "enum": ["console", "ipc", "events", "all"], "default": "all" }
+                        "source": { "type": "string", "enum": ["console", "ipc", "events", "runtime", "all"], "default": "all" }
                     }
                 })
             ),
@@ -256,7 +264,7 @@ pub fn tool_definitions() -> Value {
                 json!({
                     "type": "object",
                     "properties": {
-                        "source": { "type": "string", "enum": ["console", "ipc", "events"] },
+                        "source": { "type": "string", "enum": ["console", "ipc", "events", "runtime"] },
                         "lines": { "type": "number", "description": "Max entries from tail (default 100)" },
                         "level": { "type": "string", "description": "Level filter (console only)" },
                         "pattern": { "type": "string", "description": "Regex on serialized entry" },
@@ -288,6 +296,93 @@ pub fn tool_definitions() -> Value {
                         "since": { "type": "number", "description": "Epoch ms floor" }
                     }
                 })
+            ),
+            tool_def("runtime_get_captured",
+                "Retrieve captured frontend runtime failures: window errors, unhandled rejections, network failures, navigation, and resource errors.",
+                json!({ "type": "object", "properties": {
+                    "kind": { "type": "string" },
+                    "level": { "type": "string" },
+                    "pattern": { "type": "string" },
+                    "since": { "type": "number" },
+                    "sinceMark": { "type": "string" },
+                    "limit": { "type": "number" },
+                    "windowId": { "type": "string" }
+                } })
+            ),
+            tool_def("runtime_clear",
+                "Clear captured frontend runtime entries.",
+                json!({ "type": "object", "properties": {} })
+            ),
+            tool_def("artifact_list",
+                "List connector artifacts from the manifest registry.",
+                json!({ "type": "object", "properties": {
+                    "kind": { "type": "string" },
+                    "limit": { "type": "number" }
+                } })
+            ),
+            tool_def("artifact_read",
+                "Read an artifact by artifactId or path.",
+                json!({ "type": "object", "properties": {
+                    "artifact": { "type": "string" },
+                    "artifactId": { "type": "string" }
+                } })
+            ),
+            tool_def("artifact_compare",
+                "Compare two screenshot artifacts or paths. Refuses same-path comparisons.",
+                json!({ "type": "object", "properties": {
+                    "before": { "type": "string" },
+                    "after": { "type": "string" },
+                    "threshold": { "type": "number" }
+                }, "required": ["before", "after"] })
+            ),
+            tool_def("artifact_prune",
+                "Prune old artifact manifest entries and optionally delete artifact files.",
+                json!({ "type": "object", "properties": {
+                    "keep": { "type": "number" },
+                    "kind": { "type": "string" },
+                    "deleteFiles": { "type": "boolean" }
+                } })
+            ),
+            tool_def("debug_mark",
+                "Create a timestamp mark for later log/ipc/event/runtime filtering.",
+                json!({ "type": "object", "properties": {
+                    "label": { "type": "string" }
+                } })
+            ),
+            tool_def("debug_snapshot",
+                "Collect a bundled debug context: bridge/app state, DOM, screenshot, logs, IPC, events, and runtime captures.",
+                json!({ "type": "object", "properties": {
+                    "windowId": { "type": "string" },
+                    "includeDom": { "type": "boolean" },
+                    "includeScreenshot": { "type": "boolean" },
+                    "includeLogs": { "type": "boolean" },
+                    "includeIpc": { "type": "boolean" },
+                    "includeEvents": { "type": "boolean" },
+                    "includeRuntime": { "type": "boolean" },
+                    "since": { "type": "number" },
+                    "sinceMark": { "type": "string" },
+                    "maxTokens": { "type": "number" },
+                    "screenshotNameHint": { "type": "string" }
+                } })
+            ),
+            tool_def("webview_act_and_verify",
+                "Perform an action, wait for text/selector, and collect fresh debug evidence in one call.",
+                json!({ "type": "object", "properties": {
+                    "action": { "type": "string", "enum": ["click", "fill", "type", "press", "drag", "hover"] },
+                    "selector": { "type": "string" },
+                    "text": { "type": "string" },
+                    "key": { "type": "string" },
+                    "targetSelector": { "type": "string" },
+                    "waitForSelector": { "type": "string" },
+                    "waitForText": { "type": "string" },
+                    "timeout": { "type": "number" },
+                    "verifyDom": { "type": "boolean" },
+                    "verifyScreenshot": { "type": "boolean" },
+                    "includeLogs": { "type": "boolean" },
+                    "includeIpc": { "type": "boolean" },
+                    "includeRuntime": { "type": "boolean" },
+                    "windowId": { "type": "string" }
+                }, "required": ["action"] })
             ),
             tool_def("webview_search_snapshot",
                 "Search DOM snapshot with regex. Returns matched lines with context. Uses cached snapshot if fresh (<10s).",
@@ -355,6 +450,15 @@ pub async fn call_tool(
         "read_log_file" => handle_read_log_file(client, args).await,
         "ipc_listen" => handle_ipc_listen(client, args).await,
         "event_get_captured" => handle_event_get_captured(client, args).await,
+        "runtime_get_captured" => handle_runtime_get_captured(client, args).await,
+        "runtime_clear" => handle_clear_logs_source(client, "runtime").await,
+        "artifact_list" => handle_artifact_list(client, args).await,
+        "artifact_read" => handle_artifact_read(client, args).await,
+        "artifact_compare" => handle_artifact_compare(client, args).await,
+        "artifact_prune" => handle_artifact_prune(client, args).await,
+        "debug_mark" => handle_debug_mark(client, args).await,
+        "debug_snapshot" => handle_debug_snapshot(client, args).await,
+        "webview_act_and_verify" => handle_act_and_verify(client, args).await,
         "webview_search_snapshot" => handle_search_snapshot(client, args).await,
         "get_setup_instructions" => Ok(json!(SETUP_INSTRUCTIONS)),
         "list_devices" => handle_list_devices(host, port).await,
@@ -492,6 +596,12 @@ async fn handle_dom_snapshot(client: &mut ConnectorClient, args: &Value) -> Resu
     if let Some(v) = args.get("shadowDom").and_then(|v| v.as_bool()) {
         cmd["shadow_dom"] = json!(v);
     }
+    if let Some(v) = num_arg(args, "maxTokens") {
+        cmd["max_tokens"] = json!(v as u64);
+    }
+    if let Some(v) = args.get("noSplit").and_then(|v| v.as_bool()) {
+        cmd["no_split"] = json!(v);
+    }
     client.send(cmd).await
 }
 
@@ -555,6 +665,26 @@ async fn handle_interact(client: &mut ConnectorClient, args: &Value) -> Result<V
     }
     if let Some(v) = num_arg(args, "distance") {
         cmd["distance"] = json!(v);
+    }
+    if action == "drag" {
+        if let Some(s) = str_arg(args, "targetSelector") {
+            cmd["target_selector"] = json!(s);
+        }
+        if let Some(v) = num_arg(args, "targetX") {
+            cmd["target_x"] = json!(v);
+        }
+        if let Some(v) = num_arg(args, "targetY") {
+            cmd["target_y"] = json!(v);
+        }
+        if let Some(v) = num_arg(args, "steps") {
+            cmd["steps"] = json!(v as u32);
+        }
+        if let Some(v) = num_arg(args, "durationMs") {
+            cmd["duration_ms"] = json!(v as u32);
+        }
+        if let Some(s) = str_arg(args, "dragStrategy") {
+            cmd["drag_strategy"] = json!(s);
+        }
     }
     client.send(cmd).await
 }
@@ -682,6 +812,9 @@ async fn handle_ipc_get_captured(
     if let Some(s) = num_arg(args, "since") {
         cmd["since"] = json!(s as u64);
     }
+    if let Some(mark) = str_arg(args, "sinceMark") {
+        cmd["since_mark"] = json!(mark);
+    }
     client.send(cmd).await
 }
 
@@ -715,6 +848,13 @@ async fn handle_read_logs(client: &mut ConnectorClient, args: &Value) -> Result<
 
 async fn handle_clear_logs(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
     let source = str_arg(args, "source").unwrap_or_else(|| "all".to_string());
+    handle_clear_logs_source(client, &source).await
+}
+
+async fn handle_clear_logs_source(
+    client: &mut ConnectorClient,
+    source: &str,
+) -> Result<Value, String> {
     client
         .send(json!({ "type": "clear_logs", "source": source }))
         .await
@@ -763,7 +903,167 @@ async fn handle_event_get_captured(
     if let Some(s) = num_arg(args, "since") {
         cmd["since"] = json!(s as u64);
     }
+    if let Some(mark) = str_arg(args, "sinceMark") {
+        cmd["since_mark"] = json!(mark);
+    }
     client.send(cmd).await
+}
+
+async fn handle_runtime_get_captured(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
+    let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
+    let mut cmd = json!({ "type": "runtime_get_captured", "limit": limit });
+    for (in_key, out_key) in [
+        ("kind", "kind"),
+        ("level", "level"),
+        ("pattern", "pattern"),
+        ("windowId", "window_id"),
+    ] {
+        if let Some(v) = str_arg(args, in_key) {
+            cmd[out_key] = json!(v);
+        }
+    }
+    if let Some(s) = num_arg(args, "since") {
+        cmd["since"] = json!(s as u64);
+    }
+    if let Some(mark) = str_arg(args, "sinceMark") {
+        cmd["since_mark"] = json!(mark);
+    }
+    client.send(cmd).await
+}
+
+async fn handle_artifact_list(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+    let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
+    let mut cmd = json!({ "type": "artifact_list", "limit": limit });
+    if let Some(kind) = str_arg(args, "kind") {
+        cmd["kind"] = json!(kind);
+    }
+    client.send(cmd).await
+}
+
+async fn handle_artifact_read(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+    let artifact = str_arg(args, "artifact")
+        .or_else(|| str_arg(args, "artifactId"))
+        .ok_or("Missing 'artifact' parameter")?;
+    client
+        .send(json!({ "type": "artifact_read", "artifact": artifact }))
+        .await
+}
+
+async fn handle_artifact_compare(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
+    let before = str_arg(args, "before").ok_or("Missing 'before' parameter")?;
+    let after = str_arg(args, "after").ok_or("Missing 'after' parameter")?;
+    let threshold = num_arg(args, "threshold").unwrap_or(0.0);
+    client
+        .send(json!({
+            "type": "artifact_compare",
+            "before": before,
+            "after": after,
+            "threshold": threshold,
+        }))
+        .await
+}
+
+async fn handle_artifact_prune(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
+    let keep = num_arg(args, "keep").unwrap_or(50.0) as usize;
+    let mut cmd = json!({
+        "type": "artifact_prune",
+        "keep": keep,
+        "delete_files": args.get("deleteFiles").and_then(|v| v.as_bool()).unwrap_or(true),
+    });
+    if let Some(kind) = str_arg(args, "kind") {
+        cmd["kind"] = json!(kind);
+    }
+    client.send(cmd).await
+}
+
+async fn handle_debug_mark(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+    let mut cmd = json!({ "type": "debug_mark" });
+    if let Some(label) = str_arg(args, "label") {
+        cmd["label"] = json!(label);
+    }
+    client.send(cmd).await
+}
+
+async fn handle_debug_snapshot(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
+    let mut cmd = json!({
+        "type": "debug_snapshot",
+        "window_id": window_id(args),
+    });
+    for (in_key, out_key) in [
+        ("includeDom", "include_dom"),
+        ("includeScreenshot", "include_screenshot"),
+        ("includeLogs", "include_logs"),
+        ("includeIpc", "include_ipc"),
+        ("includeEvents", "include_events"),
+        ("includeRuntime", "include_runtime"),
+    ] {
+        if let Some(v) = args.get(in_key).and_then(|v| v.as_bool()) {
+            cmd[out_key] = json!(v);
+        }
+    }
+    if let Some(s) = num_arg(args, "since") {
+        cmd["since"] = json!(s as u64);
+    }
+    if let Some(s) = str_arg(args, "sinceMark") {
+        cmd["since_mark"] = json!(s);
+    }
+    if let Some(n) = num_arg(args, "maxTokens") {
+        cmd["max_tokens"] = json!(n as u64);
+    }
+    if let Some(s) = str_arg(args, "screenshotNameHint") {
+        cmd["screenshot_name_hint"] = json!(s);
+    }
+    client.send_with_timeout(cmd, 60_000).await
+}
+
+async fn handle_act_and_verify(
+    client: &mut ConnectorClient,
+    args: &Value,
+) -> Result<Value, String> {
+    let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
+    let mut cmd = json!({
+        "type": "webview_act_and_verify",
+        "action": action,
+        "window_id": window_id(args),
+    });
+    for (in_key, out_key) in [
+        ("selector", "selector"),
+        ("text", "text"),
+        ("key", "key"),
+        ("targetSelector", "target_selector"),
+        ("waitForSelector", "wait_for_selector"),
+        ("waitForText", "wait_for_text"),
+    ] {
+        if let Some(v) = str_arg(args, in_key) {
+            cmd[out_key] = json!(v);
+        }
+    }
+    for (in_key, out_key) in [
+        ("verifyDom", "verify_dom"),
+        ("verifyScreenshot", "verify_screenshot"),
+        ("includeLogs", "include_logs"),
+        ("includeIpc", "include_ipc"),
+        ("includeRuntime", "include_runtime"),
+    ] {
+        if let Some(v) = args.get(in_key).and_then(|v| v.as_bool()) {
+            cmd[out_key] = json!(v);
+        }
+    }
+    let timeout = num_arg(args, "timeout").unwrap_or(5000.0) as u64;
+    cmd["timeout"] = json!(timeout);
+    client.send_with_timeout(cmd, timeout + 60_000).await
 }
 
 async fn handle_search_snapshot(
@@ -816,7 +1116,7 @@ In your Tauri app's `src-tauri/Cargo.toml`:
 
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.9"
+tauri-plugin-connector = "0.11"
 ```
 
 ### 2. Register the plugin
@@ -865,3 +1165,78 @@ In `.mcp.json` (for Claude Code):
 The plugin will start a WebSocket server on port 9555 (or next available in range 9555-9655).
 The MCP server connects to this WebSocket to bridge Claude Code ↔ your Tauri app.
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool(name: &str) -> Value {
+        tool_definitions()["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing tool {name}"))
+    }
+
+    #[test]
+    fn interact_schema_contains_drag_args() {
+        let tool = tool("webview_interact");
+        let props = &tool["inputSchema"]["properties"];
+        assert!(props["action"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("drag")));
+        for key in [
+            "targetSelector",
+            "targetX",
+            "targetY",
+            "steps",
+            "durationMs",
+            "dragStrategy",
+        ] {
+            assert!(props.get(key).is_some(), "missing {key}");
+        }
+    }
+
+    #[test]
+    fn dom_snapshot_schema_contains_budget_args() {
+        let tool = tool("webview_dom_snapshot");
+        let props = &tool["inputSchema"]["properties"];
+        assert!(props.get("maxTokens").is_some());
+        assert!(props.get("noSplit").is_some());
+    }
+
+    #[test]
+    fn screenshot_schema_contains_artifact_args() {
+        let tool = tool("webview_screenshot");
+        let props = &tool["inputSchema"]["properties"];
+        for key in [
+            "save",
+            "outputDir",
+            "nameHint",
+            "overwrite",
+            "selector",
+            "windowId",
+        ] {
+            assert!(props.get(key).is_some(), "missing {key}");
+        }
+    }
+
+    #[test]
+    fn runtime_schema_contains_since_mark_and_window() {
+        let tool = tool("runtime_get_captured");
+        let props = &tool["inputSchema"]["properties"];
+        assert!(props.get("sinceMark").is_some());
+        assert!(props.get("windowId").is_some());
+    }
+
+    #[test]
+    fn artifact_schema_contains_prune_tool() {
+        let tool = tool("artifact_prune");
+        let props = &tool["inputSchema"]["properties"];
+        assert!(props.get("keep").is_some());
+        assert!(props.get("deleteFiles").is_some());
+    }
+}

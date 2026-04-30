@@ -1,6 +1,5 @@
 //! tauri-connector CLI — interact with Tauri apps from the terminal.
 
-use std::fs;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -13,25 +12,7 @@ mod hook;
 mod snapshot;
 mod update;
 
-use snapshot::RefMap;
-
 const DEFAULT_HOST: &str = "127.0.0.1";
-fn ref_cache_path() -> PathBuf {
-    std::env::temp_dir().join("tauri-connector-refs.json")
-}
-
-fn load_refs() -> RefMap {
-    fs::read_to_string(ref_cache_path())
-        .ok()
-        .and_then(|data| serde_json::from_str(&data).ok())
-        .unwrap_or_default()
-}
-
-fn save_refs(refs: &RefMap) {
-    if let Ok(json) = serde_json::to_string(refs) {
-        let _ = fs::write(ref_cache_path(), json);
-    }
-}
 
 #[derive(Parser)]
 #[command(
@@ -52,6 +33,9 @@ struct Cli {
     /// Explicit path to .connector.json
     #[arg(long, global = true)]
     pid_file: Option<PathBuf>,
+    /// Target Tauri window label
+    #[arg(long, global = true, default_value = "main")]
+    window_id: String,
     #[command(subcommand)]
     command: Commands,
 }
@@ -188,6 +172,9 @@ enum Commands {
     Screenshot {
         /// Output file path (e.g. /tmp/shot.png)
         output: Option<String>,
+        /// CSS selector or @ref for an element-scoped screenshot
+        #[arg(short, long)]
+        selector: Option<String>,
         /// Image format: png, jpeg, webp
         #[arg(short, long, default_value = "png")]
         format: String,
@@ -208,11 +195,7 @@ enum Commands {
         name_hint: Option<String>,
     },
     /// Get cached DOM snapshot (pushed from frontend)
-    Dom {
-        /// Window ID
-        #[arg(long, default_value = "main")]
-        window_id: String,
-    },
+    Dom,
     /// Find elements by CSS selector, XPath, or text
     Find {
         /// Selector or text to search for
@@ -229,9 +212,6 @@ enum Commands {
         width: u32,
         /// Height in pixels
         height: u32,
-        /// Window ID
-        #[arg(long, default_value = "main")]
-        window_id: String,
     },
     /// Execute a Tauri IPC command via invoke()
     Ipc {
@@ -253,8 +233,78 @@ enum Commands {
     },
     /// Clear log files
     Clear {
-        /// What to clear: logs, ipc, events, all
+        /// What to clear: logs, ipc, events, runtime, all
         target: String,
+    },
+    /// Show captured frontend runtime failures and navigation/network events
+    Runtime {
+        /// Number of entries
+        #[arg(short = 'n', long, default_value_t = 100)]
+        lines: usize,
+        /// Runtime kind filter: network, window_error, unhandledrejection, navigation, resource_error
+        #[arg(short, long)]
+        kind: Option<String>,
+        /// Level filter: error, warn, info
+        #[arg(short, long)]
+        level: Option<String>,
+        /// Regex pattern to match
+        #[arg(short, long)]
+        pattern: Option<String>,
+        /// Only entries since this timestamp (epoch ms)
+        #[arg(long)]
+        since: Option<u64>,
+        /// Only entries since a debug mark
+        #[arg(long)]
+        since_mark: Option<String>,
+    },
+    /// Manage screenshot and diff artifacts
+    Artifacts {
+        #[command(subcommand)]
+        action: ArtifactCommands,
+    },
+    /// Capture high-level debug context
+    Debug {
+        #[command(subcommand)]
+        action: DebugCommands,
+    },
+    /// Perform one action and collect verification context
+    Act {
+        /// Action: click, fill, type, press, drag, hover
+        action: String,
+        /// Selector, @ref, or key for press
+        target: Option<String>,
+        /// Text for fill/type
+        text: Vec<String>,
+        /// Explicit key for press
+        #[arg(long)]
+        key: Option<String>,
+        /// Drag target selector/@ref
+        #[arg(long)]
+        target_selector: Option<String>,
+        /// Wait for selector after the action
+        #[arg(long)]
+        wait_selector: Option<String>,
+        /// Wait for text after the action
+        #[arg(long)]
+        wait_text: Option<String>,
+        /// Wait timeout in milliseconds
+        #[arg(long, default_value_t = 5000)]
+        timeout: u64,
+        /// Include DOM snapshot in verification
+        #[arg(long)]
+        dom: bool,
+        /// Include screenshot artifact in verification
+        #[arg(long)]
+        screenshot: bool,
+        /// Include console log diff
+        #[arg(long)]
+        logs: bool,
+        /// Include IPC diff
+        #[arg(long)]
+        ipc: bool,
+        /// Include runtime capture diff
+        #[arg(long)]
+        runtime: bool,
     },
     /// App backend state
     State,
@@ -307,6 +357,91 @@ enum SnapshotActions {
         uuid: String,
         /// Subtree filename (e.g. subtree-0.txt). Defaults to layout.txt
         file: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ArtifactCommands {
+    /// List recent artifacts
+    List {
+        /// Artifact kind filter, e.g. screenshot
+        #[arg(long)]
+        kind: Option<String>,
+        /// Max entries to return
+        #[arg(short, long, default_value_t = 100)]
+        limit: usize,
+    },
+    /// Show artifact metadata, optionally including base64 content
+    Show {
+        /// Artifact ID or path
+        artifact: String,
+        /// Include base64 payload
+        #[arg(long)]
+        base64: bool,
+    },
+    /// Remove old artifacts from the manifest and disk
+    Prune {
+        /// Number of newest artifacts to keep
+        #[arg(long, default_value_t = 50)]
+        keep: usize,
+        /// Artifact kind filter, e.g. screenshot
+        #[arg(long)]
+        kind: Option<String>,
+        /// Only rewrite the manifest; do not delete files
+        #[arg(long)]
+        manifest_only: bool,
+    },
+    /// Compare two artifacts or file paths
+    Compare {
+        /// Before artifact ID or path
+        before: String,
+        /// After artifact ID or path
+        after: String,
+        /// Maximum allowed difference ratio
+        #[arg(long, default_value_t = 0.0)]
+        threshold: f64,
+    },
+}
+
+#[derive(Subcommand)]
+enum DebugCommands {
+    /// Create a timestamp mark for later diff filters
+    Mark {
+        /// Optional label
+        label: Option<String>,
+    },
+    /// Capture a high-level debug snapshot
+    Snapshot {
+        /// Include DOM snapshot
+        #[arg(long)]
+        dom: bool,
+        /// Include screenshot artifact
+        #[arg(long)]
+        screenshot: bool,
+        /// Include console logs
+        #[arg(long)]
+        logs: bool,
+        /// Include IPC captures
+        #[arg(long)]
+        ipc: bool,
+        /// Include Tauri event captures
+        #[arg(long)]
+        events: bool,
+        /// Include runtime captures
+        #[arg(long)]
+        runtime: bool,
+        /// Only captures since this timestamp (epoch ms)
+        #[arg(long)]
+        since: Option<u64>,
+        /// Only captures since a debug mark
+        #[arg(long)]
+        since_mark: Option<String>,
+        /// Max tokens for DOM snapshot
+        #[arg(long)]
+        max_tokens: Option<u64>,
+        /// Name hint for screenshot artifact
+        #[arg(long)]
+        screenshot_name_hint: Option<String>,
     },
 }
 
@@ -375,6 +510,7 @@ enum EventCommands {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    commands::set_window_id(cli.window_id.clone());
     let connection_options = ConnectionOptions {
         cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         host: cli.host.clone(),
@@ -513,7 +649,13 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let mut refs = load_refs();
+    let refs = match snapshot::load_ref_cache(&resolved, &cli.window_id) {
+        Ok(refs) => refs,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let result = match cli.command {
         Commands::Snapshot {
@@ -544,9 +686,11 @@ async fn main() {
             .await
             {
                 Ok(new_refs) => {
-                    refs = new_refs;
-                    save_refs(&refs);
-                    Ok(())
+                    if let Err(e) = snapshot::save_ref_cache(&resolved, &cli.window_id, new_refs) {
+                        Err(e)
+                    } else {
+                        Ok(())
+                    }
                 }
                 Err(e) => Err(e),
             }
@@ -610,6 +754,7 @@ async fn main() {
         }
         Commands::Screenshot {
             output,
+            selector,
             format,
             quality,
             max_width,
@@ -621,6 +766,7 @@ async fn main() {
             commands::screenshot(
                 &client,
                 output.as_deref(),
+                selector.as_deref(),
                 &format,
                 quality,
                 max_width,
@@ -631,16 +777,14 @@ async fn main() {
             )
             .await
         }
-        Commands::Dom { window_id } => commands::cached_dom(&client, &window_id).await,
+        Commands::Dom => commands::cached_dom(&client, &cli.window_id).await,
         Commands::Find { selector, strategy } => {
             commands::find(&client, &selector, &strategy).await
         }
         Commands::Pointed => commands::pointed(&client).await,
-        Commands::Resize {
-            width,
-            height,
-            window_id,
-        } => commands::resize(&client, &window_id, width, height).await,
+        Commands::Resize { width, height } => {
+            commands::resize(&client, &cli.window_id, width, height).await
+        }
         Commands::Ipc { action } => match action {
             IpcCommands::Exec { command, args } => {
                 commands::ipc_exec(&client, &command, args.as_deref()).await
@@ -670,6 +814,123 @@ async fn main() {
             EventCommands::Stop => commands::event_stop(&client).await,
         },
         Commands::Clear { target } => commands::clear_logs(&client, &target).await,
+        Commands::Runtime {
+            lines,
+            kind,
+            level,
+            pattern,
+            since,
+            since_mark,
+        } => {
+            commands::runtime(
+                &client,
+                lines,
+                kind.as_deref(),
+                level.as_deref(),
+                pattern.as_deref(),
+                since,
+                since_mark.as_deref(),
+                &cli.window_id,
+            )
+            .await
+        }
+        Commands::Artifacts { action } => match action {
+            ArtifactCommands::List { kind, limit } => {
+                commands::artifacts_list(&client, kind.as_deref(), limit).await
+            }
+            ArtifactCommands::Show { artifact, base64 } => {
+                commands::artifact_show(&client, &artifact, base64).await
+            }
+            ArtifactCommands::Prune {
+                keep,
+                kind,
+                manifest_only,
+            } => commands::artifact_prune(&client, keep, kind.as_deref(), !manifest_only).await,
+            ArtifactCommands::Compare {
+                before,
+                after,
+                threshold,
+            } => commands::artifact_compare(&client, &before, &after, threshold).await,
+        },
+        Commands::Debug { action } => match action {
+            DebugCommands::Mark { label } => commands::debug_mark(&client, label.as_deref()).await,
+            DebugCommands::Snapshot {
+                dom,
+                screenshot,
+                logs,
+                ipc,
+                events,
+                runtime,
+                since,
+                since_mark,
+                max_tokens,
+                screenshot_name_hint,
+            } => {
+                commands::debug_snapshot(
+                    &client,
+                    &cli.window_id,
+                    dom,
+                    screenshot,
+                    logs,
+                    ipc,
+                    events,
+                    runtime,
+                    since,
+                    since_mark.as_deref(),
+                    max_tokens,
+                    screenshot_name_hint.as_deref(),
+                )
+                .await
+            }
+        },
+        Commands::Act {
+            action,
+            target,
+            text,
+            key,
+            target_selector,
+            wait_selector,
+            wait_text,
+            timeout,
+            dom,
+            screenshot,
+            logs,
+            ipc,
+            runtime,
+        } => {
+            let action_key = if action == "press" {
+                key.as_deref().or(target.as_deref())
+            } else {
+                key.as_deref()
+            };
+            let action_text = if text.is_empty() {
+                None
+            } else {
+                Some(text.join(" "))
+            };
+            commands::act_and_verify(
+                &client,
+                &action,
+                if action == "press" {
+                    None
+                } else {
+                    target.as_deref()
+                },
+                action_text.as_deref(),
+                action_key,
+                target_selector.as_deref(),
+                wait_selector.as_deref(),
+                wait_text.as_deref(),
+                timeout,
+                dom,
+                screenshot,
+                logs,
+                ipc,
+                runtime,
+                &cli.window_id,
+            )
+            .await
+        }
         Commands::State => commands::state(&client).await,
         Commands::Status { .. } => unreachable!(),
         Commands::Bridge => commands::bridge_status(&client).await,
@@ -753,7 +1014,19 @@ WAIT:
   wait --text "Success"              Wait for text
 
 SCREENSHOT:
-  screenshot <path> [-f png|jpeg|webp] [-q 80] [-m 1280]
+  screenshot [path] [--selector @eN] [-f png|jpeg|webp] [-q 80] [-m 1280]
+
+ARTIFACTS:
+  artifacts list [--kind screenshot]  List artifact manifest entries
+  artifacts show <id|path>            Show artifact metadata
+  artifacts compare <before> <after>  Compare two artifacts or paths
+  artifacts prune --keep 50           Prune older artifacts
+
+DEBUG:
+  debug mark [label]                 Create a timestamp mark
+  debug snapshot [--dom --logs]      Collect bundled debug context
+  act click @e5 --wait-text Success  Act, wait, and collect fresh evidence
+  runtime [-n 100] [-l error]        Captured runtime failures/navigation/network
 
 DOM:
   dom                                Cached DOM (pushed from frontend)
@@ -776,6 +1049,7 @@ IPC:
 OTHER:
   eval <js-expression>               Execute JavaScript
   logs [-n 20] [-f "filter"]         Console logs
+  clear logs|ipc|events|runtime|all  Clear persisted captures
   state                              App metadata
   doctor [--json] [--no-runtime]     Diagnose current project setup
   help                               This help
@@ -784,7 +1058,8 @@ EXAMPLES:
   tauri-connector snapshot -i -c
   tauri-connector click @e7
   tauri-connector fill @e5 "user@example.com"
-  tauri-connector screenshot /tmp/shot.png -m 1280
+  tauri-connector screenshot --name-hint debug -m 1280
+  tauri-connector act click @e7 --wait-text Success --logs --ipc --runtime
   tauri-connector drag @e3 @e7 --steps 15 --duration 500
   tauri-connector drag "#item" ".drop-zone" --strategy pointer
   tauri-connector find "Submit" -s text

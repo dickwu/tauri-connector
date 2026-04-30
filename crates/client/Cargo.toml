@@ -1,6 +1,6 @@
 [package]
 name = "connector-client"
-version = "0.10.2"
+version = "0.11.0"
 edition = "2021"
 description = "Shared WebSocket client for tauri-plugin-connector"
 license = "MIT"

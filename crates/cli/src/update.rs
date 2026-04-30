@@ -3,8 +3,7 @@
 use serde::Deserialize;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const RELEASES_URL: &str =
-    "https://api.github.com/repos/dickwu/tauri-connector/releases/latest";
+const RELEASES_URL: &str = "https://api.github.com/repos/dickwu/tauri-connector/releases/latest";
 
 #[derive(Deserialize)]
 struct Release {
@@ -73,7 +72,10 @@ pub async fn run(check_only: bool) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to parse release: {e}"))?;
 
-    let latest = release.tag_name.strip_prefix('v').unwrap_or(&release.tag_name);
+    let latest = release
+        .tag_name
+        .strip_prefix('v')
+        .unwrap_or(&release.tag_name);
     eprintln!("Latest version:  {latest}");
 
     if !is_newer(CURRENT_VERSION, latest) {
@@ -117,19 +119,17 @@ pub async fn run(check_only: bool) -> Result<(), String> {
     // On Windows: rename current to .old.exe, write new
     let backup = current_exe.with_extension("old");
     if backup.exists() {
-        std::fs::remove_file(&backup)
-            .map_err(|e| format!("Failed to remove old backup: {e}"))?;
+        std::fs::remove_file(&backup).map_err(|e| format!("Failed to remove old backup: {e}"))?;
     }
 
     std::fs::rename(&current_exe, &backup)
         .map_err(|e| format!("Failed to backup current binary: {e}"))?;
 
-    std::fs::write(&current_exe, &bytes)
-        .map_err(|e| {
-            // Restore backup on failure
-            let _ = std::fs::rename(&backup, &current_exe);
-            format!("Failed to write new binary: {e}")
-        })?;
+    std::fs::write(&current_exe, &bytes).map_err(|e| {
+        // Restore backup on failure
+        let _ = std::fs::rename(&backup, &current_exe);
+        format!("Failed to write new binary: {e}")
+    })?;
 
     // Set executable permission on Unix
     #[cfg(unix)]

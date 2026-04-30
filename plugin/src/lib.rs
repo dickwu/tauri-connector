@@ -40,7 +40,7 @@ mod state;
 
 use bridge::Bridge;
 use server::Server;
-use state::{DomEntry, EventEntry, IpcEvent, LogEntry, PluginState};
+use state::{DomEntry, EventEntry, IpcEvent, LogEntry, PluginState, RuntimeEntry};
 
 const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1";
 const DEFAULT_PORT_RANGE: (u16, u16) = (9555, 9655);
@@ -201,6 +201,35 @@ async fn push_event(app: AppHandle, payload: PushEventPayload) -> Result<(), Str
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushRuntimePayload {
+    kind: String,
+    level: String,
+    message: String,
+    timestamp: u64,
+    #[serde(default = "default_main")]
+    window_id: String,
+    #[serde(default)]
+    data: serde_json::Value,
+}
+
+#[tauri::command]
+async fn push_runtime(app: AppHandle, payload: PushRuntimePayload) -> Result<(), String> {
+    let state = app.state::<PluginState>();
+    state
+        .push_runtime(RuntimeEntry {
+            kind: payload.kind,
+            level: payload.level,
+            message: payload.message,
+            timestamp: payload.timestamp,
+            window_id: payload.window_id,
+            data: payload.data,
+        })
+        .await;
+    Ok(())
+}
+
 // ============ Plugin Builder ============
 
 /// Plugin builder with configuration options.
@@ -244,7 +273,7 @@ impl ConnectorBuilder {
         }
     }
 
-    /// Set the port range for the embedded MCP SSE server. Default: 9556-9656.
+    /// Set the port range for the embedded MCP HTTP server. Default: 9556-9656.
     pub fn mcp_port_range(self, start: u16, end: u16) -> Self {
         Self {
             mcp_port_range: (start, end),
@@ -274,6 +303,7 @@ impl ConnectorBuilder {
                 set_pointed_element,
                 push_ipc_event,
                 push_event,
+                push_runtime,
             ])
             .setup(move |app, _api| {
                 if bind_address == "0.0.0.0" || bind_address == "::" {
@@ -334,7 +364,7 @@ impl ConnectorBuilder {
                         Some(handle.clone()),
                     ));
 
-                    // 5. Start embedded MCP SSE server (if enabled)
+                    // 5. Start embedded MCP HTTP server (if enabled)
                     let mut mcp_port_actual: Option<u16> = None;
                     if mcp_enabled {
                         match mcp::start(

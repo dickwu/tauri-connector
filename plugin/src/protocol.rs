@@ -117,6 +117,18 @@ pub enum Command {
         direction: Option<String>,
         #[serde(default)]
         distance: Option<f64>,
+        #[serde(default, alias = "targetSelector")]
+        target_selector: Option<String>,
+        #[serde(default, alias = "targetX")]
+        target_x: Option<f64>,
+        #[serde(default, alias = "targetY")]
+        target_y: Option<f64>,
+        #[serde(default)]
+        steps: Option<u32>,
+        #[serde(default, alias = "durationMs")]
+        duration_ms: Option<u32>,
+        #[serde(default, alias = "dragStrategy")]
+        drag_strategy: Option<String>,
         #[serde(default = "default_window")]
         window_id: String,
     },
@@ -233,6 +245,108 @@ pub enum Command {
         since: Option<u64>,
     },
 
+    // --- Runtime Capture ---
+    RuntimeGetCaptured {
+        #[serde(default)]
+        kind: Option<String>,
+        #[serde(default)]
+        level: Option<String>,
+        #[serde(default)]
+        pattern: Option<String>,
+        #[serde(default)]
+        since: Option<u64>,
+        #[serde(default)]
+        since_mark: Option<String>,
+        #[serde(default = "default_ipc_limit")]
+        limit: usize,
+        #[serde(default)]
+        window_id: Option<String>,
+    },
+
+    // --- Artifacts ---
+    ArtifactList {
+        #[serde(default)]
+        kind: Option<String>,
+        #[serde(default = "default_ipc_limit")]
+        limit: usize,
+    },
+    ArtifactRead {
+        artifact: String,
+    },
+    ArtifactCompare {
+        before: String,
+        after: String,
+        #[serde(default = "default_threshold")]
+        threshold: f64,
+    },
+    ArtifactPrune {
+        #[serde(default = "default_artifact_keep")]
+        keep: usize,
+        #[serde(default)]
+        kind: Option<String>,
+        #[serde(default = "default_true")]
+        delete_files: bool,
+    },
+
+    // --- Debug ---
+    DebugMark {
+        #[serde(default)]
+        label: Option<String>,
+    },
+    DebugSnapshot {
+        #[serde(default = "default_window")]
+        window_id: String,
+        #[serde(default)]
+        include_dom: bool,
+        #[serde(default)]
+        include_screenshot: bool,
+        #[serde(default)]
+        include_logs: bool,
+        #[serde(default)]
+        include_ipc: bool,
+        #[serde(default)]
+        include_events: bool,
+        #[serde(default)]
+        include_runtime: bool,
+        #[serde(default)]
+        since: Option<u64>,
+        #[serde(default)]
+        since_mark: Option<String>,
+        #[serde(default)]
+        max_tokens: Option<u64>,
+        #[serde(default)]
+        screenshot_name_hint: Option<String>,
+    },
+    WebviewActAndVerify {
+        action: String,
+        #[serde(default)]
+        selector: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        key: Option<String>,
+        #[serde(default)]
+        target_selector: Option<String>,
+        #[serde(default)]
+        wait_for_selector: Option<String>,
+        #[serde(default)]
+        wait_for_text: Option<String>,
+        #[serde(default = "default_timeout")]
+        timeout: u64,
+        #[serde(default)]
+        verify_dom: bool,
+        #[serde(default)]
+        verify_screenshot: bool,
+        #[serde(default)]
+        include_logs: bool,
+        #[serde(default)]
+        include_ipc: bool,
+        #[serde(default)]
+        include_runtime: bool,
+        #[serde(default = "default_window")]
+        window_id: String,
+    },
+
     // --- Search ---
     SearchSnapshot {
         pattern: String,
@@ -280,6 +394,15 @@ fn default_context() -> usize {
 }
 fn default_snapshot_mode() -> String {
     "ai".to_string()
+}
+fn default_threshold() -> f64 {
+    0.0
+}
+fn default_artifact_keep() -> usize {
+    50
+}
+fn default_true() -> bool {
+    true
 }
 
 /// Response sent back to MCP server.

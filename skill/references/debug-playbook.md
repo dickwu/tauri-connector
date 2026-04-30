@@ -1,6 +1,30 @@
 # Debug Playbook
 
-Step-by-step recipes for debugging common Tauri app issues. Each recipe follows the Snapshot -> Act -> Verify pattern and shows both MCP and CLI commands.
+Step-by-step recipes for debugging common Tauri app issues. Prefer the high-level debug tools first, then fall back to the manual Snapshot -> Act -> Verify pattern when you need finer control.
+
+## First Move: Capture a Bundled Debug Snapshot
+
+Use this before individual probing unless you already know the failing surface.
+
+```bash
+# MCP
+debug_snapshot(includeDom: true, includeLogs: true, includeRuntime: true, includeScreenshot: true)
+
+# CLI
+tauri-connector debug snapshot --dom --logs --runtime --screenshot
+```
+
+For actions, use one call to mark, act, wait, and collect fresh evidence:
+
+```bash
+# MCP
+webview_act_and_verify(action: "click", selector: "@e5", waitForText: "Success", includeLogs: true, includeIpc: true, includeRuntime: true, verifyScreenshot: true)
+
+# CLI
+tauri-connector act click @e5 --wait-text Success --logs --ipc --runtime --screenshot
+```
+
+Manual recipes below remain useful when the high-level verdict is inconclusive.
 
 ---
 
@@ -32,8 +56,8 @@ tauri-connector eval "JSON.stringify({url:location.href,state:document.readyStat
 
 **Step 4: Screenshot for visual evidence**
 ```bash
-webview_screenshot(format: "png", maxWidth: 1280)
-tauri-connector screenshot /tmp/blank-screen.png
+webview_screenshot(format: "png", maxWidth: 1280, save: true, nameHint: "blank-screen")
+tauri-connector screenshot --name-hint blank-screen
 ```
 
 **Common causes:**
@@ -48,25 +72,33 @@ tauri-connector screenshot /tmp/blank-screen.png
 
 A button or action in the UI has no visible effect.
 
-**Step 1: Snapshot and identify the element**
+**Step 1: Try the one-call flow**
+```bash
+webview_act_and_verify(action: "click", selector: "@e5", waitForText: "Success", includeLogs: true, includeIpc: true, includeRuntime: true, verifyDom: true)
+tauri-connector act click @e5 --wait-text Success --logs --ipc --runtime --dom
+```
+
+If the selector/ref is not known yet, continue with the manual flow.
+
+**Step 2: Snapshot and identify the element**
 ```bash
 webview_dom_snapshot(mode: "ai")
 tauri-connector snapshot -i
 ```
 
-**Step 2: Start IPC monitoring before clicking**
+**Step 3: Start IPC monitoring before clicking**
 ```bash
 ipc_monitor(action: "start")
 tauri-connector ipc monitor
 ```
 
-**Step 3: Click the button**
+**Step 4: Click the button**
 ```bash
 webview_interact(action: "click", selector: "@e5")
 tauri-connector click @e5
 ```
 
-**Step 4: Check what happened**
+**Step 5: Check what happened**
 ```bash
 # Did an IPC call fire?
 ipc_get_captured(limit: 10)
@@ -76,12 +108,16 @@ tauri-connector ipc captured -l 10
 read_logs(level: "error,warn", lines: 10)
 tauri-connector logs -l error,warn -n 10
 
+# Any runtime failures?
+runtime_get_captured(level: "error", limit: 10)
+tauri-connector runtime -l error -n 10
+
 # Did the DOM change?
 webview_dom_snapshot(mode: "ai")
 tauri-connector snapshot -i
 ```
 
-**Step 5: Clean up**
+**Step 6: Clean up**
 ```bash
 ipc_monitor(action: "stop")
 ```

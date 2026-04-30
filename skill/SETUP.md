@@ -40,7 +40,7 @@ In `src-tauri/Cargo.toml`, add the dep as `optional` and declare a `dev-connecto
 ```toml
 [dependencies]
 # ...
-tauri-plugin-connector = { version = "0.10", optional = true }
+tauri-plugin-connector = { version = "0.11", optional = true }
 
 [features]
 default = []
@@ -50,7 +50,7 @@ dev-connector = ["dep:tauri-plugin-connector"]
 > Mobile gotcha: if you also build for Android/iOS, scope the dep to desktop only:
 > ```toml
 > [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-> tauri-plugin-connector = { version = "0.10", optional = true }
+> tauri-plugin-connector = { version = "0.11", optional = true }
 > ```
 
 ### Alternative (legacy)
@@ -59,7 +59,7 @@ If `tauri-plugin-connector` is already a plain dependency, leave it; the legacy 
 
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.10"
+tauri-plugin-connector = "0.11"
 ```
 
 ## Step 2: Register the plugin
@@ -222,7 +222,7 @@ The PID file enables the Rust CLI, standalone MCP server, and bun scripts to aut
 For a one-shot health check of the entire setup, run `tauri-connector doctor` in the project root. It auto-detects the active pattern and emits pattern-specific rows. Under the feature-gated pattern, expect:
 
 ```
-✓ Cargo dependency: tauri-plugin-connector = "0.10" (optional, feature-gated)
+✓ Cargo dependency: tauri-plugin-connector = "0.11" (optional, feature-gated)
 ✓ Plugin registered in src-tauri/src/lib.rs (cfg(feature = "dev-connector"))
 ✓ Permission "connector:default" in src-tauri/capabilities-dev/dev-connector.json
 ✓ [features] dev-connector = ["dep:tauri-plugin-connector"]

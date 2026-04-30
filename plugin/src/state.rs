@@ -89,6 +89,17 @@ pub struct EventEntry {
     pub window_id: String,
 }
 
+/// A captured frontend runtime event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeEntry {
+    pub kind: String,
+    pub level: String,
+    pub message: String,
+    pub timestamp: u64,
+    pub window_id: String,
+    pub data: serde_json::Value,
+}
+
 /// Shared mutable state for the plugin.
 #[derive(Clone)]
 pub struct PluginState {
@@ -99,7 +110,9 @@ pub struct PluginState {
     pub console_writer: Arc<Mutex<BufWriter<File>>>,
     pub ipc_writer: Arc<Mutex<BufWriter<File>>>,
     pub event_writer: Arc<Mutex<BufWriter<File>>>,
+    pub runtime_writer: Arc<Mutex<BufWriter<File>>>,
     pub event_listeners: Arc<Mutex<Vec<String>>>,
+    pub debug_marks: Arc<Mutex<HashMap<String, u64>>>,
     pub snapshot_prune_lock: Arc<std::sync::Mutex<()>>,
 }
 
@@ -119,6 +132,7 @@ impl PluginState {
         let console_file = open_append("console.log")?;
         let ipc_file = open_append("ipc.log")?;
         let event_file = open_append("events.log")?;
+        let runtime_file = open_append("runtime.log")?;
 
         Ok(Self {
             dom_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -128,7 +142,9 @@ impl PluginState {
             console_writer: Arc::new(Mutex::new(BufWriter::new(console_file))),
             ipc_writer: Arc::new(Mutex::new(BufWriter::new(ipc_file))),
             event_writer: Arc::new(Mutex::new(BufWriter::new(event_file))),
+            runtime_writer: Arc::new(Mutex::new(BufWriter::new(runtime_file))),
             event_listeners: Arc::new(Mutex::new(Vec::new())),
+            debug_marks: Arc::new(Mutex::new(HashMap::new())),
             snapshot_prune_lock: Arc::new(std::sync::Mutex::new(())),
         })
     }
@@ -163,6 +179,14 @@ impl PluginState {
 
     pub async fn push_event(&self, entry: EventEntry) {
         let mut writer = self.event_writer.lock().await;
+        if let Ok(json) = serde_json::to_string(&entry) {
+            let _ = writeln!(*writer, "{json}");
+        }
+        let _ = writer.flush();
+    }
+
+    pub async fn push_runtime(&self, entry: RuntimeEntry) {
+        let mut writer = self.runtime_writer.lock().await;
         if let Ok(json) = serde_json::to_string(&entry) {
             let _ = writeln!(*writer, "{json}");
         }

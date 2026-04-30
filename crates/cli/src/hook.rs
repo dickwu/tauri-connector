@@ -66,8 +66,7 @@ fn settings_path() -> PathBuf {
 /// Install the auto-detect hook into the current project.
 pub fn install() -> Result<(), String> {
     let dir = hooks_dir();
-    fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create {}: {e}", dir.display()))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create {}: {e}", dir.display()))?;
 
     // Write hook script
     let script = script_path();

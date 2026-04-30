@@ -84,7 +84,7 @@ Get a structured DOM tree. The `ai` mode includes ref IDs, React component names
   "meta": {
     "split": true,
     "snapshotId": "<uuid>",
-    "allRefsPath": "<tmp>/tauri-connector-<pid>/snapshots/<uuid>/refs.json",
+    "allRefsPath": "<log_dir>/snapshots/<snapshotId>/refs.json",
     "subtreeFiles": [
       { "name": "subtree-0.txt", "label": "main>ul", "path": "...", "estimatedTokens": 3200 }
     ]
@@ -271,12 +271,12 @@ Read historical logs from JSONL files (persisted across app restarts).
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `source` | string | yes | | `console`, `ipc`, `events` |
+| `source` | string | yes | | `console`, `ipc`, `events`, `runtime` |
 | `lines` | number | | 50 | Number of entries |
 | `level` | string | | | Level filter (console only): `log`, `info`, `warn`, `error`, `debug` |
 | `pattern` | string | | | Regex match |
 | `since` | number | | | Epoch ms filter |
-| `windowId` | string | | | Window filter (console only) |
+| `windowId` | string | | | Window filter (console/runtime) |
 
 ### clear_logs
 
@@ -284,7 +284,117 @@ Clear log files.
 
 | Param | Type | Required | Description |
 |---|---|---|---|
-| `source` | string | yes | `console`, `ipc`, `events`, `all` |
+| `source` | string | yes | `console`, `ipc`, `events`, `runtime`, `all` |
+
+### runtime_get_captured
+
+Read runtime-level frontend captures from `runtime.log`.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `kind` | string | | Comma-separated kinds: `window_error`, `unhandledrejection`, `network`, `navigation`, `resource_error` |
+| `level` | string | | Comma-separated levels: `error`, `warn`, `info` |
+| `pattern` | string | | Regex match on serialized entry |
+| `since` | number | | Epoch ms filter |
+| `sinceMark` | string | | Debug mark id from `debug_mark` |
+| `limit` | number | 100 | Max entries |
+| `windowId` | string | | Target window |
+
+### runtime_clear
+
+Clear `runtime.log`. No parameters.
+
+---
+
+## Artifact Tools
+
+### artifact_list
+
+List artifact metadata from `<log_dir>/artifacts/manifest.jsonl`.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `kind` | string | | Filter by artifact kind, e.g. `screenshot` |
+| `limit` | number | 100 | Max entries |
+
+### artifact_read
+
+Read an artifact by id or path.
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `artifact` | string | yes | Artifact id or path |
+| `artifactId` | string | | Alias for `artifact` |
+
+### artifact_compare
+
+Compare two artifacts or paths. Same-path comparisons are rejected.
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `before` | string | yes | Before artifact id or path |
+| `after` | string | yes | After artifact id or path |
+| `threshold` | number | | Maximum allowed difference ratio |
+
+### artifact_prune
+
+Prune older manifest entries and optionally delete files.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `keep` | number | 50 | Newest matching artifacts to keep |
+| `kind` | string | | Optional kind filter |
+| `deleteFiles` | boolean | true | Delete pruned files from disk |
+
+---
+
+## Debug Tools
+
+### debug_mark
+
+Create a timestamp mark for later diff filters.
+
+| Param | Type | Description |
+|---|---|---|
+| `label` | string | Optional human label |
+
+### debug_snapshot
+
+Collect bridge/app state plus optional DOM, screenshot, logs, IPC, events, and runtime captures.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `windowId` | string | `main` | Target window |
+| `includeDom` | boolean | true | Include DOM snapshot |
+| `includeScreenshot` | boolean | false | Include saved screenshot artifact |
+| `includeLogs` | boolean | true | Include console errors/warnings |
+| `includeIpc` | boolean | false | Include IPC captures |
+| `includeEvents` | boolean | false | Include event captures |
+| `includeRuntime` | boolean | true | Include runtime captures |
+| `since` | number | | Epoch ms filter |
+| `sinceMark` | string | | Mark id from `debug_mark` |
+| `maxTokens` | number | 4000 | DOM snapshot inline budget |
+| `screenshotNameHint` | string | | Screenshot artifact name hint |
+
+### webview_act_and_verify
+
+Perform one action, wait for a selector/text, and collect fresh evidence since an internal mark.
+
+| Param | Type | Description |
+|---|---|---|
+| `action` | string | `click`, `fill`, `type`, `press`, `drag`, `hover` |
+| `selector` | string | Source selector or `@eN` |
+| `text` | string | Text for fill/type |
+| `key` | string | Key for press |
+| `targetSelector` | string | Drag target |
+| `waitForSelector` | string | Selector expected after action |
+| `waitForText` | string | Text expected after action |
+| `timeout` | number | Wait timeout in ms |
+| `verifyDom` | boolean | Include DOM snapshot |
+| `verifyScreenshot` | boolean | Include screenshot artifact |
+| `includeLogs` | boolean | Include log diff |
+| `includeIpc` | boolean | Include IPC diff |
+| `includeRuntime` | boolean | Include runtime diff |
 
 ---
 

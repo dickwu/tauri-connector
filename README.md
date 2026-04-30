@@ -69,7 +69,7 @@ The skill provides a **debug & code review suite** with progressive disclosure:
 | `SKILL.md` | Main skill -- core workflow, debugging, code review, interaction reference |
 | `SETUP.md` | Step-by-step setup guide for new Tauri projects |
 | `scripts/` | 14 Bun TypeScript scripts for fallback WebSocket automation |
-| `references/mcp-tools.md` | All 25 MCP tool parameter tables |
+| `references/mcp-tools.md` | MCP tool parameter tables |
 | `references/cli-commands.md` | Every CLI subcommand with flags and examples |
 | `references/debug-playbook.md` | 10 step-by-step debug recipes (blank screen, silent clicks, form failures, slow IPC, drag issues, memory leaks, multi-window) |
 | `references/code-review-playbook.md` | 9 code review workflows (visual regression, accessibility audit, component tree, IPC contract validation, DOM structure, event flow) |
@@ -97,7 +97,7 @@ Once installed, Claude will automatically:
 
 ## Features
 
-### 25 Tools (MCP + CLI) with Drag and Drop
+### MCP + CLI Tools with Drag and Drop, Artifacts, and Runtime Capture
 
 Every tool is available via both the embedded MCP server (for Claude Code) and the Rust CLI (for terminal use). The CLI uses ref-based element addressing inspired by [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser).
 
@@ -113,7 +113,9 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Interact | `webview_interact` | `click`, `dblclick`, `hover`, `drag`, `focus`, `fill`, `type`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview` |
 | Keyboard | `webview_keyboard` | `press <key>` |
 | Wait | `webview_wait_for` | `wait <selector> [--text] [--timeout]` |
-| Screenshot | `webview_screenshot` | `screenshot <path> [-f png\|jpeg\|webp] [-m maxWidth]` |
+| Screenshot | `webview_screenshot` | `screenshot [path] [--selector @eN] [--name-hint debug]` |
+| Artifacts | `artifact_list` / `artifact_read` / `artifact_compare` / `artifact_prune` | `artifacts list\|show\|compare\|prune` |
+| Debug | `debug_mark` / `debug_snapshot` / `webview_act_and_verify` | `debug mark\|snapshot`, `act` |
 | Windows | `manage_window` | `windows`, `resize <w> <h>` |
 | State | `ipc_get_backend_state` | `state` |
 | IPC | `ipc_execute_command` | `ipc exec <cmd> [-a '{...}']` |
@@ -121,7 +123,8 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Captured | `ipc_get_captured` | `ipc captured [-f filter]` |
 | Events | `ipc_emit_event` | `emit <event> [-p '{...}']` |
 | Logs | `read_logs` | `logs [-n 20] [-f filter]` |
-| Logs | `clear_logs` | `clear logs\|ipc\|events\|all` |
+| Runtime | `runtime_get_captured` / `runtime_clear` | `runtime`, `clear runtime` |
+| Logs | `clear_logs` | `clear logs\|ipc\|events\|runtime\|all` |
 | Logs | `read_log_file` | *(via MCP only)* |
 | Events | `ipc_listen` | `events listen\|captured\|stop` |
 | Events | `event_get_captured` | `events captured [-p regex]` |
@@ -185,7 +188,7 @@ Large DOMs routinely blow past LLM context windows. The snapshot engine now budg
 
 - **Token estimation + section-atomic rendering** -- the walker estimates tokens per section and stops inlining once the budget is hit, emitting `{overflow: N subtrees, file=subtree-K.txt}` markers in place of the omitted content.
 - **Repeating sibling collapse** -- runs of 5+ structurally identical siblings (same tag + role + ARIA state hash) are collapsed to 2 examples + a marker; the collapsed rows are written to a subtree file.
-- **Subtree files** -- overflow content is written atomically to a PID-scoped session dir under the OS temp directory (`<tmp>/tauri-connector/<pid>/snapshots/<uuid>/subtree-N.txt`). Directories use `0700` permissions; writes are counter-based with `.tmp` + rename.
+- **Subtree files** -- overflow content is written atomically under the connector log directory (`<log_dir>/snapshots/<snapshotId>/subtree-N.txt`). The active `log_dir` is exposed in `.connector.json` and backend/debug state; if log initialization fails, the plugin falls back to a temp `.tauri-connector` directory. Directories use `0700` permissions; writes are counter-based with `.tmp` + rename.
 - **Auto-prune** -- old sessions are pruned by mtime with a per-window `Mutex` to avoid concurrent cleanup races; prune failures fall back to a bounded policy.
 - **Search keeps full fidelity** -- `search_snapshot` / `webview_search_snapshot` match against the merged full-text (inline output plus all subtree contents), so filtered output never hides matches.
 - **Defaults** -- MCP callers default to `max_tokens: 4000`; WebSocket / internal callers default to `0` (unlimited) for backward compatibility. Set `no_split: true` (or `--no-split` on the CLI) to disable file splitting entirely.
@@ -204,7 +207,7 @@ The recommended pattern keeps `tauri-plugin-connector` and its transitive deps (
 # ...
 
 # Optional dep — only pulled when --features dev-connector is set.
-tauri-plugin-connector = { version = "0.10", optional = true }
+tauri-plugin-connector = { version = "0.11", optional = true }
 
 [features]
 default = []
@@ -285,7 +288,7 @@ If you don't want a separate dev script and don't mind the plugin (and its trans
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.10"
+tauri-plugin-connector = "0.11"
 ```
 
 ```rust
@@ -344,9 +347,9 @@ Look for:
 
 The MCP server is now live. Claude Code connects automatically via the URL in `.mcp.json`.
 
-### 8. Verify with `doctor` (v0.9+)
+### 8. Verify with `doctor` (v0.11+)
 
-`tauri-connector doctor` auto-detects whether the project is using the **feature-gated** or **legacy** registration pattern, then walks the current project and confirms every setup step above. It inspects `src-tauri/Cargo.toml` (including the `[features]` block), the plugin registration in `lib.rs`/`main.rs` (accepts either `cfg(feature = "dev-connector")` or `cfg(debug_assertions)`), both `src-tauri/capabilities/*.json` and `src-tauri/capabilities-dev/*.json`, `src-tauri/tauri.conf.json`, the frontend `package.json`, the root `.mcp.json`, and the live `.connector.json` PID file (plus WS/MCP port probes) -- each missing piece is reported with a copy-pasteable `Fix:` snippet. It exits non-zero when any required check fails, so it drops straight into CI.
+`tauri-connector doctor` auto-detects whether the project is using the **feature-gated** or **legacy** registration pattern, then walks the current project and confirms every setup step above. It inspects `src-tauri/Cargo.toml` (including the `[features]` block), the plugin registration in `lib.rs`/`main.rs`, both `src-tauri/capabilities/*.json` and `src-tauri/capabilities-dev/*.json`, `src-tauri/tauri.conf.json`, the frontend `package.json` scripts/deps, the root `.mcp.json`, and the live `.connector.json` PID file. Runtime checks verify PID liveness, log_dir/log initialization, WebSocket reachability, bridge status, runtime/artifact/debug command availability, and the Streamable HTTP `/mcp` initialize -> notification -> ping -> GET 405 -> DELETE lifecycle. Each missing piece is reported with a copy-pasteable `Fix:` snippet. It exits non-zero when any required check fails, so it drops straight into CI.
 
 ```bash
 tauri-connector doctor                 # full checklist (text)
@@ -354,7 +357,7 @@ tauri-connector doctor --no-runtime    # skip live WS/MCP probes (offline / CI)
 tauri-connector doctor --json          # machine-readable output
 ```
 
-The `--json` payload includes a top-level `setup_pattern` field with one of `"feature-gated" | "legacy" | "mixed" | "none"` so CI can branch on the active pattern:
+The `--json` payload includes a top-level `setup_pattern` field with one of `"feature-gated" | "legacy" | "mixed" | "none"` plus a flattened `fixes` array so CI can surface every suggested remediation without re-parsing sections:
 
 ```bash
 $ tauri-connector doctor --no-runtime --json | jq '.setup_pattern, .summary'
@@ -367,17 +370,17 @@ Sections reported:
 | Section | Checks |
 |---|---|
 | Environment | CLI version, working directory, Tauri v2 project detection |
-| Plugin Setup | `tauri-plugin-connector` Cargo dep (with `(optional, feature-gated)` tag when applicable), plugin registered (cites the matched cfg gate), `connector:default` permission in `capabilities/` or `capabilities-dev/`, `app.withGlobalTauri: true`, `@zumer/snapdom` in `package.json`, `.mcp.json` entry; under feature-gated/mixed: also `[features] dev-connector` declared and runtime `app.add_capability(include_str!(...))`. Legacy setups receive a non-blocking warn nudging migration. |
-| Runtime | `.connector.json` PID file, PID alive, WS ping on `ws_port`, MCP TCP probe on `mcp_port` |
+| Plugin Setup | `tauri-plugin-connector` Cargo dep (with `(optional, feature-gated)` tag when applicable), plugin registered (cites the matched cfg gate), `connector:default` permission in `capabilities/` or `capabilities-dev/`, `app.withGlobalTauri: true`, `@zumer/snapdom` in `package.json`, `.mcp.json` Streamable HTTP `/mcp` entry; under feature-gated/mixed: also `[features] dev-connector`, runtime `app.add_capability(include_str!(...))`, and a dev script passing `--features dev-connector`. Legacy setups receive a non-blocking warn nudging migration. |
+| Runtime | `.connector.json` PID file, PID alive, runtime metadata (`ws_port`, `mcp_port`, `bridge_port`, `log_dir`), JSONL logs initialized, WS ping on `ws_port`, bridge status, runtime/artifact/debug commands, MCP Streamable HTTP lifecycle on `mcp_port` |
 | Integration | `.claude/` auto-detect hook install status (optional) |
 
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.10.2
+tauri-connector doctor v0.11.0
 
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.10" (optional, feature-gated)
+  ✓ Cargo dependency: tauri-plugin-connector = "0.11" (optional, feature-gated)
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(feature = "dev-connector"))
   ✓ Permission "connector:default" in src-tauri/capabilities-dev/dev-connector.json
   ✓ app.withGlobalTauri: true
@@ -385,20 +388,21 @@ Plugin Setup
   ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
   ✓ [features] dev-connector = ["dep:tauri-plugin-connector"]
   ✓ Capability loaded at runtime via app.add_capability(include_str!("../capabilities-dev/..."))
+  ✓ package.json dev script enables --features dev-connector
 ```
 
 Example output for a legacy setup (passes, with the migration nudge):
 
 ```
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.10"
+  ✓ Cargo dependency: tauri-plugin-connector = "0.11"
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(debug_assertions))
   ✓ Permission "connector:default" in src-tauri/capabilities/default.json
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
   ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
   ! Using legacy debug_assertions gate — consider migrating to --features dev-connector
-      Fix: 1. tauri-plugin-connector = { version = "0.10", optional = true }
+      Fix: 1. tauri-plugin-connector = { version = "0.11", optional = true }
            2. [features] dev-connector = ["dep:tauri-plugin-connector"]
            3. replace cfg(debug_assertions) with cfg(feature = "dev-connector")
            4. move connector:default to capabilities-dev/dev-connector.json
@@ -511,7 +515,7 @@ All commands use `{ id, type, ...params }` with snake_case types:
 |---|---|
 | `ping` | -- |
 | `execute_js` | `script`, `window_id` |
-| `screenshot` | `format`, `quality`, `max_width`, `window_id` |
+| `screenshot` | `format`, `quality`, `max_width`, `window_id`, `save`, `output_dir`, `name_hint`, `overwrite`, `selector` |
 | `dom_snapshot` | `mode` (ai/accessibility/structure), `selector`, `max_depth`, `max_elements`, `max_tokens`, `no_split`, `react_enrich`, `follow_portals`, `shadow_dom`, `window_id` |
 | `find_element` | `selector`, `strategy`, `window_id` |
 | `get_styles` | `selector`, `properties`, `window_id` |
@@ -529,6 +533,9 @@ All commands use `{ id, type, ...params }` with snake_case types:
 | `read_log_file` | `source`, `lines`, `level`, `pattern`, `since`, `window_id` |
 | `ipc_listen` | `action`, `events` |
 | `event_get_captured` | `event`, `pattern`, `limit`, `since` |
+| `runtime_get_captured` | `kind`, `level`, `pattern`, `since`, `since_mark`, `limit`, `window_id` |
+| `artifact_list` / `artifact_read` / `artifact_compare` / `artifact_prune` | artifact registry operations |
+| `debug_mark` / `debug_snapshot` / `webview_act_and_verify` | bundled debug context and action verification |
 | `search_snapshot` | `pattern`, `context`, `mode`, `window_id` |
 
 ## Rust CLI (Alternative)
@@ -561,7 +568,7 @@ tauri-connector drag @e3 @e7         # Drag element to target
 tauri-connector drag @e5 "400,300" --strategy pointer  # Drag to coordinates
 tauri-connector get text @e7         # Get text
 tauri-connector press Enter          # Press key
-tauri-connector screenshot /tmp/s.png -m 1280  # Screenshot
+tauri-connector screenshot --name-hint debug -m 1280  # Screenshot artifact
 tauri-connector find "Submit" -s text          # Find elements
 tauri-connector dom                  # Cached DOM from frontend
 tauri-connector logs -n 10           # Console logs
@@ -687,7 +694,7 @@ tauri-connector/
 |       |-- lib.rs              # Plugin entry + Tauri IPC commands
 |       |-- bridge.rs           # Internal WebSocket bridge (the fix)
 |       |-- server.rs           # External WebSocket server (for CLI)
-|       |-- mcp.rs              # Embedded MCP SSE server
+|       |-- mcp.rs              # Embedded MCP HTTP server (/mcp Streamable HTTP, /sse legacy)
 |       |-- mcp_tools.rs        # MCP tool definitions + dispatch
 |       |-- handlers.rs         # All command handlers
 |       |-- protocol.rs         # Message types
@@ -714,7 +721,7 @@ tauri-connector/
 |   |   |-- click.ts, drag.ts, fill.ts, find.ts, hover.ts, wait.ts
 |   |   '-- logs.ts, events.ts, windows.ts
 |   '-- references/             # Progressive disclosure reference files
-|       |-- mcp-tools.md        # All 25 MCP tool parameter tables
+|       |-- mcp-tools.md        # MCP tool parameter tables
 |       |-- cli-commands.md     # Full CLI command reference
 |       |-- debug-playbook.md   # 10 debug recipes
 |       '-- code-review-playbook.md  # 9 code review workflows
@@ -755,13 +762,13 @@ The bun scripts in `skill/scripts/` auto-discover this file, verify the PID is a
 ### Embedded MCP Server
 
 1. Plugin starts a streamable HTTP MCP server on port 9556 (configurable)
-2. New clients use `POST /mcp` for JSON-RPC and can open `GET /mcp` for a stream
+2. New clients use `POST /mcp` for JSON-RPC Streamable HTTP. `GET /mcp` currently returns `405 Method Not Allowed` until server-initiated streaming is implemented.
 3. Legacy clients can still use `GET /sse` plus `POST /message`
 4. Handlers call the bridge and plugin state directly -- zero WebSocket overhead
 
 ### Console Log Capture
 
-The bridge intercepts `console.log/warn/error/info/debug`, storing entries in file-backed JSONL storage at `{app_data_dir}/.tauri-connector/console.log`. Logs persist across app restarts. Accessible via `read_logs`, `read_log_file`, or auto-pushed to Rust via `invoke()`.
+The bridge intercepts `console.log/warn/error/info/debug`, storing entries in file-backed JSONL storage at `{app_data_dir}/.tauri-connector/console.log`. It also captures runtime failures and route/network signals in `runtime.log`: `window.onerror`, `unhandledrejection`, failed/non-OK fetch and XHR calls, history/hash navigation, and resource load failures. Logs persist across app restarts and are accessible via `read_logs`, `read_log_file`, `runtime_get_captured`, `debug_snapshot`, or the CLI `logs` / `runtime` commands.
 
 ### Ref System
 
