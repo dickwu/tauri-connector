@@ -128,7 +128,7 @@ async fn handle_request(
                     "title": "Tauri Connector",
                     "version": env!("CARGO_PKG_VERSION")
                 },
-                "instructions": "Use webview_dom_snapshot, webview_interact, read_logs, ipc_* and bridge_status to debug the running Tauri app."
+                "instructions": tools::server_instructions()
             });
             JsonRpcResponse::success(id, result)
         }

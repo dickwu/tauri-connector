@@ -646,7 +646,7 @@ fn initialize_result(protocol_version: &str) -> Value {
             "title": "Tauri Connector",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Use webview_dom_snapshot, webview_interact, read_logs, ipc_* and bridge_status to debug the running Tauri app."
+        "instructions": crate::mcp_tool_schema::server_instructions()
     })
 }
 

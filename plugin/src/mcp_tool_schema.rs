@@ -1,13 +1,17 @@
 //! MCP tool schema definitions shared by embedded and standalone MCP tests.
 
-use serde_json::{Value, json};
+// Single import only: this file is compiled by both `tauri-plugin-connector` (edition 2024)
+// and `connector-mcp-server` (edition 2021) via #[path], and the two style editions sort
+// multi-item imports differently — two or more imports here make `cargo fmt --all -- --check`
+// fail forever.
+use serde_json::json;
 
 /// Return the list of tool definitions for `tools/list`.
-pub fn tool_definitions() -> Value {
+pub fn tool_definitions() -> serde_json::Value {
     json!({
         "tools": [
             tool_def("webview_execute_js",
-                "Execute JavaScript in the Tauri webview. Use IIFE for return values: \"(() => { return value; })()\"",
+                "Execute JavaScript in the Tauri webview and return the JSON-serialized result. Use an IIFE for return values: \"(() => { return value; })()\"",
                 json!({ "type": "object", "properties": {
                     "script": { "type": "string" },
                     "windowId": { "type": "string" }
@@ -27,7 +31,7 @@ pub fn tool_definitions() -> Value {
                     "outputDir": { "type": "string" },
                     "nameHint": { "type": "string" },
                     "overwrite": { "type": "boolean" },
-                    "annotate": { "type": "boolean", "description": "Overlay numbered labels for @eN refs from the latest ai snapshot" },
+                    "annotate": { "type": "boolean", "description": "Overlay numbered labels for @eN refs from the latest ai snapshot. Requires a prior webview_dom_snapshot(mode: ai); label [N] maps to ref @eN" },
                     "selector": { "type": "string", "description": "CSS selector or @ref for future element captures" },
                     "windowId": { "type": "string" }
                 } })
@@ -42,13 +46,13 @@ pub fn tool_definitions() -> Value {
                     "reactEnrich": { "type": "boolean", "description": "Include React component names (default: true)" },
                     "followPortals": { "type": "boolean", "description": "Stitch portals to their triggers (default: true)" },
                     "shadowDom": { "type": "boolean", "description": "Traverse shadow DOM (default: false)" },
-                    "maxTokens": { "type": "number", "description": "Token budget for inline result (default 4000, 0 for unlimited)" },
+                    "maxTokens": { "type": "number", "description": "Token budget for inline result (default 4000, 0 for unlimited). Over budget, subtrees spill to files listed in meta.subtreeFiles[].path; webview_search_snapshot still searches the full merged tree" },
                     "noSplit": { "type": "boolean", "description": "Disable snapshot subtree splitting and return the full inline snapshot" },
                     "windowId": { "type": "string" }
                 } })
             ),
             tool_def("get_cached_dom",
-                "Get cached DOM snapshot pushed from frontend. Faster and more LLM-friendly.",
+                "Get cached DOM snapshot pushed from frontend via invoke(). Faster and more LLM-friendly than webview_dom_snapshot, but may be stale -- use webview_dom_snapshot when current state matters.",
                 json!({ "type": "object", "properties": { "windowId": { "type": "string" } } })
             ),
             tool_def("webview_find_element",
@@ -88,7 +92,7 @@ pub fn tool_definitions() -> Value {
                 }, "required": ["action"] })
             ),
             tool_def("webview_keyboard",
-                "Type text or press keys with optional modifiers",
+                "Type text (action: type) or press a named key (action: press, e.g. Enter, Tab, Escape, ArrowDown) with optional modifiers",
                 json!({ "type": "object", "properties": {
                     "action": { "type": "string", "enum": ["type", "press"] },
                     "text": { "type": "string" },
@@ -105,14 +109,14 @@ pub fn tool_definitions() -> Value {
                     "text": { "type": "string" },
                     "url": { "type": "string", "description": "Glob pattern matched against location.href" },
                     "loadState": { "type": "string", "enum": ["domcontentloaded", "load", "networkidle"] },
-                    "fn": { "type": "string", "description": "JavaScript expression/function/body that returns truthy" },
+                    "fn": { "type": "string", "description": "JavaScript expression/function/body evaluated in page context until truthy, e.g. \"window.appReady === true\"" },
                     "state": { "type": "string", "enum": ["attached", "detached", "visible", "hidden"], "description": "Selector state to wait for" },
                     "timeout": { "type": "number" },
                     "windowId": { "type": "string" }
                 } })
             ),
             tool_def("webview_locator",
-                "Find by semantic locator (role/text/label/placeholder/alt/title/testid/name) and optionally act on the match",
+                "Find by semantic locator (role/text/label/placeholder/alt/title/testid/name) and optionally act on the match. Actions fill/type require value; click/hover/focus/check/uncheck/text ignore it",
                 json!({ "type": "object", "properties": {
                     "role": { "type": "string" },
                     "text": { "type": "string" },
@@ -140,7 +144,7 @@ pub fn tool_definitions() -> Value {
                 json!({ "type": "object", "properties": { "windowId": { "type": "string" } } })
             ),
             tool_def("manage_window",
-                "List windows, get window info, or resize a window",
+                "List windows, get window info, or resize a window. resize requires width and height",
                 json!({ "type": "object", "properties": {
                     "action": { "type": "string", "enum": ["list", "info", "resize"] },
                     "windowId": { "type": "string" },
@@ -153,7 +157,7 @@ pub fn tool_definitions() -> Value {
                 json!({ "type": "object", "properties": {} })
             ),
             tool_def("ipc_execute_command",
-                "Execute any Tauri IPC command via invoke()",
+                "Execute any app-defined Tauri IPC command via invoke(). Discover command names with ipc_monitor + ipc_get_captured; unknown commands return an error",
                 json!({ "type": "object", "properties": {
                     "command": { "type": "string" },
                     "args": { "type": "object" }
@@ -175,7 +179,7 @@ pub fn tool_definitions() -> Value {
                 } })
             ),
             tool_def("ipc_emit_event",
-                "Emit a custom Tauri event for testing event handlers",
+                "Emit a custom Tauri event app-wide (listeners in all windows receive it) for testing event handlers",
                 json!({ "type": "object", "properties": {
                     "eventName": { "type": "string" },
                     "payload": {}
@@ -192,11 +196,11 @@ pub fn tool_definitions() -> Value {
                 } })
             ),
             tool_def("get_setup_instructions",
-                "Get setup instructions for tauri-plugin-connector",
+                "Get setup instructions for integrating tauri-plugin-connector into a Tauri app",
                 json!({ "type": "object", "properties": {} })
             ),
             tool_def("list_devices",
-                "List running Tauri app instances",
+                "List running Tauri app instances the connector can reach. When the MCP server is embedded in the app, reports that the running app is reachable.",
                 json!({ "type": "object", "properties": {} })
             ),
             tool_def("clear_logs",
@@ -251,7 +255,7 @@ pub fn tool_definitions() -> Value {
             tool_def("artifact_list",
                 "List connector artifacts from the manifest registry.",
                 json!({ "type": "object", "properties": {
-                    "kind": { "type": "string" },
+                    "kind": { "type": "string", "description": "Filter by artifact kind, e.g. \"screenshot\"" },
                     "limit": { "type": "number" }
                 } })
             ),
@@ -263,19 +267,19 @@ pub fn tool_definitions() -> Value {
                 } })
             ),
             tool_def("artifact_compare",
-                "Compare two screenshot artifacts or paths. Refuses same-path comparisons.",
+                "Compare two screenshot artifacts or paths via raw byte diff (not perceptual). Returns pixelsDifferent, percentDifferent (0-1), and passed = percentDifferent <= threshold. Refuses same-path comparisons.",
                 json!({ "type": "object", "properties": {
                     "before": { "type": "string" },
                     "after": { "type": "string" },
-                    "threshold": { "type": "number" }
+                    "threshold": { "type": "number", "description": "Max allowed differing-byte fraction, 0-1 (default 0)" }
                 }, "required": ["before", "after"] })
             ),
             tool_def("artifact_prune",
-                "Prune old artifact manifest entries and optionally delete artifact files.",
+                "Prune old artifact manifest entries, keeping the newest entries. Deletes pruned files from disk unless deleteFiles is false.",
                 json!({ "type": "object", "properties": {
-                    "keep": { "type": "number" },
-                    "kind": { "type": "string" },
-                    "deleteFiles": { "type": "boolean" }
+                    "keep": { "type": "number", "description": "Newest matching entries to keep (default 50)" },
+                    "kind": { "type": "string", "description": "Only prune this kind; other kinds are untouched" },
+                    "deleteFiles": { "type": "boolean", "description": "Also delete files from disk (default true)" }
                 } })
             ),
             tool_def("debug_mark",
@@ -332,6 +336,20 @@ pub fn tool_definitions() -> Value {
     })
 }
 
-fn tool_def(name: &str, description: &str, input_schema: Value) -> Value {
+fn tool_def(name: &str, description: &str, input_schema: serde_json::Value) -> serde_json::Value {
     json!({ "name": name, "description": description, "inputSchema": input_schema })
+}
+
+/// Return the `initialize` response `instructions` string shared by both MCP servers.
+pub fn server_instructions() -> &'static str {
+    concat!(
+        "Inspect and drive the running Tauri v2 app.\n",
+        "Core loop: webview_dom_snapshot (mode 'ai') returns the UI tree with @eN refs; act via webview_interact, webview_keyboard, or webview_locator; verify via webview_wait_for, read_logs, or webview_screenshot. Refs go stale when the DOM changes -- re-snapshot after actions.\n",
+        "Big DOMs: snapshots over the token budget (default 4000) split into subtree files (meta.subtreeFiles[].path). webview_search_snapshot searches the full merged tree -- prefer it over raising maxTokens.\n",
+        "Debugging shortcuts: debug_snapshot bundles state+DOM+logs+screenshot in one call; webview_act_and_verify performs an action, waits, and collects evidence.\n",
+        "Backend: ipc_monitor + ipc_get_captured trace invoke() calls; ipc_execute_command invokes app commands directly; ipc_listen + event_get_captured capture Tauri events; runtime_get_captured surfaces window errors, unhandled rejections, and network failures.\n",
+        "Artifacts: screenshots saved with save:true register in a manifest -- artifact_list/artifact_read/artifact_compare (byte diff) use them, artifact_prune cleans up.\n",
+        "Multi-window: most tools take windowId (default 'main'); list labels with manage_window(action: 'list').\n",
+        "Setup problems: get_setup_instructions, or run `tauri-connector doctor` in the project."
+    )
 }

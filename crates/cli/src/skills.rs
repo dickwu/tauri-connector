@@ -30,6 +30,11 @@ const SKILL_DOCS: &[SkillDoc] = &[
         content: include_str!("../skill/references/mcp-tools.md"),
     },
     SkillDoc {
+        name: "snapshot-budget",
+        display_path: "references/snapshot-budget.md",
+        content: include_str!("../skill/references/snapshot-budget.md"),
+    },
+    SkillDoc {
         name: "debug-playbook",
         display_path: "references/debug-playbook.md",
         content: include_str!("../skill/references/debug-playbook.md"),

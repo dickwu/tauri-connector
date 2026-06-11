@@ -1,5 +1,6 @@
 ---
 name: tauri-connector
+version: 0.12.0
 description: "Deep inspection, interaction, debugging, and code review for Tauri v2 desktop apps. Use this skill whenever: working with a Tauri app's UI (clicking, filling forms, reading DOM, screenshots, dragging elements); debugging console logs, IPC calls, or Tauri events; reviewing component trees, accessibility, or visual regressions; testing user flows or validating IPC contracts; setting up tauri-connector in a new project. Also triggers on: DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, Tauri app testing, visual regression, admin/ front/ or tool/ desktop apps, @eN ref syntax, or any mention of tauri-connector CLI or MCP tools. This is Claude's bridge to any running Tauri v2 desktop app -- if a Tauri app is involved, use this skill."
 allowed-tools:
   - Bash
@@ -10,7 +11,7 @@ allowed-tools:
 
 # Tauri Connector -- Debug & Code Review Suite
 
-Inspect, interact with, debug, and review Tauri v2 desktop apps. The MCP server is embedded in the Tauri plugin -- it starts automatically when the app launches. No separate server process needed.
+Inspect, interact with, debug, and review Tauri v2 desktop apps. The MCP server is embedded in the Tauri plugin -- it starts automatically when the app launches. No separate server process needed. (A standalone `tauri-connector-mcp` stdio binary also exists for clients that can't reach the embedded HTTP server; most sessions never need it.)
 
 ## Architecture
 
@@ -21,6 +22,8 @@ The plugin injects a JavaScript bridge into each Tauri webview. Commands flow th
 | **MCP tools** (preferred) | Claude has MCP access via `.mcp.json` -- tools appear as `webview_*`, `ipc_*`, etc. |
 | **CLI** (`tauri-connector`) | Shell commands with `@eN` ref addressing from snapshots |
 | **Bun scripts** (fallback) | Neither MCP nor CLI binary available -- scripts at `skill/scripts/` |
+
+Pick the first path available, in that order: MCP tools need no shell round-trip; the CLI needs the binary (`which tauri-connector`); Bun scripts need only `bun` plus this skill's `scripts/` dir. All three drive the same WebSocket protocol, so refs and capabilities behave identically.
 
 Verify the app is running: `lsof -i :9555 -P -n 2>/dev/null | grep LISTEN`
 
@@ -186,11 +189,22 @@ For more recipes: read `skill/references/debug-playbook.md`
 
 ### Visual Regression Check
 
-Compare before/after screenshots to catch unintended visual changes:
+Capture before/after screenshots as artifacts, then diff them:
 
-1. `webview_screenshot(format: "png", maxWidth: 1280)` -- capture current state
-2. Apply the code change, rebuild the app
-3. Screenshot again -- compare side by side for regressions
+```bash
+# MCP
+webview_screenshot(format: "png", save: true, nameHint: "before-fix")
+# ...apply the code change, rebuild/hot-reload...
+webview_screenshot(format: "png", save: true, nameHint: "after-fix")
+artifact_compare(before: "<beforeArtifactId>", after: "<afterArtifactId>")
+
+# CLI
+tauri-connector screenshot --name-hint before-fix
+tauri-connector screenshot --name-hint after-fix
+tauri-connector artifacts compare <beforeId> <afterId>
+```
+
+`artifact_compare` is a fast byte-level diff (`metric: "byte-diff"`), not a perceptual one: `percentDifferent` is the 0--1 fraction of differing bytes and `passed` means `percentDifferent <= threshold` (default 0). Byte-identical proves nothing changed; any nonzero diff only means *something* changed -- read both screenshots and judge visually before declaring a regression.
 
 ### Accessibility Audit
 
@@ -331,52 +345,42 @@ tauri-connector windows
 tauri-connector resize 1024 768 --window-id settings
 ```
 
+Multi-window apps: nearly every tool takes `windowId` (CLI: global `--window-id`, default `main`). Each window has its own DOM, refs, console logs, and screenshots -- a snapshot of `main` says nothing about `settings`. List window labels first, then scope every call to the window you're working on.
+
 ---
 
 ## Snapshot Budget & Subtree Files
 
-For complex apps, DOM snapshots can exceed AI tool result limits. The snapshot engine automatically manages output size:
-
-- **Default behavior**: `maxTokens: 4000` over MCP -- large DOMs return a layout skeleton (inline) plus `file=subtree-K.txt` markers pointing at on-disk subtree files.
-- **WebSocket / Bun / internal callers**: default `maxTokens: 0` (full output) for backward compatibility. Pass `max_tokens` explicitly to opt in.
-- **Unlimited on MCP**: set `maxTokens: 0` or `noSplit: true` to restore legacy behavior.
-- **Subtree files**: written atomically under `<log_dir>/snapshots/<snapshotId>/` (`0700` dir on unix). The active `log_dir` is exposed in `.connector.json` and backend/debug state; if it cannot be initialized, the plugin falls back to a temp `.tauri-connector` directory. `meta.subtreeFiles[].path` gives the absolute path; `allRefsPath` points to `refs.json` when the ref map also spills.
-- **Reading subtrees**: use the `Read` tool on the `path` field, or the CLI's `snapshots read <uuid> <file>` (canonicalized -- rejects path traversal). Old sessions are auto-pruned by mtime (keeps newest 5).
-- **Search stays complete**: `webview_search_snapshot` matches against merged full text (skeleton + every subtree), so filters never hide inside spilled content.
-- **Repeating siblings**: runs of 5+ siblings with the same tag + role + ARIA state collapse to 2 examples + a marker; the collapsed rows are written to a subtree file whenever the budget is active.
-- **`--compact` / `-c`** on the CLI keeps lines containing refs _plus_ subtree markers, so you never lose a pointer to spilled content.
+Over MCP, snapshots default to a 4000-token budget: larger DOMs return an inline layout skeleton plus `file=subtree-K.txt` markers pointing at on-disk subtree files (absolute paths in `meta.subtreeFiles[].path` -- open with the Read tool, or `tauri-connector snapshots read <uuid> <file>`). WebSocket/Bun callers default to unlimited. `webview_search_snapshot` always matches the merged full text -- skeleton plus every subtree -- so spilled content is never invisible to search. When hunting for something specific, search beats raising the budget.
 
 ```bash
-# MCP -- default 4000-token budget (splits if needed)
-webview_dom_snapshot(mode: "ai")
-
-# MCP -- raise the budget for a big page
-webview_dom_snapshot(mode: "ai", maxTokens: 8000)
-
-# MCP -- unlimited (legacy behavior)
-webview_dom_snapshot(mode: "ai", maxTokens: 0)
-webview_dom_snapshot(mode: "ai", noSplit: true)
-
-# MCP -- search across spilled subtrees (context=3 lines)
+webview_dom_snapshot(mode: "ai", maxTokens: 8000)        # raise the budget
+webview_dom_snapshot(mode: "ai", noSplit: true)          # full inline output (legacy)
 webview_search_snapshot(pattern: "submit|confirm", context: 3)
-
-# CLI -- with default budget
-tauri-connector snapshot -i
-
-# CLI -- larger budget, or full output
-tauri-connector snapshot -i --max-tokens 8000
-tauri-connector snapshot -i --no-split
-
-# CLI -- list/read snapshot sessions
-tauri-connector snapshots list
-tauri-connector snapshots read <uuid>                 # layout.txt (default)
-tauri-connector snapshots read <uuid> subtree-0.txt
-tauri-connector snapshots read <uuid> refs.json
-
-# Bun -- opt in to budgeting (default is unlimited over WS)
-bun run $SCRIPTS/snapshot.ts ai --max-tokens 4000
-bun run $SCRIPTS/snapshot.ts ai --no-split
+tauri-connector snapshots list                           # then: snapshots read <uuid> subtree-0.txt
 ```
+
+Splitting mechanics, sibling collapsing, storage layout, and session pruning: read `skill/references/snapshot-budget.md`.
+
+## Artifacts
+
+Screenshots taken with `save: true` / the CLI `screenshot` command are registered in a manifest, so later calls can reference them by `artifactId` instead of a path:
+
+```bash
+# MCP
+artifact_list(kind: "screenshot", limit: 20)       # newest first
+artifact_read(artifactId: "<id>")                  # metadata + base64 content
+artifact_compare(before: "<id>", after: "<id>")    # byte-diff -- see Visual Regression Check
+artifact_prune(keep: 50, deleteFiles: true)        # keep the newest 50, drop the rest
+
+# CLI
+tauri-connector artifacts list --kind screenshot -l 20
+tauri-connector artifacts show <id> --base64
+tauri-connector artifacts compare <beforeId> <afterId>
+tauri-connector artifacts prune --keep 50
+```
+
+Long sessions accumulate screenshots fast -- prune when a debugging episode ends. Prune keeps the newest `keep` entries (default 50; scoped to `kind` when given, other kinds untouched) and deletes pruned files from disk by default -- pass `--manifest-only` (CLI) / `deleteFiles: false` (MCP) to rewrite only the registry.
 
 ---
 
@@ -431,7 +435,7 @@ For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.12"`, dr
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 
-### Verify setup with `doctor` (v0.11+)
+### Verify setup with `doctor`
 
 Before troubleshooting a broken connection, DOM bridge timeout, or missing MCP tools, run `tauri-connector doctor` from the project root. It validates every setup step in one pass and prints a concrete `Fix:` line for anything missing or misconfigured -- faster than walking `.mcp.json`, `tauri.conf.json`, capabilities, etc. by hand.
 
@@ -443,29 +447,24 @@ tauri-connector doctor --json          # machine-readable output (exit code 0/1)
 
 The `--json` payload includes a top-level `setup_pattern` field with one of `"feature-gated" | "legacy" | "mixed" | "none"` — branch on this in CI to apply pattern-specific gates without re-parsing the section list.
 
-What it verifies:
-
-| Section | Checks |
-|---|---|
-| Environment | CLI version, working directory, Tauri v2 project detection (walks up to find `src-tauri/tauri.conf.json`) |
-| Plugin Setup | `tauri-plugin-connector` in `src-tauri/Cargo.toml` (with `(optional, feature-gated)` tag when applicable); plugin registered via `init()` / `ConnectorBuilder` in `lib.rs`/`main.rs` (cites the matched cfg gate); `"connector:default"` in `src-tauri/capabilities/*.json` **or** `src-tauri/capabilities-dev/*.json`; `app.withGlobalTauri: true`; `@zumer/snapdom` in `package.json`; `.mcp.json` registers `/mcp`. Under feature-gated/mixed: also verifies `[features] dev-connector`, runtime `app.add_capability(include_str!(...))`, and a package script that passes `--features dev-connector`. Legacy setups receive a non-blocking warn nudging migration. |
-| Runtime | `.connector.json` PID file under `target/`, PID alive, runtime metadata/log_dir/log files, WebSocket ping on `ws_port`, bridge status, runtime/artifact/debug command availability, and MCP Streamable HTTP lifecycle (`initialize`, notification 202, ping, GET 405, DELETE) on `mcp_port` |
-| Integration | `.claude/` auto-detect hook install status (optional), local skill doc freshness against the CLI-bundled skill |
-
-Exit code is non-zero when any required check fails, so `doctor --json` drops cleanly into CI or pre-commit. The JSON payload includes a top-level `fixes` array with every warning/failure remediation. Use `--no-runtime` when the Tauri app isn't running (offline setup validation).
+It checks four areas -- environment, plugin setup (both install patterns), live runtime (PID file, WebSocket ping, bridge status, MCP lifecycle), and integrations -- and its output enumerates every check it ran. Exit code is non-zero when any required check fails, and the `--json` payload includes a top-level `fixes` array with every remediation, so it drops cleanly into CI or pre-commit. Use `--no-runtime` when the Tauri app isn't running (offline setup validation).
 
 First move when something looks wrong: `tauri-connector doctor`. Second move: read the `Fix:` line.
 
-### Bundled skill docs
+### Version check & doc freshness
 
-The CLI embeds this skill and references so agents can load version-matched docs before guessing command syntax:
+This skill's frontmatter `version:` records which connector release these docs describe. The installed CLI/plugin may be newer: compare with `tauri-connector --version` (the MCP initialize response also reports `serverInfo.version`), and check for newer releases with `tauri-connector update --check`. `tauri-connector doctor` flags stale local skill docs as part of its integration checks.
+
+When the binary is newer than this doc, trust the CLI-bundled copies -- they always match the binary:
 
 ```bash
 tauri-connector skills list
-tauri-connector skills get tauri-connector
-tauri-connector skills get mcp-tools
+tauri-connector skills get tauri-connector            # version-matched SKILL.md
+tauri-connector skills get snapshot-budget
 tauri-connector skills path references/mcp-tools.md
 ```
+
+Refresh the installed skill itself with `npx skills add dickwu/tauri-connector`.
 
 ## Deep Reference
 
@@ -475,6 +474,7 @@ For full parameter tables and extended workflows:
 |---|---|
 | `skill/references/mcp-tools.md` | MCP tool parameter tables with types and defaults |
 | `skill/references/cli-commands.md` | Every CLI subcommand with all flags and examples |
+| `skill/references/snapshot-budget.md` | Snapshot splitting mechanics, subtree files, storage and pruning |
 | `skill/references/debug-playbook.md` | Step-by-step recipes for common debug scenarios |
 | `skill/references/code-review-playbook.md` | Code review workflow recipes and checklists |
 
@@ -491,6 +491,9 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | Stale PID file | App crashed. Delete: `rm target/debug/.connector.json` |
 | Port conflict | Use `ConnectorBuilder::new().port_range(9600, 9700)` or set `TAURI_CONNECTOR_PORT=9600` |
 | Refs not found | DOM changed since snapshot. Re-run snapshot for fresh refs |
+| Acting on the wrong window | Pass `windowId` (MCP) / `--window-id` (CLI). Default is `main`; each window has independent DOM and refs |
+| First call slow (~2s), then fine | WS bridge wasn't connected yet; the plugin falls back to eval+event transport. Persistent slowness: check `tauri-connector bridge` and `withGlobalTauri: true` |
+| Disk filling with screenshots | `tauri-connector artifacts prune --keep 50` (MCP: `artifact_prune`) |
 | Drag not working | Try explicit `--strategy pointer` or `html5dnd`. Increase `--steps` (>5) and `--duration` |
 | Screenshot blank | Install `@zumer/snapdom` for DOM-based fallback capture |
 | No MCP tools | Verify `.mcp.json` has `"url": "http://127.0.0.1:9556/mcp"` and app is running |

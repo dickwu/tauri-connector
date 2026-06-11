@@ -363,7 +363,9 @@ Compare two artifacts or paths. Same-path comparisons are rejected.
 |---|---|---|---|
 | `before` | string | yes | Before artifact id or path |
 | `after` | string | yes | After artifact id or path |
-| `threshold` | number | | Maximum allowed difference ratio |
+| `threshold` | number | | Maximum allowed difference ratio, 0--1 (default 0) |
+
+Result: `{ pixelsDifferent, percentDifferent (0--1), threshold, passed, beforePath, afterPath, metric: "byte-diff" }`. The comparison is a raw byte diff of the two files, not a perceptual pixel diff: `passed` is `percentDifferent <= threshold`. Byte-identical means truly unchanged; any nonzero diff means "something changed" -- inspect both images visually before judging a regression.
 
 ### artifact_prune
 
