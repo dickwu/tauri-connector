@@ -5,7 +5,9 @@ use serde_json::{json, Value};
 
 use crate::protocol::text_content;
 
-#[path = "../../../plugin/src/mcp_tool_schema.rs"]
+// Vendored byte-for-byte from plugin/src/mcp_tool_schema.rs (the canonical copy) so the
+// published crate is self-contained; the vendored_schema_matches_plugin_source test enforces it.
+#[path = "mcp_tool_schema.rs"]
 mod embedded_mcp_tool_schema;
 
 pub use embedded_mcp_tool_schema::server_instructions;
@@ -972,5 +974,21 @@ mod tests {
         // Pin the totals so accidental additions/deletions are caught.
         assert_eq!(embedded.len(), 36, "shared tool count changed");
         assert_eq!(standalone.len(), 37, "standalone tool count changed");
+    }
+
+    #[test]
+    fn vendored_schema_matches_plugin_source() {
+        let vendored = include_str!("mcp_tool_schema.rs");
+        let canonical_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../plugin/src/mcp_tool_schema.rs"
+        );
+        let canonical = std::fs::read_to_string(canonical_path)
+            .expect("plugin schema source readable (parity test must run from the workspace)");
+        assert_eq!(
+            vendored, canonical,
+            "crates/mcp-server/src/mcp_tool_schema.rs is out of sync with \
+             plugin/src/mcp_tool_schema.rs — re-copy the canonical file"
+        );
     }
 }
