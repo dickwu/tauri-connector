@@ -389,7 +389,7 @@ Sections reported:
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.12.0
+tauri-connector doctor v0.12.1
 
 Plugin Setup
   ✓ Cargo dependency: tauri-plugin-connector = "0.12" (optional, feature-gated)

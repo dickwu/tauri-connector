@@ -284,7 +284,7 @@ function createServer() {
     'Execute any Tauri IPC command via invoke()',
     {
       command: z.string(),
-      args: z.record(z.unknown()).optional(),
+      args: z.record(z.string(), z.unknown()).optional(),
     },
     async ({ command, args }) => {
       const result = await client.send({ type: 'ipc_execute_command', command, args })
