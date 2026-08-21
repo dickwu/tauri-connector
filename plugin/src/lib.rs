@@ -41,6 +41,11 @@ mod state;
 
 use bridge::Bridge;
 use server::Server;
+
+/// Bridge port shared with the `on_page_load` re-injection hook. Set once when
+/// the bridge starts; a single bridge exists per process (the plugin has a
+/// `links` key, so only one instance can be registered).
+static BRIDGE_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
 use state::{DomEntry, EventEntry, IpcEvent, LogEntry, PluginState, RuntimeEntry};
 
 #[doc(hidden)]
@@ -311,6 +316,17 @@ impl ConnectorBuilder {
                 push_event,
                 push_runtime,
             ])
+            .on_page_load(|webview, _payload| {
+                // Re-inject on every page load (Started and Finished): the
+                // one-shot eval at setup/webview-created does not survive
+                // reloads or navigations (e.g. dev-server full reloads), which
+                // silently killed the bridge and snapshot engine until app
+                // restart. The __CONNECTOR_BRIDGE__ guard makes this idempotent.
+                if let Some(port) = BRIDGE_PORT.get() {
+                    let label = webview.label().to_string();
+                    let _ = webview.eval(bridge::bridge_init_script(*port, &label));
+                }
+            })
             .setup(move |app, _api| {
                 if bind_address == "0.0.0.0" || bind_address == "::" {
                     eprintln!(
@@ -346,6 +362,7 @@ impl ConnectorBuilder {
 
                     // 1b. Set app handle on bridge for eval fallback
                     bridge.set_app_handle(handle.clone()).await;
+                    let _ = BRIDGE_PORT.set(bridge.port());
 
                     // 2. Inject bridge JS into all current webviews
                     for (label, window) in handle.webview_windows() {

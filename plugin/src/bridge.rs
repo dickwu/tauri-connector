@@ -25,6 +25,9 @@ pub struct BridgeClient {
     pub url: Option<String>,
     pub title: Option<String>,
     pub connected_at_ms: u64,
+    /// Identity of the underlying WS connection. A late disconnect of a stale
+    /// socket must not remove a newer client registered under the same label.
+    pub conn_id: String,
     pub tx: mpsc::UnboundedSender<String>,
 }
 
@@ -282,6 +285,7 @@ async fn handle_bridge_client(
     let (mut ws_write, mut ws_read) = ws_stream.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let mut window_id: Option<String> = None;
+    let conn_id = uuid::Uuid::new_v4().to_string();
 
     loop {
         tokio::select! {
@@ -303,6 +307,7 @@ async fn handle_bridge_client(
                             &tx,
                             &clients,
                             &pending,
+                            &conn_id,
                         ).await {
                             window_id = Some(new_window_id);
                         }
@@ -315,8 +320,19 @@ async fn handle_bridge_client(
     }
 
     if let Some(window_id) = window_id {
-        clients.lock().await.remove(&window_id);
-        println!("[connector][bridge] Webview client disconnected: {window_id}");
+        let mut clients = clients.lock().await;
+        let is_current = clients
+            .get(&window_id)
+            .map(|c| c.conn_id == conn_id)
+            .unwrap_or(false);
+        if is_current {
+            clients.remove(&window_id);
+            println!("[connector][bridge] Webview client disconnected: {window_id}");
+        } else {
+            println!(
+                "[connector][bridge] Stale connection closed for {window_id}; keeping newer client"
+            );
+        }
     } else {
         println!("[connector][bridge] Webview client disconnected before hello");
     }
@@ -329,6 +345,7 @@ async fn handle_bridge_message(
     tx: &mpsc::UnboundedSender<String>,
     clients: &ClientMap,
     pending: &PendingMap,
+    conn_id: &str,
 ) -> Option<String> {
     let value: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
@@ -357,6 +374,7 @@ async fn handle_bridge_message(
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
             connected_at_ms: now_ms(),
+            conn_id: conn_id.to_string(),
             tx: tx.clone(),
         };
         clients.lock().await.insert(window_id.clone(), client);
@@ -1451,7 +1469,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         hflags.push(he.rect.width + 'x' + he.rect.height);
         hparts.push(he.id + ' "' + he.title.replace(/"/g, '\\"') + '" [' + hflags.join(', ') + ']');
       }}
-      var overlayHeader = '# overlays: ' + hparts.join(' · ') + ' -- rescope via meta.overlays[].selector';
+      var overlayHeader = '# overlays: ' + hparts.join(' | ') + ' -- rescope via meta.overlays[].selector';
       snapshotLines.push(overlayHeader);
       if (budgetActive) usedTokens += estimateTokens(overlayHeader);
     }}

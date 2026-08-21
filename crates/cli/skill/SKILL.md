@@ -1,6 +1,6 @@
 ---
 name: tauri-connector
-version: 0.13.0
+version: 0.13.1
 description: "Deep inspection, interaction, debugging, and code review for Tauri v2 desktop apps. Use this skill whenever: working with a Tauri app's UI (clicking, filling forms, reading DOM, screenshots, dragging elements); debugging console logs, IPC calls, or Tauri events; reviewing component trees, accessibility, or visual regressions; testing user flows or validating IPC contracts; setting up tauri-connector in a new project. Also triggers on: DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, Tauri app testing, visual regression, admin/ front/ or tool/ desktop apps, @eN ref syntax, or any mention of tauri-connector CLI or MCP tools. This is Claude's bridge to any running Tauri v2 desktop app -- if a Tauri app is involved, use this skill."
 allowed-tools:
   - Bash
@@ -402,7 +402,7 @@ webview_dom_snapshot(selector: ".ant-table-wrapper")   # Table
 Full-document `ai`/`accessibility` snapshots detect open overlays -- modals, floating windows, drawers, docks, lock screens -- whether they come from antd or a custom modal system. Detection: `role="dialog"`/`"alertdialog"`, open `<dialog>`/popover, any visible `position:fixed` element with a numeric z-index and real size, or an explicit `data-connector-overlay` attribute. The snapshot leads with a one-line inventory and `meta.overlays[]` carries the details:
 
 ```
-# overlays: o1 "Create Patient" [focused, modal, z=1000, 640x500] · o2 "Lab Orders" [z=702, 520x420] -- rescope via meta.overlays[].selector
+# overlays: o1 "Create Patient" [focused, modal, z=1000, 640x500] | o2 "Lab Orders" [z=702, 520x420] -- rescope via meta.overlays[].selector
 ```
 
 - Ordering is focused-first, then z-order descending -- the overlay the user is actually working in comes first. Under a token budget, overlay sections render inline first, so the open modal never spills to subtree files; the background page spills instead.
