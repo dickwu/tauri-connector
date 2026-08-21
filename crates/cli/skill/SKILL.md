@@ -415,6 +415,16 @@ Full-document `ai`/`accessibility` snapshots detect open overlays -- modals, flo
 - An expected modal absent from both the tree and the overlays header is probably a separate Tauri window, not in-page DOM: `manage_window(action: "list")`, then re-snapshot with the right `windowId`.
 - Building a custom modal system? Give each modal root `role="dialog"` plus `aria-label`/`aria-labelledby` (an accessibility win regardless), or stamp it `data-connector-overlay` -- either guarantees detection with a stable title. A `data-modal-key` per instance gives rescoping a semantic, stable selector.
 
+### Example: multi-window floating-window systems
+
+Apps with several non-blocking dialog windows open and typeable at once (SelfModal-style: portal-to-body roots carrying `role="dialog"`, `aria-modal="false"`, and a semantic `data-modal-key`) map onto the overlay tools like this:
+
+- Every open window is its own overlay entry with `modal: false` -- the background staying interactive is the system's design, so never read `modal: false` as "not a real dialog".
+- Scope by the reported `[data-modal-key="…"]` selector, never by "the dialog" or an nth-match -- several same-class windows coexist by construction.
+- Stacking is live: pointer-down inside a window typically re-ranks z-order, so overlay ids and ordering shift between snapshots. Re-read the `# overlays:` header after interactions instead of caching it.
+- Expect layered z bands: floating windows low, genuinely blocking dialogs (confirm, login) above them, and a minimized-window dock pinned near the top of the stack. The dock is detected as an overlay too; its tiles are the restore controls for minimized windows.
+- Minimized or closed-but-kept windows usually stay mounted as `display:none` to preserve form state: they are correctly absent from snapshots and the overlays list, but a scoped snapshot by their stable selector still reads the hidden content.
+
 ## Bun Script Fallback
 
 When MCP and CLI are unavailable. Requires `bun` runtime:
