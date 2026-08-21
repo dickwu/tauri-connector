@@ -406,7 +406,8 @@ Full-document `ai`/`accessibility` snapshots detect open overlays -- modals, flo
 ```
 
 - Ordering is focused-first, then z-order descending -- the overlay the user is actually working in comes first. Under a token budget, overlay sections render inline first, so the open modal never spills to subtree files; the background page spills instead.
-- Each entry's `selector` addresses that exact instance (`#id` → `[data-modal-key="…"]` → `[data-testid="…"]` → a stamped `[data-connector-overlay="oN"]` fallback). Rescope with `webview_dom_snapshot(selector: <that selector>)` to capture one modal precisely -- this works even when several same-class windows are open at once.
+- Each entry's `selector` addresses that exact instance (`#id` → `[data-modal-key="…"]` → `[data-testid="…"]` → a stamped `[data-connector-overlay="oN"]` fallback). Rescope with `webview_dom_snapshot(selector: <that selector>)` (CLI: `tauri-connector snapshot -i -s '<that selector>'`) to capture one modal precisely -- this works even when several same-class windows are open at once.
+- Stamped `data-connector-overlay` values stick to the element across snapshots, while `oN` ids re-rank on every snapshot -- so a stamp may lag the current id. Always address an overlay by its reported `meta.overlays[].selector`; never reconstruct `[data-connector-overlay="oN"]` from the id.
 - `modal` is true only for genuinely blocking layers (`aria-modal="true"`, a viewport-covering layer, or a backdrop mask); non-blocking floating windows report `modal: false` because the background stays interactive.
 - Overlay tree nodes are annotated in place: `[overlay=o1, z=1000, focused, modal]`.
 - Scoped snapshots (any `selector`) skip overlay detection and no longer pull unrelated `ant-`/`rc-` body portals into the result -- a rescoped modal snapshot contains that modal only. Portals linked from inside the scope via `aria-controls`/`aria-owns` still stitch in.
@@ -515,4 +516,5 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | Screenshot blank | Install `@zumer/snapdom` for DOM-based fallback capture |
 | No MCP tools | Verify `.mcp.json` has `"url": "http://127.0.0.1:9556/mcp"` and app is running |
 | Bridge not connecting | Check `withGlobalTauri: true` in tauri.conf.json. Bridge auto-reconnects every 1s |
+| Bridge/snapshot engine vanishes after a page reload or dev-server hot reload | Plugin < 0.13.1 injected the bridge once per webview, so reloads killed it until app restart. Upgrade `tauri-plugin-connector` to >= 0.13.1 (re-injects on every page load) |
 | Logs empty | Console interception starts on bridge connect. Ensure plugin is registered before app loads |
