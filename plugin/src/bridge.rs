@@ -848,7 +848,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     const rootEl = opts.selector
       ? document.querySelector(opts.selector)
       : document.body;
-    if (!rootEl) return {{ snapshot: '', refs: {{}}, allRefs: null, subtrees: [], meta: {{ elementCount: 0, truncated: false, split: false, inlineComplete: true, portalCount: 0, virtualScrollContainers: 0, inlineTokens: 0 }} }};
+    if (!rootEl) return {{ snapshot: '', refs: {{}}, allRefs: null, subtrees: [], meta: {{ elementCount: 0, truncated: false, split: false, inlineComplete: true, portalCount: 0, virtualScrollContainers: 0, inlineTokens: 0, overlays: [] }} }};
 
     // State
     let elementCount = 0;
@@ -861,6 +861,10 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     const claimedPortalIds = new Set();
     const depthMap = new WeakMap();
     const treeNodeMap = new WeakMap();
+    // Overlay detection runs only on full-document ai/accessibility snapshots;
+    // a scoped snapshot means the caller already chose its focus.
+    const overlayCandidates = [];
+    const detectOverlays = mode !== 'structure' && !opts.selector;
 
     // TreeWalker filter
     function nodeFilter(node) {{
@@ -979,7 +983,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         }};
       }}
 
-      return {{
+      var nodeObj = {{
         label: role || tag,
         name: name || '',
         attrs: attrs,
@@ -987,6 +991,31 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         depth: depth,
         el: el
       }};
+
+      if (detectOverlays) {{
+        try {{
+          var isRoleOverlay = role === 'dialog' || role === 'alertdialog' ||
+            (tag === 'dialog' && el.hasAttribute('open'));
+          var overlayOptIn = el.hasAttribute('data-connector-overlay');
+          var popoverOpen = false;
+          try {{ popoverOpen = el.hasAttribute('popover') && el.matches(':popover-open'); }} catch (_) {{}}
+          var fixedOverlay = false;
+          if (!isRoleOverlay && !overlayOptIn && !popoverOpen) {{
+            var ocs = getComputedStyle(el);
+            if (ocs.position === 'fixed' && ocs.zIndex !== 'auto') {{
+              var obr = el.getBoundingClientRect();
+              // Size gate skips tooltips and small floating buttons but keeps
+              // dock bars and every real window/panel.
+              if (obr.width >= 96 && obr.height >= 40) fixedOverlay = true;
+            }}
+          }}
+          if (isRoleOverlay || overlayOptIn || popoverOpen || fixedOverlay) {{
+            overlayCandidates.push({{ el: el, node: nodeObj, viaRole: isRoleOverlay }});
+          }}
+        }} catch (_) {{}}
+      }}
+
+      return nodeObj;
     }}
 
     // Build a minimal CSS selector for ref lookup
@@ -1215,8 +1244,11 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         }}
       }}
 
-      // Orphan portals: body direct children with ant-/rc- class not claimed
-      var bodyChildren = document.body.children;
+      // Orphan portals: body direct children with ant-/rc- class not claimed.
+      // Full-document snapshots only: a scoped snapshot means the caller chose
+      // its focus, and unrelated open modals must not leak into it (aria-linked
+      // portals still stitch via pass 2 from any scope).
+      var bodyChildren = opts.selector ? [] : document.body.children;
       for (var oi = 0; oi < bodyChildren.length; oi++) {{
         var orphan = bodyChildren[oi];
         if (orphan.id && claimedPortalIds.has(orphan.id)) continue;
@@ -1254,6 +1286,137 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       }}
     }}
 
+    // === Overlay post-pass: pick roots, rank, annotate, build meta ===
+    var overlayEntries = [];
+    var overlaysMeta = [];
+    if (detectOverlays && overlayCandidates.length > 0) {{
+      try {{
+        var coversViewport = function(e) {{
+          try {{
+            var vr = e.getBoundingClientRect();
+            return vr.width >= window.innerWidth * 0.9 && vr.height >= window.innerHeight * 0.9;
+          }} catch (_) {{ return false; }}
+        }};
+        // Dedupe by element (portal stitching can build a second node for the same el).
+        var seenOverlayEls = new Set();
+        var cands = [];
+        for (var ui = 0; ui < overlayCandidates.length; ui++) {{
+          if (seenOverlayEls.has(overlayCandidates[ui].el)) continue;
+          seenOverlayEls.add(overlayCandidates[ui].el);
+          cands.push(overlayCandidates[ui]);
+        }}
+        for (var ci2 = 0; ci2 < cands.length; ci2++) {{
+          var top = cands[ci2];
+          var contained = false;
+          for (var cj = 0; cj < cands.length; cj++) {{
+            if (cj !== ci2 && cands[cj].el.contains(top.el)) {{ contained = true; break; }}
+          }}
+          if (contained) continue;
+          // Root = shallowest role-bearing candidate in this chain (antd: the
+          // .ant-modal panel, not the full-viewport wrap), else the top itself.
+          var root = null;
+          for (var ck = 0; ck < cands.length; ck++) {{
+            var cc = cands[ck];
+            if (cc.viaRole && (cc.el === top.el || top.el.contains(cc.el))) {{ root = cc; break; }}
+          }}
+          if (!root) root = top;
+          // Skip bare backdrops: a role-less fixed layer with no children and no
+          // text (e.g. .ant-modal-mask) is a mask, not an overlay of its own.
+          if (root.el === top.el && !root.viaRole && !root.el.firstElementChild && !(root.el.textContent || '').trim()) continue;
+          var zEff = 0;
+          try {{
+            var zcs = getComputedStyle(top.el);
+            zEff = zcs.zIndex === 'auto' ? 0 : (parseInt(zcs.zIndex, 10) || 0);
+            if (zEff === 0 && root.el !== top.el) {{
+              var rzcs = getComputedStyle(root.el);
+              if (rzcs.zIndex !== 'auto') zEff = parseInt(rzcs.zIndex, 10) || 0;
+            }}
+          }} catch (_) {{}}
+          var orect = {{ x: 0, y: 0, width: 0, height: 0 }};
+          try {{
+            var obr2 = root.el.getBoundingClientRect();
+            orect = {{ x: Math.round(obr2.x), y: Math.round(obr2.y), width: Math.round(obr2.width), height: Math.round(obr2.height) }};
+          }} catch (_) {{}}
+          var ofocused = false;
+          try {{ ofocused = !!(document.activeElement && root.el.contains(document.activeElement)); }} catch (_) {{}}
+          var oModal = false;
+          try {{
+            if (root.el.getAttribute('aria-modal') === 'true' || top.el.getAttribute('aria-modal') === 'true') {{
+              oModal = true;
+            }} else if (coversViewport(top.el)) {{
+              oModal = true;
+            }} else {{
+              // A backdrop renders immediately BEFORE the layer it masks (antd:
+              // .ant-modal-mask then .ant-modal-wrap) and is element-childless.
+              var pbs = top.el.previousElementSibling;
+              if (pbs && !pbs.firstElementChild && getComputedStyle(pbs).position === 'fixed' && coversViewport(pbs)) {{
+                oModal = true;
+              }}
+            }}
+          }} catch (_) {{}}
+          var otitle = getName(root.el) || '';
+          if (!otitle && root.el !== top.el) otitle = getName(top.el) || '';
+          if (!otitle) {{
+            var rdesc = root.el.querySelector('[role="dialog"], [role="alertdialog"]');
+            if (rdesc) otitle = getName(rdesc) || '';
+          }}
+          if (!otitle) {{
+            var ohd = root.el.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"]');
+            if (ohd) otitle = (ohd.textContent || '').trim().replace(/\s+/g, ' ');
+          }}
+          if (!otitle) otitle = getComponentName(root.el) || '';
+          if (!otitle) otitle = (root.el.textContent || '').trim().replace(/\s+/g, ' ').substring(0, 40);
+          otitle = otitle.substring(0, 60);
+          overlayEntries.push({{ el: root.el, node: root.node, topEl: top.el, title: otitle, zIndex: zEff, rect: orect, focused: ofocused, modal: oModal }});
+        }}
+        overlayEntries.sort(function(a, b) {{
+          if (a.focused !== b.focused) return a.focused ? -1 : 1;
+          return b.zIndex - a.zIndex;
+        }});
+        overlayEntries = overlayEntries.slice(0, 8);
+        for (var oe2 = 0; oe2 < overlayEntries.length; oe2++) {{
+          var oent = overlayEntries[oe2];
+          var oid = 'o' + (oe2 + 1);
+          var osel;
+          if (oent.el.id) {{
+            osel = '#' + oent.el.id;
+          }} else {{
+            var omk = oent.el.getAttribute('data-modal-key');
+            var otid = oent.el.getAttribute('data-testid');
+            if (omk) {{
+              osel = '[data-modal-key="' + omk.replace(/"/g, '\\"') + '"]';
+            }} else if (otid) {{
+              osel = '[data-testid="' + otid.replace(/"/g, '\\"') + '"]';
+            }} else {{
+              var stamped = oent.el.getAttribute('data-connector-overlay');
+              if (!stamped) {{
+                try {{ oent.el.setAttribute('data-connector-overlay', oid); stamped = oid; }} catch (_) {{}}
+              }}
+              osel = stamped ? '[data-connector-overlay="' + stamped + '"]' : buildSelector(oent.el);
+            }}
+          }}
+          oent.id = oid;
+          oent.selector = osel;
+          oent.node.attrs.push('overlay=' + oid);
+          if (oent.zIndex) oent.node.attrs.push('z=' + oent.zIndex);
+          if (oent.focused) oent.node.attrs.push('focused');
+          if (oent.modal) oent.node.attrs.push('modal');
+          overlaysMeta.push({{
+            id: oid,
+            title: oent.title,
+            selector: osel,
+            zIndex: oent.zIndex,
+            rect: oent.rect,
+            focused: oent.focused,
+            modal: oent.modal
+          }});
+        }}
+      }} catch (_) {{
+        overlayEntries = [];
+        overlaysMeta = [];
+      }}
+    }}
+
     // === Render: recursive stringify ===
     function renderNode(node, depth) {{
       var line = '  '.repeat(depth) + '- ' + node.label;
@@ -1276,8 +1439,66 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     var subtrees = [];
     var snapshotLines = [];
 
-    for (var ri = 0; ri < rootNode.children.length; ri++) {{
-      var sectionText = renderNode(rootNode.children[ri], 0);
+    // Overlay header: one line of situational awareness before the tree.
+    if (overlayEntries.length > 0) {{
+      var hparts = [];
+      for (var hi = 0; hi < overlayEntries.length; hi++) {{
+        var he = overlayEntries[hi];
+        var hflags = [];
+        if (he.focused) hflags.push('focused');
+        if (he.modal) hflags.push('modal');
+        if (he.zIndex) hflags.push('z=' + he.zIndex);
+        hflags.push(he.rect.width + 'x' + he.rect.height);
+        hparts.push(he.id + ' "' + he.title.replace(/"/g, '\\"') + '" [' + hflags.join(', ') + ']');
+      }}
+      var overlayHeader = '# overlays: ' + hparts.join(' · ') + ' -- rescope via meta.overlays[].selector';
+      snapshotLines.push(overlayHeader);
+      if (budgetActive) usedTokens += estimateTokens(overlayHeader);
+    }}
+
+    // Sections: a body- or single-container-rooted walk yields one top node
+    // holding everything, so budget granularity comes from that node's
+    // children; the container's own line renders first.
+    var sections = rootNode.children;
+    var sectionDepth = 0;
+    if (rootNode.children.length === 1 && rootNode.children[0].children.length > 0) {{
+      var topNode = rootNode.children[0];
+      var tline = '- ' + topNode.label;
+      if (topNode.name) tline += ' "' + topNode.name.replace(/"/g, '\\"') + '"';
+      if (topNode.attrs.length > 0) tline += ' [' + topNode.attrs.join(', ') + ']';
+      snapshotLines.push(tline);
+      if (budgetActive) usedTokens += estimateTokens(tline);
+      sections = topNode.children;
+      sectionDepth = 1;
+    }}
+
+    // Section order: with a budget and detected overlays, overlay sections render
+    // first (focused, then z-desc) so the open modal stays inline and the
+    // background page spills instead. Unlimited output keeps pure DOM order.
+    var sectionIndices = [];
+    for (var si = 0; si < sections.length; si++) sectionIndices.push(si);
+    if (budgetActive && overlayEntries.length > 0) {{
+      var sectionRank = {{}};
+      for (var oi2 = 0; oi2 < overlayEntries.length; oi2++) {{
+        for (var sj = 0; sj < sections.length; sj++) {{
+          var secEl = sections[sj].el;
+          if (secEl && (secEl === overlayEntries[oi2].topEl || secEl.contains(overlayEntries[oi2].topEl))) {{
+            if (sectionRank[sj] === undefined) sectionRank[sj] = oi2;
+            break;
+          }}
+        }}
+      }}
+      sectionIndices.sort(function(a, b) {{
+        var ra = sectionRank[a] === undefined ? 9999 : sectionRank[a];
+        var rb = sectionRank[b] === undefined ? 9999 : sectionRank[b];
+        if (ra !== rb) return ra - rb;
+        return a - b;
+      }});
+    }}
+
+    for (var rii = 0; rii < sectionIndices.length; rii++) {{
+      var ri = sectionIndices[rii];
+      var sectionText = renderNode(sections[ri], sectionDepth);
       var sectionTokens = budgetActive ? estimateTokens(sectionText) : 0;
 
       if (!budgetActive || (usedTokens + sectionTokens) <= maxTokens) {{
@@ -1285,9 +1506,21 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         usedTokens += sectionTokens;
       }} else {{
         split = true;
-        var sectionLabel = rootNode.children[ri].label || ('section-' + ri);
+        var secNode = sections[ri];
+        var sectionLabel = secNode.label || ('section-' + ri);
+        try {{
+          if (secNode.el) {{
+            if (secNode.el.id) {{
+              sectionLabel += '#' + secNode.el.id;
+            }} else if (secNode.el.className && typeof secNode.el.className === 'string') {{
+              var scls = secNode.el.className.trim().split(/\s+/).slice(0, 2).filter(Boolean);
+              if (scls.length > 0) sectionLabel += '.' + scls.join('.');
+            }}
+          }}
+          if (secNode.name) sectionLabel += ' "' + secNode.name.substring(0, 30) + '"';
+        }} catch (_) {{}}
         subtrees.push({{ label: sectionLabel, content: sectionText }});
-        snapshotLines.push('- [subtree: ' + sectionLabel + '] (' + sectionTokens + ' tokens, see subtrees[' + (subtrees.length - 1) + '])');
+        snapshotLines.push('  '.repeat(sectionDepth) + '- [subtree: ' + sectionLabel + '] (' + sectionTokens + ' tokens, see subtrees[' + (subtrees.length - 1) + '])');
         // Charge placeholder line to budget (tracks total payload, not just content)
         usedTokens += estimateTokens(snapshotLines[snapshotLines.length - 1]);
       }}
@@ -1330,7 +1563,8 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         inlineComplete: !split,
         portalCount: portalCount,
         virtualScrollContainers: virtualScrollCount,
-        inlineTokens: usedTokens
+        inlineTokens: usedTokens,
+        overlays: overlaysMeta
       }}
     }};
   }};

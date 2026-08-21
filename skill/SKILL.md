@@ -1,6 +1,6 @@
 ---
 name: tauri-connector
-version: 0.12.1
+version: 0.13.0
 description: "Deep inspection, interaction, debugging, and code review for Tauri v2 desktop apps. Use this skill whenever: working with a Tauri app's UI (clicking, filling forms, reading DOM, screenshots, dragging elements); debugging console logs, IPC calls, or Tauri events; reviewing component trees, accessibility, or visual regressions; testing user flows or validating IPC contracts; setting up tauri-connector in a new project. Also triggers on: DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, Tauri app testing, visual regression, admin/ front/ or tool/ desktop apps, @eN ref syntax, or any mention of tauri-connector CLI or MCP tools. This is Claude's bridge to any running Tauri v2 desktop app -- if a Tauri app is involved, use this skill."
 allowed-tools:
   - Bash
@@ -351,7 +351,7 @@ Multi-window apps: nearly every tool takes `windowId` (CLI: global `--window-id`
 
 ## Snapshot Budget & Subtree Files
 
-Over MCP, snapshots default to a 4000-token budget: larger DOMs return an inline layout skeleton plus `file=subtree-K.txt` markers pointing at on-disk subtree files (absolute paths in `meta.subtreeFiles[].path` -- open with the Read tool, or `tauri-connector snapshots read <uuid> <file>`). WebSocket/Bun callers default to unlimited. `webview_search_snapshot` always matches the merged full text -- skeleton plus every subtree -- so spilled content is never invisible to search. When hunting for something specific, search beats raising the budget.
+Over MCP, snapshots default to a 4000-token budget: larger DOMs return an inline layout skeleton plus `file=subtree-K.txt` markers pointing at on-disk subtree files (absolute paths in `meta.subtreeFiles[].path` -- open with the Read tool, or `tauri-connector snapshots read <uuid> <file>`). WebSocket/Bun callers default to unlimited. `webview_search_snapshot` always matches the merged full text -- skeleton plus every subtree -- so spilled content is never invisible to search. When hunting for something specific, search beats raising the budget. When overlays (modals, floating windows) are open, overlay sections render inline first -- focused, then z-order -- so the open modal never spills; the background page spills instead (see "Modals, Floating Windows & Overlays").
 
 ```bash
 webview_dom_snapshot(mode: "ai", maxTokens: 8000)        # raise the budget
@@ -397,6 +397,23 @@ webview_dom_snapshot(selector: ".ant-form")            # Form
 webview_dom_snapshot(selector: ".ant-table-wrapper")   # Table
 ```
 
+## Modals, Floating Windows & Overlays
+
+Full-document `ai`/`accessibility` snapshots detect open overlays -- modals, floating windows, drawers, docks, lock screens -- whether they come from antd or a custom modal system. Detection: `role="dialog"`/`"alertdialog"`, open `<dialog>`/popover, any visible `position:fixed` element with a numeric z-index and real size, or an explicit `data-connector-overlay` attribute. The snapshot leads with a one-line inventory and `meta.overlays[]` carries the details:
+
+```
+# overlays: o1 "Create Patient" [focused, modal, z=1000, 640x500] · o2 "Lab Orders" [z=702, 520x420] -- rescope via meta.overlays[].selector
+```
+
+- Ordering is focused-first, then z-order descending -- the overlay the user is actually working in comes first. Under a token budget, overlay sections render inline first, so the open modal never spills to subtree files; the background page spills instead.
+- Each entry's `selector` addresses that exact instance (`#id` → `[data-modal-key="…"]` → `[data-testid="…"]` → a stamped `[data-connector-overlay="oN"]` fallback). Rescope with `webview_dom_snapshot(selector: <that selector>)` to capture one modal precisely -- this works even when several same-class windows are open at once.
+- `modal` is true only for genuinely blocking layers (`aria-modal="true"`, a viewport-covering layer, or a backdrop mask); non-blocking floating windows report `modal: false` because the background stays interactive.
+- Overlay tree nodes are annotated in place: `[overlay=o1, z=1000, focused, modal]`.
+- Scoped snapshots (any `selector`) skip overlay detection and no longer pull unrelated `ant-`/`rc-` body portals into the result -- a rescoped modal snapshot contains that modal only. Portals linked from inside the scope via `aria-controls`/`aria-owns` still stitch in.
+- Minimized or closed-but-mounted modals (`display:none`) are excluded like any hidden content; to inspect one's preserved form state, scope directly to it (e.g. `selector: '[data-modal-key="…"]'`).
+- An expected modal absent from both the tree and the overlays header is probably a separate Tauri window, not in-page DOM: `manage_window(action: "list")`, then re-snapshot with the right `windowId`.
+- Building a custom modal system? Give each modal root `role="dialog"` plus `aria-label`/`aria-labelledby` (an accessibility win regardless), or stamp it `data-connector-overlay` -- either guarantees detection with a stable title. A `data-modal-key` per instance gives rescoping a semantic, stable selector.
+
 ## Bun Script Fallback
 
 When MCP and CLI are unavailable. Requires `bun` runtime:
@@ -422,7 +439,7 @@ bun run $SCRIPTS/events.ts listen user:login  # Listen for events
 
 For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
 
-1. `tauri-plugin-connector = { version = "0.12", optional = true }` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = { version = "0.13", optional = true }` in `src-tauri/Cargo.toml`
 2. Declare the cargo feature: `[features] dev-connector = ["dep:tauri-plugin-connector"]`
 3. Register the plugin with `#[cfg(feature = "dev-connector")]` guard
 4. Drop the dev capability JSON at `src-tauri/capabilities-dev/dev-connector.json` (outside the default `capabilities/` glob), and register it at runtime via `app.add_capability(include_str!("../capabilities-dev/dev-connector.json"))` inside the same `cfg(feature = "dev-connector")`
@@ -431,7 +448,7 @@ For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill def
 7. Add `"tauri:dev": "tauri dev --features dev-connector"` to `package.json`
 8. Add `"url": "http://127.0.0.1:9556/mcp"` to `.mcp.json`
 
-For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.12"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
+For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.13"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 

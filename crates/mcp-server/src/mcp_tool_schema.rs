@@ -39,7 +39,7 @@ pub fn tool_definitions() -> serde_json::Value {
                 } })
             ),
             tool_def("webview_dom_snapshot",
-                "Get structured DOM snapshot. Mode 'ai' (default) includes ref IDs for interaction, React component names, and stitches portals. Mode 'accessibility' shows ARIA roles/names. Mode 'structure' shows tags/classes.",
+                "Get structured DOM snapshot. Mode 'ai' (default) includes ref IDs for interaction, React component names, and stitches portals. Mode 'accessibility' shows ARIA roles/names. Mode 'structure' shows tags/classes. Full-document ai/accessibility snapshots also detect open overlays (modals, floating windows, dialogs, docks): a '# overlays:' header line and meta.overlays[] report each one's id, title, z-order, focused/modal state, and a CSS selector for rescoping; under a token budget, overlay sections render inline first so open modals never spill.",
                 json!({ "type": "object", "properties": {
                     "mode": { "type": "string", "enum": ["ai", "accessibility", "structure"], "default": "ai" },
                     "selector": { "type": "string", "description": "CSS selector to scope snapshot to a subtree" },
@@ -348,6 +348,7 @@ pub fn server_instructions() -> &'static str {
         "Inspect and drive the running Tauri v2 app.\n",
         "Core loop: webview_dom_snapshot (mode 'ai') returns the UI tree with @eN refs; act via webview_interact, webview_keyboard, or webview_locator; verify via webview_wait_for, read_logs, or webview_screenshot. Refs go stale when the DOM changes -- re-snapshot after actions.\n",
         "Big DOMs: snapshots over the token budget (default 4000) split into subtree files (meta.subtreeFiles[].path). webview_search_snapshot searches the full merged tree -- prefer it over raising maxTokens.\n",
+        "Overlays: full-page snapshots list open modals/floating windows in a '# overlays:' header and meta.overlays[] (focused first, then z-order). Rescope with webview_dom_snapshot(selector: <meta.overlays[i].selector>) to capture one modal precisely. An expected modal absent from both may be a separate window -- manage_window(action: 'list') and pass windowId.\n",
         "Debugging shortcuts: debug_snapshot bundles state+DOM+logs+screenshot in one call; webview_act_and_verify performs an action, waits, and collects evidence.\n",
         "Backend: ipc_monitor + ipc_get_captured trace invoke() calls; ipc_execute_command invokes app commands directly; ipc_listen + event_get_captured capture Tauri events; runtime_get_captured surfaces window errors, unhandled rejections, and network failures.\n",
         "Artifacts: screenshots saved with save:true register in a manifest -- artifact_list/artifact_read/artifact_compare (byte diff) use them, artifact_prune cleans up.\n",

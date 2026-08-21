@@ -78,3 +78,12 @@ tauri-connector snapshot -i --no-split
 bun run $SCRIPTS/snapshot.ts ai --max-tokens 4000
 bun run $SCRIPTS/snapshot.ts ai --no-split
 ```
+
+## Overlay-first ordering
+
+Since 0.13, budget spending is overlay-aware. Full-document snapshots detect open overlays (modals, floating windows, docks -- see "Modals, Floating Windows & Overlays" in SKILL.md) and render top-level sections in priority order: sections containing overlays first (focused overlay, then z-order descending), remaining sections in DOM order. Because portal-mounted modals live at the end of `<body>`, plain DOM order used to spend the whole budget on the background page and spill the very modal being debugged; the priority order inverts that. With no overlays open (or with `maxTokens: 0`), section order is pure DOM order as before.
+
+Two related refinements in the same release:
+
+- **Section granularity**: a body-rooted (or single-container-rooted) walk now splits at the container's *children* instead of treating the whole container as one all-or-nothing section, so skeletons stay meaningful at any budget.
+- **Spill labels**: spilled sections are labeled with their id/classes/name (`div#root`, `dialog "Create Patient"`) instead of a bare tag, so you can tell which subtree file holds what before reading it.
