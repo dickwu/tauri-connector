@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
+pub mod batch;
 pub mod discovery;
 
 const DEFAULT_TIMEOUT_MS: u64 = 35_000;

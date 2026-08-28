@@ -334,6 +334,24 @@ pub fn tool_definitions() -> serde_json::Value {
                     "windowId": { "type": "string" }
                 }, "required": ["pattern"] })
             ),
+            tool_def("batch_actions",
+                "Run several tool calls from one JSON spec -- sequentially, in parallel, or DAG-ordered via dependsOn -- and return per-action run logs (status, timing, result/error). The report is {ok, mode, total, succeeded, failed, skipped, startedAt, durationMs, logs[]}; 'save' also writes it to a JSON file.",
+                json!({ "type": "object", "properties": {
+                    "mode": { "type": "string", "enum": ["sequential", "parallel"], "description": "sequential (default): run in spec order; parallel: start everything at once, ordered only by dependsOn" },
+                    "stopOnError": { "type": "boolean", "description": "Stop starting new actions after the first failure (default true); unstarted actions are logged as skipped" },
+                    "maxParallel": { "type": "number", "description": "Cap on concurrently running actions (default unlimited)" },
+                    "timeoutMs": { "type": "number", "description": "Default per-action timeout in milliseconds" },
+                    "save": { "type": "string", "description": "Write the full run report as pretty JSON to this file path (absolute path recommended)" },
+                    "actions": { "type": "array", "description": "Actions to run", "items": { "type": "object", "properties": {
+                        "id": { "type": "string", "description": "Stable id that other actions reference in dependsOn" },
+                        "tool": { "type": "string", "description": "Any tool name except batch_actions and driver_session" },
+                        "args": { "type": "object", "description": "Tool arguments, same shape as a direct call" },
+                        "dependsOn": { "type": "array", "items": { "type": "string" }, "description": "Ids that must succeed before this action starts" },
+                        "timeoutMs": { "type": "number", "description": "Per-action timeout override in milliseconds" },
+                        "omitResult": { "type": "boolean", "description": "Drop the tool result from the log entry (keep status/timing) to save tokens" }
+                    }, "required": ["tool"] } }
+                }, "required": ["actions"] })
+            ),
         ]
     })
 }
@@ -350,6 +368,7 @@ pub fn server_instructions() -> &'static str {
         "Big DOMs: snapshots over the token budget (default 4000) split into subtree files (meta.subtreeFiles[].path). webview_search_snapshot searches the full merged tree -- prefer it over raising maxTokens.\n",
         "Overlays: full-page snapshots list open modals/floating windows in a '# overlays:' header and meta.overlays[] (focused first, then z-order). Rescope with webview_dom_snapshot(selector: <meta.overlays[i].selector>) to capture one modal precisely. An expected modal absent from both may be a separate window -- manage_window(action: 'list') and pass windowId.\n",
         "Debugging shortcuts: debug_snapshot bundles state+DOM+logs+screenshot in one call; webview_act_and_verify performs an action, waits, and collects evidence.\n",
+        "Batching: batch_actions runs several tool calls from one JSON spec (mode sequential|parallel, dependsOn for DAG order across both), returns per-action run logs, and can save the report to a JSON file (save).\n",
         "Backend: ipc_monitor + ipc_get_captured trace invoke() calls; ipc_execute_command invokes app commands directly; ipc_listen + event_get_captured capture Tauri events; runtime_get_captured surfaces window errors, unhandled rejections, and network failures.\n",
         "Artifacts: screenshots saved with save:true register in a manifest -- artifact_list/artifact_read/artifact_compare (byte diff) use them, artifact_prune cleans up.\n",
         "Multi-window: most tools take windowId (default 'main'); list labels with manage_window(action: 'list').\n",

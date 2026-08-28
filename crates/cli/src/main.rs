@@ -357,6 +357,23 @@ enum Commands {
         #[arg(long)]
         runtime: bool,
     },
+    /// Run a JSON batch of MCP tool actions sequentially, in parallel, or DAG-ordered
+    Batch {
+        /// Inline JSON spec, a path to a JSON file, or '-' for stdin
+        spec: String,
+        /// Write the run report as pretty JSON to this file
+        #[arg(long)]
+        save: Option<PathBuf>,
+        /// Override execution mode: sequential or parallel
+        #[arg(long)]
+        mode: Option<String>,
+        /// Keep starting independent actions after a failure
+        #[arg(long)]
+        continue_on_error: bool,
+        /// Cap on concurrently running actions
+        #[arg(long)]
+        max_parallel: Option<usize>,
+    },
     /// App backend state
     State,
     /// Show discovered connector instances
@@ -1071,6 +1088,26 @@ async fn main() {
                 logs,
                 ipc,
                 runtime,
+                &cli.window_id,
+            )
+            .await
+        }
+        Commands::Batch {
+            spec,
+            save,
+            mode,
+            continue_on_error,
+            max_parallel,
+        } => {
+            commands::batch(
+                &client,
+                &resolved.host,
+                resolved.port,
+                &spec,
+                save.as_deref(),
+                mode.as_deref(),
+                continue_on_error,
+                max_parallel,
                 &cli.window_id,
             )
             .await

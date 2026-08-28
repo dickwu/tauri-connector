@@ -170,8 +170,10 @@ impl Bridge {
     ) -> Result<serde_json::Value, String> {
         use tauri::{Listener, Manager};
 
-        let app = self.app_handle.lock().await;
-        let app = app.as_ref().ok_or("App handle not set for eval fallback")?;
+        // Clone the handle out so the lock is not held across the eval await —
+        // concurrent commands (e.g. parallel batches) must not serialize on it.
+        let app = self.app_handle.lock().await.clone();
+        let app = app.ok_or("App handle not set for eval fallback")?;
         let window = app
             .get_webview_window(window_id)
             .ok_or_else(|| format!("Window '{window_id}' not found"))?;
@@ -222,10 +224,14 @@ impl Bridge {
             .eval(&js)
             .map_err(|e| format!("eval inject failed: {e}"))?;
 
-        let result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx)
-            .await
-            .map_err(|_| "Script execution timeout (eval path)".to_string())?
-            .map_err(|_| "Result channel closed".to_string())?;
+        // No `?` before the unlisten below: the listener must be removed on
+        // the timeout and closed-channel paths too, or it leaks per eval.
+        let result: Result<serde_json::Value, String> =
+            match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await {
+                Ok(Ok(res)) => res,
+                Ok(Err(_)) => Err("Result channel closed".to_string()),
+                Err(_) => Err("Script execution timeout (eval path)".to_string()),
+            };
 
         app.unlisten(listener_id);
         result

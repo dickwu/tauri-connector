@@ -104,7 +104,11 @@ impl Server {
                             let state = state.clone();
 
                             tokio::spawn(async move {
-                                let app = app_handle.lock().await;
+                                // Clone the handle out so the lock is not held
+                                // across command execution — concurrent
+                                // commands (e.g. parallel batches) must not
+                                // serialize on it.
+                                let app = app_handle.lock().await.clone();
                                 let response = handle_command(
                                     id,
                                     request.command,

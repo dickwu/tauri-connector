@@ -282,6 +282,56 @@ tauri-connector drag "[draggable]" ".trash" --strategy html5dnd
 
 ---
 
+## Batch Actions
+
+```bash
+tauri-connector batch <SPEC> [FLAGS]
+```
+
+Run several MCP tool calls from one JSON spec -- sequentially, in parallel, or
+DAG-ordered via `dependsOn` -- and print the run report with one log entry per
+action (status, timing, result/error). `SPEC` is inline JSON, a path to a JSON
+file, or `-` for stdin. Actions use MCP tool names and arguments (see
+`references/mcp-tools.md` -> `batch_actions` for the full spec format); a bare
+JSON array is shorthand for `{ "actions": [...] }`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--mode` | `sequential` | `sequential` or `parallel` (overrides the spec) |
+| `--continue-on-error` | off | Keep running the remaining actions after a failure (`stopOnError: false`); only explicit `dependsOn` edges on the failed action skip |
+| `--max-parallel` | unlimited | Cap on concurrently running actions |
+| `--save` | | Write the run report as pretty JSON to this file |
+
+Examples:
+```bash
+# Sequential flow: click, wait, then read errors
+tauri-connector batch '{
+  "actions": [
+    { "id": "open", "tool": "webview_interact", "args": { "action": "click", "selector": "@e5" } },
+    { "id": "settle", "tool": "webview_wait_for", "args": { "selector": ".modal", "timeout": 5000 } },
+    { "tool": "read_logs", "args": { "level": "error" } }
+  ]
+}'
+
+# Parallel evidence collection, report saved to a file
+tauri-connector batch flow.json --mode parallel --save report.json
+
+# Bare-array shorthand from stdin
+echo '[ { "tool": "bridge_status" }, { "tool": "ipc_get_backend_state" } ]' \
+  | tauri-connector batch -
+```
+
+- The global `--window-id` becomes the default `windowId` for actions that
+  don't set one in their own `args`.
+- A tool result carrying a top-level `error` string (e.g. `Element not found`
+  from a bad selector) counts as a failure -- it triggers `stopOnError` and
+  skips dependents.
+- Exits non-zero when any action fails or is skipped, after printing the
+  report.
+- `batch_actions` and `driver_session` are rejected inside a batch.
+
+---
+
 ## Screenshot
 
 ```bash

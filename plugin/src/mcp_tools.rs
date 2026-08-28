@@ -2,6 +2,9 @@
 //!
 //! Calls existing handler functions directly — no WebSocket hop.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use serde_json::{Value, json};
 
 use crate::bridge::Bridge;
@@ -611,6 +614,10 @@ pub async fn call_tool(
             handlers::search_snapshot(id, &pattern, context, &mode, &wid, state, bridge).await
         }
 
+        "batch_actions" => {
+            return handle_batch_actions(args, bridge, app, state).await;
+        }
+
         _ => {
             return json!({
                 "content": [{ "type": "text", "text": format!("Unknown tool: {name}") }],
@@ -622,6 +629,77 @@ pub async fn call_tool(
     to_mcp_content(response)
 }
 
+/// Pin-box a dispatch future so `batch_actions` can recurse into `call_tool`
+/// without an infinitely sized future type.
+fn boxed_dispatch<'a>(
+    fut: impl Future<Output = Result<Value, String>> + Send + 'a,
+) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>> {
+    Box::pin(fut)
+}
+
+/// Run several embedded tool calls from one JSON spec via the shared batch
+/// executor, returning the run report as MCP content.
+///
+/// Returns an explicitly boxed future: `call_tool` recurses into this for the
+/// `batch_actions` arm, and the explicit `Send` bound breaks the auto-trait
+/// inference cycle a plain `async fn` would create.
+fn handle_batch_actions<'a>(
+    args: &'a Value,
+    bridge: &'a Bridge,
+    app: Option<&'a tauri::AppHandle>,
+    state: &'a PluginState,
+) -> Pin<Box<dyn Future<Output = Value> + Send + 'a>> {
+    Box::pin(async move {
+        let dispatch = |tool: String, targs: Value| {
+            boxed_dispatch(async move {
+                if tool == "batch_actions" {
+                    return Err("batch_actions cannot be nested".to_string());
+                }
+                let envelope = call_tool(&tool, &targs, bridge, app, state).await;
+                envelope_to_result(envelope)
+            })
+        };
+        match connector_client::batch::run_from_value(args, dispatch).await {
+            Ok(report) => {
+                let text = serde_json::to_string_pretty(&report).unwrap_or_default();
+                json!({ "content": [{ "type": "text", "text": text }] })
+            }
+            Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
+        }
+    })
+}
+
+/// Convert an MCP content envelope back into a plain result for batch logs:
+/// errors become `Err`, single text items parse back to JSON when possible,
+/// and anything else (e.g. image content) is kept as the raw envelope.
+fn envelope_to_result(envelope: Value) -> Result<Value, String> {
+    let is_error = envelope
+        .get("isError")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let first_text = envelope
+        .get("content")
+        .and_then(|v| v.as_array())
+        .and_then(|items| {
+            items
+                .iter()
+                .find_map(|item| item.get("text").and_then(|t| t.as_str()))
+        })
+        .map(|s| s.to_string());
+    if is_error {
+        return Err(first_text.unwrap_or_else(|| "Unknown error".to_string()));
+    }
+    let single_text = envelope
+        .get("content")
+        .and_then(|v| v.as_array())
+        .map(|items| items.len() == 1)
+        .unwrap_or(false);
+    match (single_text, first_text) {
+        (true, Some(text)) => Ok(serde_json::from_str(&text).unwrap_or(Value::String(text))),
+        _ => Ok(envelope),
+    }
+}
+
 pub use crate::mcp_tool_schema::tool_definitions;
 
 const SETUP_INSTRUCTIONS: &str = r#"## tauri-plugin-connector Setup
@@ -630,7 +708,7 @@ const SETUP_INSTRUCTIONS: &str = r#"## tauri-plugin-connector Setup
 In your Tauri app's `src-tauri/Cargo.toml`:
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.11"
+tauri-plugin-connector = "0.14"
 ```
 
 ### 2. Register the plugin (feature-gated dev tooling)
@@ -681,6 +759,42 @@ mod tests {
             .find(|tool| tool["name"] == name)
             .cloned()
             .unwrap_or_else(|| panic!("missing tool {name}"))
+    }
+
+    #[test]
+    fn envelope_to_result_maps_error_and_json_text() {
+        // isError envelopes become Err with the text as message.
+        let err = envelope_to_result(json!({
+            "content": [{ "type": "text", "text": "boom" }],
+            "isError": true,
+        }));
+        assert_eq!(err, Err("boom".to_string()));
+
+        // Single text items parse back to JSON when possible.
+        let ok = envelope_to_result(json!({
+            "content": [{ "type": "text", "text": "{\"clicked\":true}" }],
+        }));
+        assert_eq!(ok, Ok(json!({ "clicked": true })));
+
+        // Non-JSON text stays a string; multi-item envelopes pass through.
+        let plain = envelope_to_result(json!({
+            "content": [{ "type": "text", "text": "hello" }],
+        }));
+        assert_eq!(plain, Ok(json!("hello")));
+        let multi = json!({
+            "content": [
+                { "type": "image", "data": "...", "mimeType": "image/png" },
+                { "type": "text", "text": "{}" }
+            ],
+        });
+        assert_eq!(envelope_to_result(multi.clone()), Ok(multi));
+
+        // A "successful" envelope whose payload carries a soft error passes
+        // through here — the batch executor demotes it to a failure.
+        let soft = envelope_to_result(json!({
+            "content": [{ "type": "text", "text": "{\"error\":\"Element not found\"}" }],
+        }));
+        assert_eq!(soft, Ok(json!({ "error": "Element not found" })));
     }
 
     #[test]

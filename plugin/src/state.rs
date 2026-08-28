@@ -49,6 +49,11 @@ pub struct DomEntry {
     /// Snapshot session UUID if subtrees were written.
     #[serde(default)]
     pub snapshot_id: Option<String>,
+    /// Monotonic token assigned by `push_dom`. Later patches (e.g. the
+    /// snapshot handler's search-text phase) must check it so a concurrent
+    /// replacement of the entry is never blindly overwritten.
+    #[serde(default)]
+    pub generation: u64,
 }
 
 impl DomEntry {
@@ -114,6 +119,9 @@ pub struct PluginState {
     pub event_listeners: Arc<Mutex<Vec<String>>>,
     pub debug_marks: Arc<Mutex<HashMap<String, u64>>>,
     pub snapshot_prune_lock: Arc<std::sync::Mutex<()>>,
+    /// Serializes artifact manifest access: concurrent appends (parallel
+    /// screenshots) and prune's read-rewrite must not interleave.
+    pub artifact_manifest_lock: Arc<std::sync::Mutex<()>>,
 }
 
 impl PluginState {
@@ -146,12 +154,18 @@ impl PluginState {
             event_listeners: Arc::new(Mutex::new(Vec::new())),
             debug_marks: Arc::new(Mutex::new(HashMap::new())),
             snapshot_prune_lock: Arc::new(std::sync::Mutex::new(())),
+            artifact_manifest_lock: Arc::new(std::sync::Mutex::new(())),
         })
     }
 
-    pub async fn push_dom(&self, entry: DomEntry) {
+    /// Insert a DOM entry, stamping and returning its generation token.
+    pub async fn push_dom(&self, mut entry: DomEntry) -> u64 {
+        static DOM_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let generation = DOM_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        entry.generation = generation;
         let mut cache = self.dom_cache.lock().await;
         cache.insert(entry.window_id.clone(), entry);
+        generation
     }
 
     pub async fn get_dom(&self, window_id: &str) -> Option<DomEntry> {
@@ -191,10 +205,6 @@ impl PluginState {
             let _ = writeln!(*writer, "{json}");
         }
         let _ = writer.flush();
-    }
-
-    pub async fn set_ipc_monitoring(&self, active: bool) {
-        *self.ipc_monitor_active.lock().await = active;
     }
 
     #[allow(dead_code)]

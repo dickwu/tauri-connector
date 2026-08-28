@@ -47,6 +47,31 @@ pub async fn call_tool(
 ) -> Value {
     let result = match name {
         "driver_session" => handle_driver_session(client, host, port, args).await,
+        "batch_actions" => handle_batch_actions(client, host, port, args).await,
+        _ => dispatch_tool(client, host, port, name, args).await,
+    };
+
+    match result {
+        Ok(data) => text_content(&data),
+        Err(e) => text_content(&json!({ "error": e })),
+    }
+}
+
+/// Dispatch a single non-session tool call and return its raw result.
+///
+/// Shared by `call_tool`, `batch_actions`, and the CLI `batch` command; only
+/// `driver_session` (which mutates the connection) and `batch_actions` itself
+/// live outside this table.
+pub async fn dispatch_tool(
+    client: &ConnectorClient,
+    host: &str,
+    port: u16,
+    name: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    match name {
+        "driver_session" => Err("driver_session is not allowed inside batch_actions".to_string()),
+        "batch_actions" => Err("batch_actions cannot be nested".to_string()),
         "webview_execute_js" => handle_execute_js(client, args).await,
         "bridge_status" => handle_bridge_status(client).await,
         "webview_screenshot" => handle_screenshot(client, args).await,
@@ -84,12 +109,20 @@ pub async fn call_tool(
         "get_setup_instructions" => Ok(json!(SETUP_INSTRUCTIONS)),
         "list_devices" => handle_list_devices(host, port).await,
         _ => Err(format!("Unknown tool: {name}")),
-    };
-
-    match result {
-        Ok(data) => text_content(&data),
-        Err(e) => text_content(&json!({ "error": e })),
     }
+}
+
+async fn handle_batch_actions(
+    client: &ConnectorClient,
+    host: &str,
+    port: u16,
+    args: &Value,
+) -> Result<Value, String> {
+    let report = connector_client::batch::run_from_value(args, |tool, targs| async move {
+        dispatch_tool(client, host, port, &tool, &targs).await
+    })
+    .await?;
+    serde_json::to_value(&report).map_err(|e| format!("Failed to serialize batch report: {e}"))
 }
 
 // ─── Helpers ───
@@ -141,7 +174,7 @@ async fn handle_driver_session(
     }
 }
 
-async fn handle_execute_js(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_execute_js(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let script = str_arg(args, "script").ok_or("Missing 'script' parameter")?;
     let wid = window_id(args);
     client
@@ -149,11 +182,11 @@ async fn handle_execute_js(client: &mut ConnectorClient, args: &Value) -> Result
         .await
 }
 
-async fn handle_bridge_status(client: &mut ConnectorClient) -> Result<Value, String> {
+async fn handle_bridge_status(client: &ConnectorClient) -> Result<Value, String> {
     client.send(json!({ "type": "bridge_status" })).await
 }
 
-async fn handle_screenshot(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_screenshot(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let format = str_arg(args, "format").unwrap_or_else(|| "jpeg".to_string());
     let quality = num_arg(args, "quality").unwrap_or(80.0) as u8;
     let max_width = num_arg(args, "maxWidth").map(|n| n as u32);
@@ -189,7 +222,7 @@ async fn handle_screenshot(client: &mut ConnectorClient, args: &Value) -> Result
     client.send(cmd).await
 }
 
-async fn handle_dom_snapshot(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_dom_snapshot(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let mode = args
         .get("mode")
         .or_else(|| args.get("type"))
@@ -229,14 +262,14 @@ async fn handle_dom_snapshot(client: &mut ConnectorClient, args: &Value) -> Resu
     client.send(cmd).await
 }
 
-async fn handle_cached_dom(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_cached_dom(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let wid = window_id(args);
     client
         .send(json!({ "type": "get_cached_dom", "window_id": wid }))
         .await
 }
 
-async fn handle_find_element(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_find_element(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let selector = str_arg(args, "selector").ok_or("Missing 'selector' parameter")?;
     let strategy = str_arg(args, "strategy").unwrap_or_else(|| "css".to_string());
     let wid = window_id(args);
@@ -252,7 +285,7 @@ async fn handle_find_element(client: &mut ConnectorClient, args: &Value) -> Resu
     client.send(cmd).await
 }
 
-async fn handle_get_styles(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_get_styles(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let selector = str_arg(args, "selector").ok_or("Missing 'selector' parameter")?;
     let wid = window_id(args);
     let mut cmd = json!({
@@ -266,7 +299,7 @@ async fn handle_get_styles(client: &mut ConnectorClient, args: &Value) -> Result
     client.send(cmd).await
 }
 
-async fn handle_interact(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_interact(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
     let wid = window_id(args);
     let mut cmd = json!({
@@ -313,7 +346,7 @@ async fn handle_interact(client: &mut ConnectorClient, args: &Value) -> Result<V
     client.send(cmd).await
 }
 
-async fn handle_keyboard(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_keyboard(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
     let wid = window_id(args);
     let mut cmd = json!({
@@ -333,7 +366,7 @@ async fn handle_keyboard(client: &mut ConnectorClient, args: &Value) -> Result<V
     client.send(cmd).await
 }
 
-async fn handle_wait_for(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_wait_for(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let wid = window_id(args);
     let timeout = num_arg(args, "timeout").unwrap_or(5000.0) as u64;
     let mut cmd = json!({
@@ -366,7 +399,7 @@ async fn handle_wait_for(client: &mut ConnectorClient, args: &Value) -> Result<V
     client.send_with_timeout(cmd, timeout + 5000).await
 }
 
-async fn handle_locator(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_locator(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let wid = window_id(args);
     let mut cmd = json!({
         "type": "locator",
@@ -400,7 +433,7 @@ async fn handle_locator(client: &mut ConnectorClient, args: &Value) -> Result<Va
 }
 
 async fn handle_get_pointed_element(
-    client: &mut ConnectorClient,
+    client: &ConnectorClient,
     args: &Value,
 ) -> Result<Value, String> {
     let wid = window_id(args);
@@ -409,17 +442,14 @@ async fn handle_get_pointed_element(
         .await
 }
 
-async fn handle_select_element(
-    client: &mut ConnectorClient,
-    args: &Value,
-) -> Result<Value, String> {
+async fn handle_select_element(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let wid = window_id(args);
     client
         .send(json!({ "type": "select_element", "window_id": wid }))
         .await
 }
 
-async fn handle_manage_window(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_manage_window(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
     let wid = window_id(args);
 
@@ -446,12 +476,12 @@ async fn handle_manage_window(client: &mut ConnectorClient, args: &Value) -> Res
     }
 }
 
-async fn handle_backend_state(client: &mut ConnectorClient) -> Result<Value, String> {
+async fn handle_backend_state(client: &ConnectorClient) -> Result<Value, String> {
     client.send(json!({ "type": "backend_state" })).await
 }
 
 async fn handle_ipc_execute_command(
-    client: &mut ConnectorClient,
+    client: &ConnectorClient,
     args: &Value,
 ) -> Result<Value, String> {
     let command = str_arg(args, "command").ok_or("Missing 'command' parameter")?;
@@ -462,17 +492,14 @@ async fn handle_ipc_execute_command(
     client.send(cmd).await
 }
 
-async fn handle_ipc_monitor(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_ipc_monitor(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
     client
         .send(json!({ "type": "ipc_monitor", "action": action }))
         .await
 }
 
-async fn handle_ipc_get_captured(
-    client: &mut ConnectorClient,
-    args: &Value,
-) -> Result<Value, String> {
+async fn handle_ipc_get_captured(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
     let mut cmd = json!({ "type": "ipc_get_captured", "limit": limit });
     if let Some(f) = str_arg(args, "filter") {
@@ -490,10 +517,7 @@ async fn handle_ipc_get_captured(
     client.send(cmd).await
 }
 
-async fn handle_ipc_emit_event(
-    client: &mut ConnectorClient,
-    args: &Value,
-) -> Result<Value, String> {
+async fn handle_ipc_emit_event(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let event_name = str_arg(args, "eventName").ok_or("Missing 'eventName' parameter")?;
     let mut cmd = json!({ "type": "ipc_emit_event", "event_name": event_name });
     if let Some(p) = args.get("payload") {
@@ -502,7 +526,7 @@ async fn handle_ipc_emit_event(
     client.send(cmd).await
 }
 
-async fn handle_read_logs(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_read_logs(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let lines = num_arg(args, "lines").unwrap_or(50.0) as usize;
     let wid = window_id(args);
     let mut cmd = json!({ "type": "console_logs", "lines": lines, "window_id": wid });
@@ -518,21 +542,18 @@ async fn handle_read_logs(client: &mut ConnectorClient, args: &Value) -> Result<
     client.send(cmd).await
 }
 
-async fn handle_clear_logs(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_clear_logs(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let source = str_arg(args, "source").unwrap_or_else(|| "all".to_string());
     handle_clear_logs_source(client, &source).await
 }
 
-async fn handle_clear_logs_source(
-    client: &mut ConnectorClient,
-    source: &str,
-) -> Result<Value, String> {
+async fn handle_clear_logs_source(client: &ConnectorClient, source: &str) -> Result<Value, String> {
     client
         .send(json!({ "type": "clear_logs", "source": source }))
         .await
 }
 
-async fn handle_read_log_file(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_read_log_file(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let source = str_arg(args, "source").ok_or("Missing 'source' parameter")?;
     let lines = num_arg(args, "lines").unwrap_or(100.0) as usize;
     let mut cmd = json!({ "type": "read_log_file", "source": source, "lines": lines });
@@ -551,7 +572,7 @@ async fn handle_read_log_file(client: &mut ConnectorClient, args: &Value) -> Res
     client.send(cmd).await
 }
 
-async fn handle_ipc_listen(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_ipc_listen(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
     let mut cmd = json!({ "type": "ipc_listen", "action": action });
     if let Some(events) = args.get("events") {
@@ -561,7 +582,7 @@ async fn handle_ipc_listen(client: &mut ConnectorClient, args: &Value) -> Result
 }
 
 async fn handle_event_get_captured(
-    client: &mut ConnectorClient,
+    client: &ConnectorClient,
     args: &Value,
 ) -> Result<Value, String> {
     let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
@@ -582,7 +603,7 @@ async fn handle_event_get_captured(
 }
 
 async fn handle_runtime_get_captured(
-    client: &mut ConnectorClient,
+    client: &ConnectorClient,
     args: &Value,
 ) -> Result<Value, String> {
     let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
@@ -606,7 +627,7 @@ async fn handle_runtime_get_captured(
     client.send(cmd).await
 }
 
-async fn handle_artifact_list(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_artifact_list(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let limit = num_arg(args, "limit").unwrap_or(100.0) as usize;
     let mut cmd = json!({ "type": "artifact_list", "limit": limit });
     if let Some(kind) = str_arg(args, "kind") {
@@ -615,7 +636,7 @@ async fn handle_artifact_list(client: &mut ConnectorClient, args: &Value) -> Res
     client.send(cmd).await
 }
 
-async fn handle_artifact_read(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_artifact_read(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let artifact = str_arg(args, "artifact")
         .or_else(|| str_arg(args, "artifactId"))
         .ok_or("Missing 'artifact' parameter")?;
@@ -624,10 +645,7 @@ async fn handle_artifact_read(client: &mut ConnectorClient, args: &Value) -> Res
         .await
 }
 
-async fn handle_artifact_compare(
-    client: &mut ConnectorClient,
-    args: &Value,
-) -> Result<Value, String> {
+async fn handle_artifact_compare(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let before = str_arg(args, "before").ok_or("Missing 'before' parameter")?;
     let after = str_arg(args, "after").ok_or("Missing 'after' parameter")?;
     let threshold = num_arg(args, "threshold").unwrap_or(0.0);
@@ -641,10 +659,7 @@ async fn handle_artifact_compare(
         .await
 }
 
-async fn handle_artifact_prune(
-    client: &mut ConnectorClient,
-    args: &Value,
-) -> Result<Value, String> {
+async fn handle_artifact_prune(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let keep = num_arg(args, "keep").unwrap_or(50.0) as usize;
     let mut cmd = json!({
         "type": "artifact_prune",
@@ -657,7 +672,7 @@ async fn handle_artifact_prune(
     client.send(cmd).await
 }
 
-async fn handle_debug_mark(client: &mut ConnectorClient, args: &Value) -> Result<Value, String> {
+async fn handle_debug_mark(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let mut cmd = json!({ "type": "debug_mark" });
     if let Some(label) = str_arg(args, "label") {
         cmd["label"] = json!(label);
@@ -665,10 +680,7 @@ async fn handle_debug_mark(client: &mut ConnectorClient, args: &Value) -> Result
     client.send(cmd).await
 }
 
-async fn handle_debug_snapshot(
-    client: &mut ConnectorClient,
-    args: &Value,
-) -> Result<Value, String> {
+async fn handle_debug_snapshot(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let mut cmd = json!({
         "type": "debug_snapshot",
         "window_id": window_id(args),
@@ -700,10 +712,7 @@ async fn handle_debug_snapshot(
     client.send_with_timeout(cmd, 60_000).await
 }
 
-async fn handle_act_and_verify(
-    client: &mut ConnectorClient,
-    args: &Value,
-) -> Result<Value, String> {
+async fn handle_act_and_verify(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
     let mut cmd = json!({
         "type": "webview_act_and_verify",
@@ -738,10 +747,7 @@ async fn handle_act_and_verify(
     client.send_with_timeout(cmd, timeout + 60_000).await
 }
 
-async fn handle_search_snapshot(
-    client: &mut ConnectorClient,
-    args: &Value,
-) -> Result<Value, String> {
+async fn handle_search_snapshot(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let pattern = str_arg(args, "pattern").ok_or("Missing 'pattern' parameter")?;
     let context = num_arg(args, "context").unwrap_or(2.0) as usize;
     let mode = str_arg(args, "mode").unwrap_or_else(|| "ai".to_string());
@@ -788,7 +794,7 @@ In your Tauri app's `src-tauri/Cargo.toml`:
 
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.11"
+tauri-plugin-connector = "0.14"
 ```
 
 ### 2. Register the plugin
@@ -972,8 +978,63 @@ mod tests {
         );
 
         // Pin the totals so accidental additions/deletions are caught.
-        assert_eq!(embedded.len(), 36, "shared tool count changed");
-        assert_eq!(standalone.len(), 37, "standalone tool count changed");
+        assert_eq!(embedded.len(), 37, "shared tool count changed");
+        assert_eq!(standalone.len(), 38, "standalone tool count changed");
+    }
+
+    #[test]
+    fn batch_actions_schema_describes_spec() {
+        let tool = tool("batch_actions");
+        let props = &tool["inputSchema"]["properties"];
+        for key in [
+            "mode",
+            "stopOnError",
+            "maxParallel",
+            "timeoutMs",
+            "save",
+            "actions",
+        ] {
+            assert!(props.get(key).is_some(), "missing {key}");
+        }
+        let action_props = &props["actions"]["items"]["properties"];
+        for key in ["id", "tool", "args", "dependsOn", "timeoutMs", "omitResult"] {
+            assert!(action_props.get(key).is_some(), "missing action prop {key}");
+        }
+        assert_eq!(tool["inputSchema"]["required"], json!(["actions"]));
+    }
+
+    #[tokio::test]
+    async fn batch_actions_rejects_nesting_and_driver_session() {
+        let client = ConnectorClient::new();
+        for forbidden in ["batch_actions", "driver_session"] {
+            let args = json!({ "actions": [ { "tool": forbidden } ] });
+            let report = handle_batch_actions(&client, "127.0.0.1", 9555, &args)
+                .await
+                .expect("batch itself succeeds; the inner action fails");
+            assert_eq!(report["failed"], json!(1), "{forbidden} must be rejected");
+            let error = report["logs"][0]["error"].as_str().unwrap();
+            assert!(error.contains(forbidden), "unexpected error: {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_actions_reports_per_action_logs_when_disconnected() {
+        let client = ConnectorClient::new();
+        let args = json!({
+            "actions": [
+                { "id": "status", "tool": "bridge_status" },
+                { "id": "after", "tool": "webview_execute_js", "args": { "script": "1" } }
+            ]
+        });
+        let report = handle_batch_actions(&client, "127.0.0.1", 9555, &args)
+            .await
+            .unwrap();
+        assert_eq!(report["total"], json!(2));
+        assert_eq!(report["ok"], json!(false));
+        // First action errors (not connected), second is skipped by stopOnError.
+        assert_eq!(report["logs"][0]["status"], json!("error"));
+        assert_eq!(report["logs"][1]["status"], json!("skipped"));
+        assert_eq!(report["logs"][0]["id"], json!("status"));
     }
 
     #[test]

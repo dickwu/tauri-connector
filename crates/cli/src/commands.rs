@@ -1654,6 +1654,124 @@ pub async fn act_and_verify(
     print_json_result(client.send_with_timeout(cmd, timeout + 60_000).await)
 }
 
+/// Run a JSON batch of MCP tool actions through the shared batch executor,
+/// dispatching each action via the standalone MCP server's tool table so the
+/// CLI speaks the exact same vocabulary as both MCP servers.
+#[allow(clippy::too_many_arguments)]
+pub async fn batch(
+    client: &ConnectorClient,
+    host: &str,
+    port: u16,
+    spec_input: &str,
+    save: Option<&Path>,
+    mode: Option<&str>,
+    continue_on_error: bool,
+    max_parallel: Option<usize>,
+    window_id: &str,
+) -> Result<(), String> {
+    let text = read_batch_spec_input(spec_input)?;
+    let value = prepare_batch_spec_value(
+        &text,
+        mode,
+        continue_on_error,
+        max_parallel,
+        save,
+        window_id,
+    )?;
+
+    let report = connector_client::batch::run_from_value(&value, |tool, targs| async move {
+        connector_mcp_server::tools::dispatch_tool(client, host, port, &tool, &targs).await
+    })
+    .await?;
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+    );
+    if report.ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "batch finished with {} failed and {} skipped action(s)",
+            report.failed, report.skipped
+        ))
+    }
+}
+
+/// Resolve the batch spec argument: '-' reads stdin, inline JSON is used
+/// verbatim, anything else is treated as a file path.
+fn read_batch_spec_input(spec: &str) -> Result<String, String> {
+    let trimmed = spec.trim();
+    if trimmed == "-" {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            .map_err(|e| format!("Failed to read batch spec from stdin: {e}"))?;
+        return Ok(buf);
+    }
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return Ok(trimmed.to_string());
+    }
+    std::fs::read_to_string(trimmed)
+        .map_err(|e| format!("Failed to read batch spec file '{trimmed}': {e}"))
+}
+
+/// Parse the spec text and apply CLI overrides (mode, stopOnError,
+/// maxParallel, save) plus the CLI-wide --window-id as the default windowId
+/// for actions that don't set one themselves.
+fn prepare_batch_spec_value(
+    text: &str,
+    mode: Option<&str>,
+    continue_on_error: bool,
+    max_parallel: Option<usize>,
+    save: Option<&Path>,
+    window_id: &str,
+) -> Result<Value, String> {
+    let mut value: Value =
+        serde_json::from_str(text).map_err(|e| format!("Invalid batch spec JSON: {e}"))?;
+
+    // Bare-array shorthand: wrap so overrides below have an object to land on.
+    if value.is_array() {
+        value = json!({ "actions": value });
+    }
+    if !value.is_object() {
+        return Err("batch spec must be a JSON object or array".to_string());
+    }
+    if let Some(mode) = mode {
+        if mode != "sequential" && mode != "parallel" {
+            return Err(format!(
+                "--mode must be 'sequential' or 'parallel', got '{mode}'"
+            ));
+        }
+        value["mode"] = json!(mode);
+    }
+    if continue_on_error {
+        value["stopOnError"] = json!(false);
+    }
+    if let Some(max) = max_parallel {
+        value["maxParallel"] = json!(max);
+    }
+    if let Some(path) = save {
+        value["save"] = json!(path.to_string_lossy());
+    }
+    if window_id != "main" {
+        if let Some(actions) = value.get_mut("actions").and_then(|v| v.as_array_mut()) {
+            for action in actions.iter_mut() {
+                let Some(action_obj) = action.as_object_mut() else {
+                    continue;
+                };
+                let args = action_obj.entry("args").or_insert_with(|| json!({}));
+                if args.is_null() {
+                    *args = json!({});
+                }
+                if let Some(obj) = args.as_object_mut() {
+                    obj.entry("windowId").or_insert_with(|| json!(window_id));
+                }
+            }
+        }
+    }
+    Ok(value)
+}
+
 fn print_json_result(result: Result<Value, String>) -> Result<(), String> {
     let result = result?;
     println!(
@@ -1697,6 +1815,69 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::sha256_hex;
+    use super::{prepare_batch_spec_value, read_batch_spec_input};
+    use serde_json::json;
+
+    #[test]
+    fn batch_spec_inline_json_is_used_verbatim() {
+        assert_eq!(
+            read_batch_spec_input(r#"{"actions":[]}"#).unwrap(),
+            r#"{"actions":[]}"#
+        );
+        assert_eq!(
+            read_batch_spec_input(r#"[{"tool":"x"}]"#).unwrap(),
+            r#"[{"tool":"x"}]"#
+        );
+        assert!(read_batch_spec_input("/no/such/spec-file.json").is_err());
+    }
+
+    #[test]
+    fn batch_spec_overrides_apply() {
+        let value = prepare_batch_spec_value(
+            r#"{ "actions": [ { "tool": "bridge_status" } ] }"#,
+            Some("parallel"),
+            true,
+            Some(3),
+            Some(std::path::Path::new("/tmp/report.json")),
+            "main",
+        )
+        .unwrap();
+        assert_eq!(value["mode"], json!("parallel"));
+        assert_eq!(value["stopOnError"], json!(false));
+        assert_eq!(value["maxParallel"], json!(3));
+        assert_eq!(value["save"], json!("/tmp/report.json"));
+    }
+
+    #[test]
+    fn batch_spec_wraps_bare_array_and_injects_window_id() {
+        let value = prepare_batch_spec_value(
+            r#"[ { "tool": "bridge_status" }, { "tool": "read_logs", "args": { "windowId": "other" } } ]"#,
+            None,
+            false,
+            None,
+            None,
+            "settings",
+        )
+        .unwrap();
+        let actions = value["actions"].as_array().unwrap();
+        // Missing windowId gets the CLI-wide default; explicit ones are kept.
+        assert_eq!(actions[0]["args"]["windowId"], json!("settings"));
+        assert_eq!(actions[1]["args"]["windowId"], json!("other"));
+    }
+
+    #[test]
+    fn batch_spec_rejects_bad_mode_and_non_object() {
+        assert!(prepare_batch_spec_value(
+            r#"{ "actions": [] }"#,
+            Some("sideways"),
+            false,
+            None,
+            None,
+            "main"
+        )
+        .is_err());
+        assert!(prepare_batch_spec_value("42", None, false, None, None, "main").is_err());
+    }
 
     #[test]
     fn sha256_hex_matches_known_vector() {

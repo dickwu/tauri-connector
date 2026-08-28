@@ -94,7 +94,7 @@ async fn push_dom(app: AppHandle, payload: PushDomPayload) -> Result<(), String>
         serde_json::from_str(&payload.refs).map_err(|e| format!("Invalid refs JSON: {e}"))?;
     let meta: state::SnapshotMeta = serde_json::from_str(&payload.meta).unwrap_or_default();
 
-    state
+    let _generation = state
         .push_dom(DomEntry {
             window_id: payload.window_id,
             html: payload.html,
@@ -106,6 +106,7 @@ async fn push_dom(app: AppHandle, payload: PushDomPayload) -> Result<(), String>
             timestamp,
             search_text: String::new(),
             snapshot_id: None,
+            generation: 0,
         })
         .await;
 

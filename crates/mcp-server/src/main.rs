@@ -9,10 +9,8 @@ use connector_client::discovery::{self, ConnectionOptions};
 use connector_client::ConnectorClient;
 use serde_json::{json, Value};
 
-mod protocol;
-mod tools;
-
-use protocol::{JsonRpcRequest, JsonRpcResponse};
+use connector_mcp_server::protocol::{self, JsonRpcRequest, JsonRpcResponse};
+use connector_mcp_server::tools;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 9555;

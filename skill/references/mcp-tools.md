@@ -429,6 +429,69 @@ Perform one action, wait for a selector/text, and collect fresh evidence since a
 
 ---
 
+## Batch Tool
+
+### batch_actions
+
+Run several tool calls from one JSON spec -- sequentially, in parallel, or DAG-ordered via `dependsOn` -- and get back per-action run logs (status, timing, result/error). Available in both MCP servers; the CLI equivalent is `tauri-connector batch`.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `actions` | array | required | Actions to run (see below) |
+| `mode` | string | `sequential` | `sequential` runs in spec order; `parallel` starts everything at once, ordered only by `dependsOn` |
+| `stopOnError` | boolean | true | Stop starting new actions after the first failure; unstarted actions log as `skipped` |
+| `maxParallel` | number | unlimited | Cap on concurrently running actions |
+| `timeoutMs` | number | | Default per-action timeout in ms |
+| `save` | string | | Also write the full report as pretty JSON to this file path (absolute path recommended) |
+
+Each entry in `actions`:
+
+| Param | Type | Description |
+|---|---|---|
+| `tool` | string | Any tool name except `batch_actions` and `driver_session` |
+| `args` | object | Tool arguments, same shape as a direct call (`@eN` refs and `windowId` work as usual) |
+| `id` | string | Stable id other actions reference in `dependsOn` |
+| `dependsOn` | array | Ids that must all succeed before this action starts |
+| `timeoutMs` | number | Per-action timeout override in ms |
+| `omitResult` | boolean | Drop the tool result from its log entry (keep status/timing) to save tokens |
+
+Example -- click, wait, then collect evidence in parallel:
+
+```json
+batch_actions(mode: "parallel", actions: [
+  { "id": "open", "tool": "webview_interact",
+    "args": { "action": "click", "selector": "@e5" } },
+  { "id": "settle", "tool": "webview_wait_for",
+    "args": { "selector": ".modal", "timeout": 5000 }, "dependsOn": ["open"] },
+  { "tool": "read_logs", "args": { "level": "error" }, "dependsOn": ["settle"] },
+  { "tool": "webview_screenshot",
+    "args": { "save": true, "nameHint": "after-open" }, "dependsOn": ["settle"] }
+])
+```
+
+The response is the run report (also what `save` writes):
+
+```json
+{
+  "ok": true, "mode": "parallel", "total": 4,
+  "succeeded": 4, "failed": 0, "skipped": 0,
+  "startedAt": 1756350000000, "durationMs": 640,
+  "logs": [
+    { "index": 0, "id": "open", "tool": "webview_interact", "status": "ok",
+      "startedAtMs": 0, "durationMs": 120, "result": { "clicked": true } }
+  ]
+}
+```
+
+- Log `status` is `ok`, `error` (with an `error` message), or `skipped` (a dependency failed, or `stopOnError` aborted the batch). `startedAtMs` is the offset from batch start, so overlapping ranges show real concurrency.
+- A tool result that "succeeds" but carries a top-level `error` string (e.g. `{"error": "Element not found", "selector": ...}` from a bad selector or stale `@eN` ref) counts as a **failure**: it fails the action, triggers `stopOnError`, and skips its dependents.
+- With `stopOnError: false`, sequential mode still runs the remaining actions in order after a failure -- only explicit `dependsOn` edges on the failed action skip their dependents. That is the "run all checks, report which failed" shape.
+- Mix order and concurrency: `mode: "parallel"` plus `dependsOn` chains gives a DAG -- independent actions overlap while dependent ones wait.
+- Screenshots inside batches: prefer `args: { "save": true }` (artifact path in the log) over inline base64 payloads.
+- Actions that mutate the same DOM still serialize inside the webview's JS run loop; parallel mode pays off for mixed reads (logs, IPC, screenshots) and multi-window work via per-action `windowId`.
+
+---
+
 ## Setup & Info Tools
 
 ### get_setup_instructions

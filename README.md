@@ -125,6 +125,7 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Screenshot | `webview_screenshot` | `screenshot [path] [--selector @eN] [--annotate] [--name-hint debug]` |
 | Artifacts | `artifact_list` / `artifact_read` / `artifact_compare` / `artifact_prune` | `artifacts list\|show\|compare\|prune` |
 | Debug | `debug_mark` / `debug_snapshot` / `webview_act_and_verify` | `debug mark\|snapshot`, `act` |
+| Batch | `batch_actions` | `batch <spec.json\|-\|inline> [--mode sequential\|parallel] [--save report.json]` |
 | Windows | `manage_window` | `windows`, `resize <w> <h>` |
 | State | `ipc_get_backend_state` | `state` |
 | IPC | `ipc_execute_command` | `ipc exec <cmd> [-a '{...}']` |
@@ -217,7 +218,7 @@ The recommended pattern keeps `tauri-plugin-connector` and its transitive deps (
 # ...
 
 # Optional dep — only pulled when --features dev-connector is set.
-tauri-plugin-connector = { version = "0.13", optional = true }
+tauri-plugin-connector = { version = "0.14", optional = true }
 
 [features]
 default = []
@@ -298,7 +299,7 @@ If you don't want a separate dev script and don't mind the plugin (and its trans
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.13"
+tauri-plugin-connector = "0.14"
 ```
 
 ```rust
@@ -389,10 +390,10 @@ Sections reported:
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.13.1
+tauri-connector doctor v0.14.0
 
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.13" (optional, feature-gated)
+  ✓ Cargo dependency: tauri-plugin-connector = "0.14" (optional, feature-gated)
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(feature = "dev-connector"))
   ✓ Permission "connector:default" in src-tauri/capabilities-dev/dev-connector.json
   ✓ app.withGlobalTauri: true
@@ -407,14 +408,14 @@ Example output for a legacy setup (passes, with the migration nudge):
 
 ```
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.13"
+  ✓ Cargo dependency: tauri-plugin-connector = "0.14"
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(debug_assertions))
   ✓ Permission "connector:default" in src-tauri/capabilities/default.json
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
   ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
   ! Using legacy debug_assertions gate — consider migrating to --features dev-connector
-      Fix: 1. tauri-plugin-connector = { version = "0.13", optional = true }
+      Fix: 1. tauri-plugin-connector = { version = "0.14", optional = true }
            2. [features] dev-connector = ["dep:tauri-plugin-connector"]
            3. replace cfg(debug_assertions) with cfg(feature = "dev-connector")
            4. move connector:default to capabilities-dev/dev-connector.json

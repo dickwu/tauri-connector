@@ -391,7 +391,9 @@ async fn dispatch_jsonrpc_request(
                 .unwrap_or("");
             let arguments = params_val.get("arguments").cloned().unwrap_or(json!({}));
 
-            let app = state.app_handle.lock().await;
+            // Clone the handle out so the lock is not held across tool
+            // execution — batch_actions runs tools concurrently.
+            let app = state.app_handle.lock().await.clone();
             let result = mcp_tools::call_tool(
                 tool_name,
                 &arguments,

@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-connector"
-version = "0.13.1"
+version = "0.14.0"
 edition = "2024"
 description = "MCP-compatible Tauri v2 plugin with xcap cross-platform screenshot, snapdom fallback, dual-path JS execution, and embedded MCP server"
 license = "MIT"
@@ -26,6 +26,7 @@ crate-type = ["cdylib", "rlib"]
 tauri-plugin = { version = "2", features = ["build"] }
 
 [dependencies]
+connector-client = { version = "0.14.0", path = "../crates/client" }
 tauri = "2"
 tauri-plugin = "2"
 serde = { version = "1", features = ["derive"] }

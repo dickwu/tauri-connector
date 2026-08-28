@@ -1,6 +1,6 @@
 ---
 name: tauri-connector
-version: 0.13.1
+version: 0.14.0
 description: "Deep inspection, interaction, debugging, and code review for Tauri v2 desktop apps. Use this skill whenever: working with a Tauri app's UI (clicking, filling forms, reading DOM, screenshots, dragging elements); debugging console logs, IPC calls, or Tauri events; reviewing component trees, accessibility, or visual regressions; testing user flows or validating IPC contracts; setting up tauri-connector in a new project. Also triggers on: DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, Tauri app testing, visual regression, admin/ front/ or tool/ desktop apps, @eN ref syntax, or any mention of tauri-connector CLI or MCP tools. This is Claude's bridge to any running Tauri v2 desktop app -- if a Tauri app is involved, use this skill."
 allowed-tools:
   - Bash
@@ -347,6 +347,25 @@ tauri-connector resize 1024 768 --window-id settings
 
 Multi-window apps: nearly every tool takes `windowId` (CLI: global `--window-id`, default `main`). Each window has its own DOM, refs, console logs, and screenshots -- a snapshot of `main` says nothing about `settings`. List window labels first, then scope every call to the window you're working on.
 
+### Batch Actions
+
+Run several tool calls from one JSON spec -- sequentially, in parallel, or DAG-ordered via `dependsOn` -- and get per-action run logs (status, timing, result/error) in one response. Same spec format everywhere: MCP `batch_actions` tool and CLI `tauri-connector batch`.
+
+```bash
+# MCP -- click, wait, then collect evidence concurrently
+batch_actions(mode: "parallel", actions: [
+  { "id": "open", "tool": "webview_interact", "args": { "action": "click", "selector": "@e5" } },
+  { "id": "settle", "tool": "webview_wait_for", "args": { "selector": ".modal" }, "dependsOn": ["open"] },
+  { "tool": "read_logs", "args": { "level": "error" }, "dependsOn": ["settle"] },
+  { "tool": "webview_screenshot", "args": { "save": true }, "dependsOn": ["settle"] }
+])
+
+# CLI -- spec inline, from a file, or '-' for stdin; save the report to JSON
+tauri-connector batch flow.json --mode parallel --save report.json
+```
+
+Sequential is the default (`stopOnError: true` skips the rest after a failure; `--continue-on-error` / `stopOnError: false` keeps running the remaining actions in order -- only explicit `dependsOn` edges skip). A tool result carrying a top-level `error` string (bad selector, stale ref) counts as a failure. `parallel` plus `dependsOn` gives a DAG: independent actions overlap, dependent ones wait. The report (`{ok, total, succeeded, failed, skipped, durationMs, logs[]}`) is returned in the response and, with `save`, also written to a JSON file. Use `omitResult: true` on noisy actions to keep logs small; details in `references/mcp-tools.md`.
+
 ---
 
 ## Snapshot Budget & Subtree Files
@@ -450,7 +469,7 @@ bun run $SCRIPTS/events.ts listen user:login  # Listen for events
 
 For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
 
-1. `tauri-plugin-connector = { version = "0.13", optional = true }` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = { version = "0.14", optional = true }` in `src-tauri/Cargo.toml`
 2. Declare the cargo feature: `[features] dev-connector = ["dep:tauri-plugin-connector"]`
 3. Register the plugin with `#[cfg(feature = "dev-connector")]` guard
 4. Drop the dev capability JSON at `src-tauri/capabilities-dev/dev-connector.json` (outside the default `capabilities/` glob), and register it at runtime via `app.add_capability(include_str!("../capabilities-dev/dev-connector.json"))` inside the same `cfg(feature = "dev-connector")`
@@ -459,7 +478,7 @@ For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill def
 7. Add `"tauri:dev": "tauri dev --features dev-connector"` to `package.json`
 8. Add `"url": "http://127.0.0.1:9556/mcp"` to `.mcp.json`
 
-For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.13"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
+For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.14"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 

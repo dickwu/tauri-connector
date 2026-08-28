@@ -291,7 +291,7 @@ pub async fn dom_snapshot(
         .unwrap_or("")
         .to_string();
     let meta = snapshot_meta_from_value(result.get("meta"));
-    state
+    let generation = state
         .push_dom(DomEntry {
             window_id: window_id.to_string(),
             html: String::new(),
@@ -303,6 +303,7 @@ pub async fn dom_snapshot(
             timestamp: now_ms(),
             search_text: String::new(),
             snapshot_id: None,
+            generation: 0,
         })
         .await;
 
@@ -447,10 +448,15 @@ pub async fn dom_snapshot(
         eprintln!("[connector] Failed to write meta.json for snapshot {snapshot_id}");
     }
 
-    // Update search cache with merged full-text.
+    // Update search cache with merged full-text — but only if the entry is
+    // still the one this snapshot created. A concurrent snapshot (parallel
+    // batch, or the frontend auto-push) may have replaced it, and patching
+    // that entry would mix one snapshot's refs with another's search text.
     {
         let mut cache = state.dom_cache.lock().await;
-        if let Some(entry) = cache.get_mut(window_id) {
+        if let Some(entry) = cache.get_mut(window_id)
+            && entry.generation == generation
+        {
             entry.search_text = merged_search_text;
             entry.snapshot_id = Some(snapshot_id.clone());
         }
@@ -1660,19 +1666,20 @@ pub async fn ipc_monitor(
     bridge: &crate::bridge::Bridge,
 ) -> Response {
     match action {
-        "start" => {
-            state.set_ipc_monitoring(true).await;
-            let _ = bridge
-                .execute_js("window.__CONNECTOR_IPC_MONITOR__ = true", 2_000)
-                .await;
-            Response::success(id.to_string(), serde_json::json!({ "monitoring": true }))
-        }
-        "stop" => {
-            state.set_ipc_monitoring(false).await;
-            let _ = bridge
-                .execute_js("window.__CONNECTOR_IPC_MONITOR__ = false", 2_000)
-                .await;
-            Response::success(id.to_string(), serde_json::json!({ "monitoring": false }))
+        "start" | "stop" => {
+            let on = action == "start";
+            // Hold the flag's lock across the JS commit so concurrent
+            // start/stop toggles serialize and the Rust flag can never
+            // disagree with the in-page flag.
+            let mut monitoring = state.ipc_monitor_active.lock().await;
+            let script = if on {
+                "window.__CONNECTOR_IPC_MONITOR__ = true"
+            } else {
+                "window.__CONNECTOR_IPC_MONITOR__ = false"
+            };
+            let _ = bridge.execute_js(script, 2_000).await;
+            *monitoring = on;
+            Response::success(id.to_string(), serde_json::json!({ "monitoring": on }))
         }
         _ => Response::error(
             id.to_string(),
@@ -2560,6 +2567,10 @@ fn append_artifact_manifest(
     state: &PluginState,
     artifact: &serde_json::Value,
 ) -> Result<(), String> {
+    let _guard = state
+        .artifact_manifest_lock
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let path = artifact_manifest_path(state);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
@@ -2845,7 +2856,14 @@ pub async fn artifact_prune(
     state: &PluginState,
 ) -> Response {
     let path = artifact_manifest_path(state);
-    let mut entries = read_artifact_manifest(state);
+    // Hold the manifest lock across the whole read → rewrite so a concurrent
+    // append (parallel screenshot) can never land between them and be lost.
+    // Everything below is synchronous — no await while the guard is held.
+    let _guard = state
+        .artifact_manifest_lock
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let mut entries = read_artifact_manifest_unlocked(state);
     let matches_kind = |entry: &serde_json::Value| {
         let Some(kind) = kind else {
             return true;
@@ -2943,6 +2961,16 @@ pub async fn artifact_prune(
 }
 
 fn read_artifact_manifest(state: &PluginState) -> Vec<serde_json::Value> {
+    let _guard = state
+        .artifact_manifest_lock
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    read_artifact_manifest_unlocked(state)
+}
+
+/// Manifest read without taking `artifact_manifest_lock` — only for callers
+/// (like `artifact_prune`) that already hold the guard.
+fn read_artifact_manifest_unlocked(state: &PluginState) -> Vec<serde_json::Value> {
     let path = artifact_manifest_path(state);
     let Ok(file) = std::fs::File::open(path) else {
         return Vec::new();
@@ -3569,17 +3597,24 @@ pub async fn ipc_listen(
                 );
             }
 
+            // The in-page guard makes registration idempotent: JS is
+            // single-threaded per webview, so the synchronous placeholder
+            // check closes the race when two concurrent starts (e.g. a
+            // parallel batch) both inject for the same event.
             let events_js: Vec<String> = new_events.iter().map(|e| {
                 format!(
-                    "window.__TAURI__.event.listen('{ev}', function(ev) {{\
-                        var ipc = window.__CONNECTOR_ORIG_INVOKE__ || window.__TAURI_INTERNALS__.invoke;\
-                        ipc('plugin:connector|push_event', {{\
-                            payload: {{ event: '{ev}', payload: ev.payload, timestamp: Date.now(), windowId: ev.windowLabel || 'main' }}\
-                        }}).catch(function(){{}});\
-                    }}).then(function(unlisten) {{\
-                        window.__CONNECTOR_EVENT_LISTENERS__ = window.__CONNECTOR_EVENT_LISTENERS__ || {{}};\
-                        window.__CONNECTOR_EVENT_LISTENERS__['{ev}'] = unlisten;\
-                    }});",
+                    "window.__CONNECTOR_EVENT_LISTENERS__ = window.__CONNECTOR_EVENT_LISTENERS__ || {{}};\
+                    if (!window.__CONNECTOR_EVENT_LISTENERS__['{ev}']) {{\
+                        window.__CONNECTOR_EVENT_LISTENERS__['{ev}'] = true;\
+                        window.__TAURI__.event.listen('{ev}', function(ev) {{\
+                            var ipc = window.__CONNECTOR_ORIG_INVOKE__ || window.__TAURI_INTERNALS__.invoke;\
+                            ipc('plugin:connector|push_event', {{\
+                                payload: {{ event: '{ev}', payload: ev.payload, timestamp: Date.now(), windowId: ev.windowLabel || 'main' }}\
+                            }}).catch(function(){{}});\
+                        }}).then(function(unlisten) {{\
+                            window.__CONNECTOR_EVENT_LISTENERS__['{ev}'] = unlisten;\
+                        }});\
+                    }}",
                     ev = e,
                 )
             }).collect();
@@ -3588,15 +3623,22 @@ pub async fn ipc_listen(
             drop(listeners); // release lock before bridge call
             match bridge.execute_js(&script, 5_000).await {
                 Ok(_) => {
+                    // Re-diff under the second lock: a concurrent start may
+                    // have registered some of these while the lock was
+                    // released for the bridge call.
                     let mut listeners = state.event_listeners.lock().await;
+                    let mut added = 0usize;
                     for e in &new_events {
-                        listeners.push((*e).clone());
+                        if !listeners.contains(*e) {
+                            listeners.push((*e).clone());
+                            added += 1;
+                        }
                     }
                     Response::success(
                         id.to_string(),
                         serde_json::json!({
                             "listening": *listeners,
-                            "added": new_events.len(),
+                            "added": added,
                         }),
                     )
                 }
