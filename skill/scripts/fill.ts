@@ -1,39 +1,40 @@
 #!/usr/bin/env bun
-/** Focus an element and type text into it. Args: <selector> <text> */
+/** Fill one input: resolve the selector to exactly one element, replace its value, fire input events.
+ * Args: <selector|@ref> <text> [--window <id>]
+ * Uses the same targeted-input pipeline as CLI `fill` / MCP `webview_act_and_verify`: a selector that
+ * matches zero or several elements fails (target_not_found / ambiguous_target) instead of typing into
+ * whatever happens to have focus.
+ */
 import { send } from './connector';
 
-const selector = process.argv[2];
-const text = process.argv[3];
+const args = process.argv.slice(2);
+const windowIndex = args.indexOf('--window');
+const windowId = windowIndex >= 0 ? args[windowIndex + 1] ?? 'main' : 'main';
+const positional =
+  windowIndex >= 0 ? [...args.slice(0, windowIndex), ...args.slice(windowIndex + 2)] : args;
+const [selector, text] = positional;
+
 if (!selector || text === undefined) {
-  console.error('Usage: bun run fill.ts <selector> <text>');
+  console.error('Usage: bun run fill.ts <selector|@ref> <text> [--window <id>]');
   process.exit(1);
 }
 
-// Focus, clear, then type
-const script = `(() => {
-  const el = document.querySelector("${selector.replace(/"/g, '\\"')}");
-  if (!el) return { error: "Element not found: ${selector}" };
-  el.focus();
-  if ('value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
-  return { focused: true, tag: el.tagName.toLowerCase() };
-})()`;
-
-const focusResp = await send({ type: 'execute_js', script, window_id: 'main' });
-if ((focusResp as { error?: string }).error) {
-  console.error('Focus failed:', (focusResp as { error: string }).error);
-  process.exit(1);
-}
-
-const typeResp = await send({
-  type: 'keyboard',
-  action: 'type',
+const response = await send({
+  type: 'webview_act_and_verify',
+  action: 'fill',
+  selector,
   text,
-  window_id: 'main',
+  window_id: windowId,
 });
 
-if ((typeResp as { error?: string }).error) {
-  console.error('Type failed:', (typeResp as { error: string }).error);
+if (response.error !== undefined) {
+  console.error(JSON.stringify({ error: response.error, outcome: response.outcome }));
   process.exit(1);
 }
 
-console.log(JSON.stringify((typeResp as { result?: unknown }).result, null, 2));
+const result = response.result as { verdict?: string; actionResult?: unknown } | undefined;
+console.log(JSON.stringify(result?.actionResult ?? result ?? null, null, 2));
+if (result?.verdict === 'failed') {
+  console.error(JSON.stringify({ error: 'fill failed', outcome: response.outcome }));
+  process.exit(1);
+}

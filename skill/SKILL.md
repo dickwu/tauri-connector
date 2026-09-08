@@ -48,9 +48,30 @@ tauri-connector workflow get <runId> --include evidence
 tauri-connector workflow resume <runId> --expected-revision 7 --checkpoint-id <checkpointId> --intent reconcile
 ```
 
+A minimal strict spec (`schemaVersion`, `runKey`, `steps` are required; `inputs`, `expect`, `goal` are optional):
+
+```json
+{
+  "schemaVersion": 1,
+  "runKey": "login-smoke-001",
+  "inputs": { "email": "qa@example.com" },
+  "steps": [
+    { "id": "email", "op": "fill",
+      "target": { "by": "label", "value": "Email" },
+      "value": { "fromInput": { "key": "email" } },
+      "expect": { "kind": "valueEquals", "target": { "by": "label", "value": "Email" }, "expected": { "fromInput": { "key": "email" } } } },
+    { "id": "submit", "op": "click",
+      "target": { "by": "role", "value": "button", "name": "Sign in" },
+      "expect": { "kind": "element", "target": { "by": "role", "value": "heading", "name": "Dashboard" }, "state": "visible" } }
+  ]
+}
+```
+
+Each locator must resolve to exactly one actionable element (`target_not_found` / `ambiguous_target` / `not_actionable` otherwise) -- narrow it with `name`, a nested `scope` locator, or `entity: {attribute, value}`. `runKey` is the idempotency key: resubmitting the identical spec returns the existing run, while a changed spec under the same key returns `run_key_conflict`. Check `authentication.configured` in `workflow_capabilities` when a call returns `unauthorized`.
+
 The Bun fallback uses the same app-owned service: `bun run $SCRIPTS/workflow.ts run @arguments.json`, where the file contains `{"spec": {...}}`. Use `get`, `cancel`, `resume` or `capabilities` with their JSON arguments. It reads `TAURI_CONNECTOR_WORKFLOW_TOKEN`, checks application support, and preserves incomplete/failure exit codes.
 
-`continue` is limited to an undispatched paused step within the same application instance and original deadline. `reconcile` only rechecks an available postcondition; it does not replay actions or erase the original failure. Cancellation prevents future dispatch and does not roll back prior effects. CLI codes are `0` completed, `1` failed/cancelled, `2` pending/paused/unknown. `goalStatus: not_requested` does not mean the business goal was verified. See `references/mcp-tools.md` and `references/cli-commands.md` for exact arguments and examples.
+`continue` is limited to an undispatched paused step within the same application instance and original deadline. `reconcile` only rechecks an available postcondition; it does not replay actions or erase the original failure. Cancellation prevents future dispatch and does not roll back prior effects. CLI codes are `0` completed, `1` failed/cancelled, `2` pending/paused/unknown; a `completed` run still exits `1` when `goalStatus`/`originalTestVerdict` is `failed` and `2` when `inconclusive`. Over MCP only the exit-1 case sets `isError`, so read `status` and `allowedNextActions` from the body. `goalStatus: not_requested` does not mean the business goal was verified. `query` steps refuse password/secret-looking fields (`capability_unavailable`). See `references/mcp-tools.md` and `references/cli-commands.md` for exact arguments and examples.
 
 Workflow v1 supports role/label/testId/CSS locators; it rejects legacy `@ref` fallback, arbitrary JS, unknown IPC, parallel scheduling and transition-event assertions. DOM conditions establish observed UI state, not business persistence. For an unknown UI issue, continue with the inspection loop below.
 
@@ -389,11 +410,11 @@ Sequential is the default (`stopOnError: true` skips the rest after a failure; `
 
 ## Snapshot Budget & Subtree Files
 
-Over MCP, snapshots default to a 4000-token budget: larger DOMs return an inline layout skeleton plus `file=subtree-K.txt` markers pointing at on-disk subtree files (absolute paths in `meta.subtreeFiles[].path` -- open with the Read tool, or `tauri-connector snapshots read <uuid> <file>`). WebSocket/Bun callers default to unlimited. `webview_search_snapshot` always matches the merged full text -- skeleton plus every subtree -- so spilled content is never invisible to search. When hunting for something specific, search beats raising the budget. When overlays (modals, floating windows) are open, overlay sections render inline first -- focused, then z-order -- so the open modal never spills; the background page spills instead (see "Modals, Floating Windows & Overlays").
+Snapshots default to a 4000-token budget on every path (MCP, WebSocket/Bun, CLI): larger DOMs return an inline layout skeleton plus `file=subtree-K.txt` markers pointing at on-disk subtree files (absolute paths in `meta.subtreeFiles[].path` -- open with the Read tool, or `tauri-connector snapshots read <uuid> <file>`). `webview_search_snapshot` always matches the merged full text -- skeleton plus every subtree -- so spilled content is never invisible to search. When hunting for something specific, search beats raising the budget. When overlays (modals, floating windows) are open, overlay sections render inline first -- focused, then z-order -- so the open modal never spills; the background page spills instead (see "Modals, Floating Windows & Overlays").
 
 ```bash
 webview_dom_snapshot(mode: "ai", maxTokens: 8000)        # raise the budget
-webview_dom_snapshot(mode: "ai", noSplit: true)          # full inline output (legacy)
+webview_dom_snapshot(mode: "ai", maxTokens: 0)           # full inline output (the embedded MCP server ignores noSplit; CLI: --no-split)
 webview_search_snapshot(pattern: "submit|confirm", context: 3)
 tauri-connector snapshots list                           # then: snapshots read <uuid> subtree-0.txt
 ```
@@ -482,6 +503,7 @@ bun run $SCRIPTS/wait.ts ".loaded"        # Wait for selector
 bun run $SCRIPTS/state.ts                 # App metadata
 bun run $SCRIPTS/windows.ts              # List windows
 bun run $SCRIPTS/events.ts listen user:login  # Listen for events
+bun run $SCRIPTS/workflow.ts capabilities     # Workflow lifecycle: run|get|cancel|resume|capabilities '<args JSON>' or @file.json
 ```
 
 ## Setup
@@ -566,3 +588,10 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | Bridge not connecting | Check `withGlobalTauri: true` in tauri.conf.json. Bridge auto-reconnects every 1s |
 | Bridge/snapshot engine vanishes after a page reload or dev-server hot reload | Plugin < 0.13.1 injected the bridge once per webview, so reloads killed it until app restart. Upgrade `tauri-plugin-connector` to >= 0.13.1 (re-injects on every page load) |
 | Logs empty | Console interception starts on bridge connect. Ensure plugin is registered before app loads |
+| `unauthorized` from a `workflow_*` call | The host has no workflow token, or one shorter than 32 bytes (silently ignored). Set `TAURI_CONNECTOR_WORKFLOW_TOKEN` before launching the app (or call `ConnectorBuilder::workflow_token`), and give the same value to the CLI / standalone MCP environment or the embedded `authToken` argument. `workflow capabilities` reports `authentication.configured` |
+| `capability_unavailable` on `workflow` | The app runs a plugin older than 0.15 (`bridge_status` lacks `workflowProtocolVersion: 1`). Upgrade `tauri-plugin-connector`; single tools and `batch` keep working meanwhile |
+| `run_key_conflict` | The same `runKey` was reused with a different spec. Recover a lost submission with the identical spec; use a new key only for genuinely new work |
+| `resource_busy` | Another workflow, batch, or single tool (screenshots and snapshots included) holds the same window resource, or an uncertain write is quarantined there. Retry before dispatch (`retryableBeforeDispatch: true`); never treat it as permission to replay a write. With `quarantined: true`, only restarting the app frees the resource -- no tool releases it |
+| `outcome_unknown` / `effect: possible` | The action was dispatched but its result was lost (timeout, disconnect). Read `workflow_get`, then `resume --intent reconcile`; do not resubmit under a fresh key. The quarantine on that window persists until the app restarts |
+| `persistence_unavailable` | The workflow journal cannot use private storage (Windows, or an unusable app data dir). Workflows fail closed; legacy tools are unaffected |
+| Wait timed out inside `batch`, or `act_and_verify` verdict `failed` | Since 0.15 these are real failures (`condition_timeout`, `postcondition_failed`): the action fails and its dependents skip. Raise `timeout`, or wait for a state that actually appears |

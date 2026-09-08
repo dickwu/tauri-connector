@@ -12,6 +12,7 @@ Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-
 | `TAURI_CONNECTOR_PORT` | discovered | Plugin WebSocket port |
 | `TAURI_CONNECTOR_PID_FILE` | | Explicit `.connector.json` path |
 | `TAURI_CONNECTOR_APP_ID` | | Filter discovered instances by app identifier |
+| `TAURI_CONNECTOR_WORKFLOW_TOKEN` | | Host workflow token (>= 32 bytes) for `workflow run/get/cancel/resume`; `workflow capabilities` needs none |
 
 ---
 
@@ -26,7 +27,7 @@ tauri-connector --pid-file src-tauri/target/.connector.json snapshot -i
 tauri-connector bridge
 ```
 
-`status` lists live and stale candidates. `bridge` shows connected webviews, pending evals, and whether eval fallback is available. `--window-id` is global and scopes snapshots, refs, interactions, screenshots, logs, and window operations to a specific Tauri window label.
+`status` lists live and stale candidates. `bridge` shows connected webviews, pending evals, whether eval fallback is available (`fallbackAvailable`), and `workflowProtocolVersion` (`1` on plugins >= 0.15; the CLI checks it before sending any `workflow` request). `--window-id` is global and scopes snapshots, refs, interactions, screenshots, logs, and window operations to a specific Tauri window label.
 
 ---
 
@@ -64,7 +65,7 @@ tauri-connector snapshot [FLAGS]
 | `--max-tokens` | | 4000 | Token budget for inline output. Overflow spills to subtree files. `0` = unlimited |
 | `--no-split` | | false | Disable subtree file splitting -- full inline output regardless of budget |
 | `--selector` | `-s` | | CSS selector to scope subtree |
-| `--mode` | | `ai` | `ai`, `accessibility`, `structure` |
+| `--mode` | | `ai` with `-i`, else `accessibility` | `ai`, `accessibility`, `structure` |
 | `--no-react` | | false | Skip React fiber enrichment |
 | `--no-portals` | | false | Skip portal stitching |
 
@@ -259,11 +260,11 @@ tauri-connector drag <source> <target> [FLAGS]
 
 `source` and `target` can be `@eN` refs, CSS selectors, or `"x,y"` pixel coordinates.
 
-| Flag | Default | Description |
-|---|---|---|
-| `--steps` | 10 | Intermediate move events (higher = smoother, some libs need >5) |
-| `--duration` | 300 | Total drag time in ms |
-| `--strategy` | `auto` | `auto`, `pointer`, `html5dnd` |
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--steps` | `-s` | 10 | Intermediate move events (higher = smoother, some libs need >5) |
+| `--duration` | `-d` | 300 | Total drag time in ms |
+| `--strategy` | | `auto` | `auto`, `pointer`, `html5dnd` |
 
 Strategy details:
 - **auto**: Checks `el.draggable` -- uses `html5dnd` if true, `pointer` otherwise
@@ -293,9 +294,17 @@ tauri-connector workflow cancel <runId>
 tauri-connector workflow resume <runId> --expected-revision 7 --checkpoint-id <checkpointId> --intent reconcile
 ```
 
+| Subcommand | Flags | Notes |
+|---|---|---|
+| `capabilities` | | No token needed. Reports `ops`, `conditions`, `tools`, `authentication.configured`, `recovery`, `unsupported`, `limits` |
+| `run <SPEC>` | `--wait-ms <0-30000>` (default 1000) | `SPEC` is inline JSON, a file path, or `-` for stdin; forwarded unchanged, the app executes |
+| `get <runId>` | `--cursor <n>`, `--include steps,events,evidence`, `--evidence-id <ref>`, `--offset <bytes>` | `--offset` requires `--evidence-id`; omitted offset is 0 |
+| `cancel <runId>` | | Stops future dispatch only; nothing is rolled back |
+| `resume <runId>` | `--expected-revision <n>`, `--checkpoint-id <id>`, `--intent continue\|reconcile` (all three required) | Take the values from the latest report |
+
 Set `TAURI_CONNECTOR_WORKFLOW_TOKEN` to the trusted host token (at least 32 bytes). Capability lookup does not require a token. `run` reads a v1 spec and forwards it unchanged to the application; it never runs workflow steps in the CLI. The spec's `windowId` controls execution. `--wait-ms` ranges from 0 to 30000 (default 1000); it limits response waiting while app execution continues under its original deadline.
 
-The JSON response includes `runId` and the current status. Exit code `0` means completed success or successful capability lookup; `1` means failure, cancellation, invalid input or transport error; `2` means queued, running, paused, interrupted or unknown. Never interpret a nonzero code as proof that no effect occurred. Query `get` or reuse the same `runKey` and identical spec after a lost submission response.
+The JSON response includes `runId` and the current status. Exit code `0` means completed success or successful capability lookup; `1` means failure, cancellation, invalid input or transport error; `2` means queued, running, paused, interrupted or unknown. A `completed` run exits `1` when `goalStatus` or `originalTestVerdict` is `failed`, and `2` when either is `inconclusive`. Never interpret a nonzero code as proof that no effect occurred. Query `get` or reuse the same `runKey` and identical spec after a lost submission response.
 
 `get --evidence-id` reads one retained reference as an `evidencePage` with JSON text `content`, byte `offset`, `nextOffset`, and `totalBytes`. Follow the returned UTF-8 byte `nextOffset` to read further chunks. `--offset` requires `--evidence-id`; omitted offset starts at zero. `nextOffset: null` marks the final chunk. Paging does not dispatch business actions.
 
@@ -385,7 +394,8 @@ The command prints the final resolved path and `sha256` as JSON. Annotated scree
 List, inspect, prune, and compare screenshot artifacts from the connector manifest.
 
 ```bash
-tauri-connector artifacts list --kind screenshot
+tauri-connector artifacts list --kind screenshot          # --limit/-l caps entries (default 100)
+tauri-connector artifacts list -l 20
 tauri-connector artifacts show shot_...
 tauri-connector artifacts show shot_... --base64
 tauri-connector artifacts compare shot_before shot_after --threshold 0.01
@@ -409,7 +419,7 @@ tauri-connector logs [FLAGS]
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--lines` | `-n` | 50 | Number of entries |
+| `--lines` | `-n` | 20 | Number of entries |
 | `--filter` | `-f` | | Substring match |
 | `--level` | `-l` | | Comma-separated: `log`, `info`, `warn`, `error`, `debug` |
 | `--pattern` | `-p` | | Regex match |
@@ -424,25 +434,58 @@ tauri-connector runtime -l error --since-mark mark_...
 tauri-connector clear runtime
 ```
 
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--lines` | `-n` | 100 | Number of entries |
+| `--kind` | `-k` | | Comma-separated kinds: `network`, `window_error`, `unhandledrejection`, `navigation`, `resource_error` |
+| `--level` | `-l` | | Comma-separated levels: `error`, `warn`, `info` |
+| `--pattern` | `-p` | | Regex match on the serialized entry |
+| `--since` | | | Epoch ms filter |
+| `--since-mark` | | | Debug mark id from `debug mark` |
+
 ### debug
 
 Create marks and collect bundled debug context.
 
 ```bash
 tauri-connector debug mark before-login-click
-tauri-connector debug snapshot --dom --screenshot --logs --ipc --runtime
+tauri-connector debug snapshot --dom --screenshot --logs --ipc --events --runtime
 tauri-connector debug snapshot --runtime --since-mark mark_...
 ```
+
+`debug snapshot` flags:
+
+| Flag | Description |
+|---|---|
+| `--dom`, `--screenshot`, `--logs`, `--ipc`, `--events`, `--runtime` | Sections to include (each off unless passed) |
+| `--since <epoch-ms>`, `--since-mark <id>` | Only captures after a timestamp or a `debug mark` |
+| `--max-tokens <n>` | Inline token budget for the DOM snapshot |
+| `--screenshot-name-hint <slug>` | Name hint for the saved screenshot artifact |
 
 ### act
 
 Perform an action, wait for a visible result, and collect fresh evidence in one call.
 
 ```bash
+tauri-connector act <action> [target] [text...] [FLAGS]
 tauri-connector act click @e5 --wait-text Success --screenshot --logs --ipc --runtime
 tauri-connector act fill @e3 "user@example.com" --wait-selector ".valid" --dom
 tauri-connector act press Enter --wait-selector ".submitted" --runtime
+tauri-connector act drag @e3 --target-selector @e7 --wait-selector ".dropped"
 ```
+
+| Arg / flag | Default | Description |
+|---|---|---|
+| `action` | | `click`, `fill`, `type`, `press`, `drag`, `hover` |
+| `target` | | Selector or `@eN`; for `press`, the key name when `--key` is omitted |
+| `text` | | Text for `fill` / `type` |
+| `--key` | | Explicit key for `press` |
+| `--target-selector` | | Drag destination selector or `@eN` |
+| `--wait-selector`, `--wait-text` | | Condition expected after the action |
+| `--timeout` | 5000 | Wait timeout in ms |
+| `--dom`, `--screenshot`, `--logs`, `--ipc`, `--runtime` | off | Evidence to collect after the wait |
+
+The response carries `verdict`: `failed` when the action or the wait failed, `inconclusive` when no `--wait-selector`/`--wait-text` was given, `passed` otherwise. Inside `batch`, a `failed` verdict fails the action (`postcondition_failed`).
 
 ### eval
 
@@ -474,7 +517,7 @@ tauri-connector wait [selector] [FLAGS]
 | `--url` | | Glob pattern matched against `location.href` |
 | `--load-state` | | `domcontentloaded` or `load`; `networkidle` returns `unsupported_condition` |
 | `--fn` | | JavaScript expression/function/body that returns truthy |
-| `--state` | `attached` | Selector state: `attached`, `detached`, `visible`, `hidden` |
+| `--state` | `attached` (applied by the plugin when omitted) | Selector state: `attached`, `detached`, `visible`, `hidden` |
 | `--timeout` | 5000 | Timeout in ms |
 
 Examples:
@@ -484,6 +527,8 @@ tauri-connector wait --url "**/settings*" --load-state load
 tauri-connector wait --fn "window.__APP_READY__ === true"
 tauri-connector wait ".toast" --state hidden
 ```
+
+A standalone `wait` prints `{ "found": false, "timeout": true, ... }` and exits 0 on timeout (only transport errors exit 1), so check `found` in scripts. Inside `batch` the same timeout is a failure (`condition_timeout`): the action fails, its dependents skip, and the batch exits non-zero.
 
 ### locator
 
@@ -498,7 +543,7 @@ tauri-connector locator --test-id submit --action click
 
 | Flag | Description |
 |---|---|
-| `--role`, `--text`, `--label`, `--placeholder`, `--alt`, `--title`, `--test-id` | Primary locator |
+| `--role`, `--text`, `--label`, `--placeholder`, `--alt`, `--title`, `--test-id` (alias `--testid`) | Primary locator |
 | `--name` | Accessible-name filter |
 | `--exact` | Exact text/name match |
 | `--first`, `--last`, `--nth` | Match selection |
@@ -513,7 +558,7 @@ Clear log files.
 tauri-connector clear <target>
 ```
 
-`target`: `logs`, `ipc`, `events`, `all`
+`target`: `logs`, `ipc`, `events`, `runtime`, `all`
 
 ---
 
@@ -529,7 +574,7 @@ tauri-connector ipc exec <command> [-a <json-args>]
 
 ### ipc monitor / unmonitor
 
-Start or stop IPC call monitoring.
+Start or stop IPC call monitoring in the window selected by the global `--window-id` (default `main`). The response reports `desired`/`applied` for that window and the command fails with `observation_failed` if its page never acknowledges; monitor each window you care about separately.
 
 ```bash
 tauri-connector ipc monitor
@@ -549,7 +594,7 @@ tauri-connector ipc captured [FLAGS]
 | `--filter` | `-f` | | Substring match on command |
 | `--pattern` | `-p` | | Regex match |
 | `--since` | | | Epoch ms filter |
-| `--limit` | `-l` | 50 | Max entries |
+| `--limit` | `-l` | 100 | Max entries |
 
 ---
 
@@ -585,7 +630,7 @@ tauri-connector events captured [FLAGS]
 |---|---|---|---|
 | `--pattern` | `-p` | | Regex match |
 | `--since` | | | Epoch ms filter |
-| `--limit` | `-l` | 50 | Max entries |
+| `--limit` | `-l` | 100 | Max entries |
 
 ### events stop
 
@@ -659,4 +704,14 @@ What it verifies:
 - `.connector.json` PID file + live WS ping + MCP Streamable HTTP initialize POST
 - PID liveness, runtime metadata/log_dir, JSONL log files, bridge status, runtime/artifact/debug WS commands
 - MCP Streamable HTTP lifecycle: initialize 200, notification 202 empty body, ping 200, GET /mcp 405, DELETE 204
-- `.claude/` auto-detect hook installation (optional)
+- `.claude/` auto-detect hook installation (optional; `Fix:` points at `tauri-connector hook install`)
+- installed local skill docs (`~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills`) match the CLI-bundled copies (warn only)
+
+### hook
+
+Install or remove the Claude Code auto-detect hook: a `UserPromptSubmit` hook wired into `.claude/settings.local.json` that announces the connector tools on each prompt while the app's `.connector.json` PID file is live, and stays silent otherwise.
+
+```bash
+tauri-connector hook install
+tauri-connector hook remove
+```

@@ -405,3 +405,43 @@ read_log_file(source: "console", windowId: "settings", lines: 50)
 webview_screenshot(windowId: "main")
 webview_screenshot(windowId: "settings")
 ```
+
+---
+
+## Recipe 11: Reproduce a Known Multi-Step Flow Deterministically
+
+Use an application-owned workflow (plugin >= 0.15) when the failing scenario is a known sequence -- open dialog, fill, save, check the row -- and you need it to survive slow steps, response timeouts, or a dropped connection without double-submitting.
+
+**Step 1: Confirm support and authentication**
+```bash
+tauri-connector workflow capabilities        # ops, conditions, limits, authentication.configured
+```
+`authentication.configured: false` means the host never set `TAURI_CONNECTOR_WORKFLOW_TOKEN` (see `SETUP.md`, Step 6b). `capability_unavailable` means the plugin is older than 0.15.
+
+**Step 2: Collect strict locators from a snapshot**
+```bash
+webview_dom_snapshot(mode: "accessibility")   # roles + accessible names
+webview_search_snapshot(pattern: "data-testid", context: 1)
+```
+Workflow locators are `role`+`name`, `label`, `testId`, or `css` -- never `@eN` refs. Add a `scope` (for example the dialog) whenever the page has more than one match; the run fails with `ambiguous_target` otherwise.
+
+**Step 3: Submit the spec and wait for the response budget**
+```bash
+tauri-connector workflow run flow.json --wait-ms 30000
+```
+Each step's `expect` must pass before the next step dispatches. Exit `0` means completed, `1` failed/cancelled, `2` still running, paused, or unknown -- never a signal to resubmit with a fresh `runKey`.
+
+**Step 4: Read the report**
+```bash
+tauri-connector workflow get <runId> --include steps,events,evidence
+tauri-connector workflow get <runId> --evidence-id <ref> --offset 0   # follow evidencePage.nextOffset until null
+```
+Look at `status`, `reason`, `blockedStep`, and `blockedOutcome.error.code` (see the error-code table in `mcp-tools.md`). `steps[].outcome.data` holds `query` results; `coverage.truncated: true` means evidence bodies were dropped from the summary and must be read by `evidenceId`.
+
+**Step 5: Recover instead of replaying**
+- Lost the submission response? Resubmit the *identical* spec with the same `runKey`: the app returns the existing run. A changed spec under the same key is `run_key_conflict`.
+- `paused` with `allowedNextActions` containing `continue`? `tauri-connector workflow resume <runId> --expected-revision <n> --checkpoint-id <id> --intent continue` (same app instance, undispatched step, deadline remaining).
+- `outcome_unknown` / `effect: possible`? Use `--intent reconcile` to recheck the postcondition. It never replays the click, and the original verdict stays failed if it was failed.
+- `resource_busy`? Another operation or a quarantined uncertain write holds the window; wait, then retry before dispatch.
+
+A passing `expect` proves observed UI state only. Confirm backend persistence separately (`ipc_get_captured`, backend logs, or a `tool` step on `ipc_get_backend_state`).

@@ -6,7 +6,9 @@ Complete parameter tables for tauri-connector MCP tools. Configure in `.mcp.json
 { "mcpServers": { "tauri-connector": { "url": "http://127.0.0.1:9556/mcp" } } }
 ```
 
-The standalone MCP server (`tauri-connector-mcp`) adds one additional tool: `driver_session`. Legacy `/sse` remains available for older clients.
+The standalone MCP server (`tauri-connector-mcp`) adds one additional tool, `driver_session`, and reads `TAURI_CONNECTOR_WORKFLOW_TOKEN` from its environment for the `workflow_*` tools (put it in the `env` block of its `.mcp.json` entry). Legacy `/sse` remains available for older clients.
+
+**Response envelope (0.15+).** Every tool result can carry a typed `outcome` (`structuredContent.outcome` on success, `structuredContent.{error, outcome}` on failure) with `execution`, `verification`, `effect`, and a stable `error.code` -- see "Run report fields" and "Error codes" under Workflow tools. A legacy handler error without a typed outcome surfaces as `outcome_unknown`. Mutating tools, plus `webview_screenshot`, `webview_dom_snapshot`, `webview_find_element`, `webview_get_styles`, and `webview_wait_for`, take an application-owned lease on the target window and can return `resource_busy` while a workflow, batch, or another tool holds it; read-only diagnostics such as `read_logs`, `bridge_status`, `ipc_get_backend_state`, `artifact_list`, and `artifact_read` are never blocked. A lease quarantined by an uncertain write (`quarantined: true`) is released only by restarting the app -- no tool clears it. Mutating tools can also fail with `persistence_unavailable` when the app's data directory is unusable, because the lease journal must be writable first.
 
 ---
 
@@ -58,7 +60,7 @@ Poll for an element state, text, URL glob, document load state, or JavaScript co
 | `state` | string | `attached` | Selector state: `attached`, `detached`, `visible`, `hidden` |
 | `timeout` | number | 5000 | Timeout in ms |
 
-Timeouts return `{ found: false, timeout: true, elapsed_ms }`; successful waits return `{ found: true, elapsed_ms }`.
+Timeouts return `{ found: false, timeout: true, elapsed_ms, lastObservation }`; successful waits return `{ found: true, elapsed_ms, lastObservation }`. A predicate that throws, or a page unload mid-wait, returns `{ found: false, code: "observation_failed", error }`. A direct call reports the timeout as data (no MCP `isError`); inside `batch_actions`, `webview_act_and_verify`, or a workflow `wait` step the same timeout is a failure (`condition_timeout`) that fails the action and skips its dependents. `effect` is `none` unless a custom `fn` predicate was supplied (`possible`, since your predicate may have side effects).
 
 ### webview_locator
 
@@ -82,6 +84,8 @@ Find an element by semantic locator and optionally act on the matched element. U
 | `value` | string | | Value for `fill` or `type` |
 | `windowId` | string | | Target window |
 
+All supplied locator constraints intersect (AND), then `first`/`last`/`nth` pick from that intersection. `fill` replaces the matched control's value and `type` appends, both through native setters plus `beforeinput`/`input`/`change` events so controlled React inputs update.
+
 ---
 
 ## DOM & Inspection Tools
@@ -96,8 +100,8 @@ Get a structured DOM tree. The `ai` mode includes ref IDs, React component names
 | `selector` | string | | CSS selector to scope to a subtree |
 | `maxDepth` | number | unlimited | Maximum tree depth |
 | `maxElements` | number | unlimited | Maximum element count |
-| `maxTokens` | number | 4000 (MCP), 0 elsewhere | Token budget for inline output. Overflow spills to on-disk subtree files. `0` = unlimited. |
-| `noSplit` | boolean | false | Disable subtree file splitting -- return full inline output regardless of budget |
+| `maxTokens` | number | 4000 | Token budget for inline output (same default over MCP, WebSocket, and CLI). Overflow spills to on-disk subtree files. `0` = unlimited. |
+| `noSplit` | boolean | false | Disable subtree file splitting -- return full inline output regardless of budget. The embedded MCP server (0.15) ignores this flag: pass `maxTokens: 0` there. The standalone server and the CLI (`--no-split`) honor it |
 | `reactEnrich` | boolean | true | Include React component names from fiber internals |
 | `followPortals` | boolean | true | Stitch portals (detected via `aria-controls`/`aria-owns`) to their triggers |
 | `shadowDom` | boolean | false | Traverse shadow DOM boundaries |
@@ -174,7 +178,7 @@ Native window capture via `xcap`. Falls back to `@zumer/snapdom` if unavailable.
 
 | Param | Type | Default | Description |
 |---|---|---|---|
-| `format` | string | `png` | `png`, `jpeg`, `webp` |
+| `format` | string | `png` embedded, `jpeg` standalone | `png`, `jpeg`, `webp` -- pass it explicitly when the format matters |
 | `quality` | number | 80 | JPEG/WebP quality (0-100) |
 | `maxWidth` | number | | Max width in pixels (maintains aspect ratio) |
 | `windowId` | string | | Target window |
@@ -209,7 +213,7 @@ List windows, get info about a specific window, or resize.
 |---|---|---|---|
 | `action` | string | yes | `list`, `info`, `resize` |
 | `windowId` | string | | Target window (for `info` and `resize`) |
-| `width` | number | | New width (for `resize`) |
+| `width` | number | | New width (for `resize`). Always pass both dimensions: the standalone server rejects a missing one, the embedded server silently falls back to 800x600 |
 | `height` | number | | New height (for `resize`) |
 
 ---
@@ -233,11 +237,14 @@ Call any Tauri IPC command (same as `window.__TAURI_INTERNALS__.invoke()`).
 
 ### ipc_monitor
 
-Start or stop IPC call monitoring. When active, every `invoke()` call is logged to `ipc.log` with command name, args, duration, and error (if any).
+Start or stop IPC call monitoring in one window. When active, every `invoke()` call is logged to `ipc.log` with command name, args, duration, and error (if any).
 
 | Param | Type | Required | Description |
 |---|---|---|---|
 | `action` | string | yes | `start` or `stop` |
+| `windowId` | string | | Window whose page should monitor (default `main`); monitoring is per window |
+
+The page must acknowledge the change: the response reports `windowId`, `desired`, `applied` (`null` until acknowledged), `pageEpoch`, and `acknowledgedAt`, and the call fails (`observation_failed`) when the selected window never acknowledges -- a stale flag is never reported as success. Start monitoring in every window whose IPC you need.
 
 ### ipc_get_captured
 
@@ -247,7 +254,7 @@ Read captured IPC calls from `ipc.log`.
 |---|---|---|---|
 | `filter` | string | | Substring match on command name |
 | `pattern` | string | | Regex match on command name |
-| `limit` | number | 50 | Max entries to return |
+| `limit` | number | 100 | Max entries to return |
 | `since` | number | | Epoch ms -- only return entries after this time |
 
 ### ipc_emit_event
@@ -276,7 +283,7 @@ Read captured Tauri events from `events.log`.
 |---|---|---|---|
 | `event` | string | | Exact event name filter |
 | `pattern` | string | | Regex match on event name or payload |
-| `limit` | number | 50 | Max entries to return |
+| `limit` | number | 100 | Max entries to return |
 | `since` | number | | Epoch ms -- only return entries after this time |
 
 ---
@@ -301,7 +308,7 @@ Read historical logs from JSONL files (persisted across app restarts).
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `source` | string | yes | | `console`, `ipc`, `events`, `runtime` |
-| `lines` | number | | 50 | Number of entries |
+| `lines` | number | | 100 | Number of entries |
 | `level` | string | | | Level filter (console only): `log`, `info`, `warn`, `error`, `debug` |
 | `pattern` | string | | | Regex match |
 | `since` | number | | | Epoch ms filter |
@@ -427,6 +434,10 @@ Perform one action, wait for a selector/text, and collect fresh evidence since a
 | `includeIpc` | boolean | Include IPC diff |
 | `includeRuntime` | boolean | Include runtime diff |
 
+Defaults: `timeout` 5000, `includeLogs` true, `includeRuntime` true, `verifyDom` / `verifyScreenshot` / `includeIpc` false. `fill`, `type`, and `press` act on the element `selector` resolves to (exactly one match, else `target_not_found` / `ambiguous_target`) rather than on whatever has focus; `fill` replaces the value, `type` appends. The wait is skipped when the action itself failed.
+
+The response carries `verdict` (`failed` when the action or the wait failed, `inconclusive` when neither `waitForSelector` nor `waitForText` was given, `passed` otherwise), `mark`, `actionResult`, `waitResult` plus a typed `waitOutcome`, the requested evidence diffs, and `suggestions`. Always pass a wait condition when you need a verdict. Inside `batch_actions`, a `failed` verdict fails the action (`postcondition_failed`) and skips its dependents.
+
 ---
 
 ## Workflow tools
@@ -443,6 +454,10 @@ Known multi-step intent should use the app-owned workflow executor. Token-based 
 
 Required spec fields: `schemaVersion: 1`, `runKey`, and 1–100 `steps`. Optional `mode` is only `strict`; `schedule` is only `sequential`; `windowId` defaults to `main`; `deadlineMs` defaults to 60000 and cannot exceed 300000. `inputs` is an object. `evidence.maxInlineBytes` is 1024–65536 (default 16384). `defaults` accepts `stepTimeoutMs`, `locatorTimeoutMs`, `pollIntervalMs`, and `failureEvidenceGraceMs`. The `workflow_run` schema defines all accepted fields and union variants.
 
+Further limits: a spec is at most 256 KiB; `runKey` and step ids are non-empty and at most 1024 bytes; any single literal or bound value is at most 64 KiB; locator `scope` nests at most 4 deep; at most 100 condition nodes nested at most 8 deep; `pollIntervalMs` is at least 10 and `failureEvidenceGraceMs` at most 2000. The app executes at most 4 workflows concurrently and queues 16 more; beyond that `workflow_run` returns `resource_busy` ("Active and queued workflow capacity reached"). Up to 1000 runs are retained without eviction.
+
+`status: completed` is not success by itself: the exit-code mapping shared by the CLI and both MCP servers returns `1` when `goalStatus` or `originalTestVerdict` is `failed` and `2` when either is `inconclusive`; `failed`, `cancelled`, `expired`, and `rejected` map to `1`; every other status (queued, running, paused, interrupted) maps to `2`. MCP sets `isError` only for the exit-1 case, so a paused or uncertain run arrives as an ordinary successful tool result -- always read `status`, `reason`, and `allowedNextActions` from the body.
+
 Each step has an `id` and `op`: `click(target)`, `fill(target,value)`, `type(target,value)`, `press(key,target?)`, `wait(condition)`, `query(target,query)`, or trusted `tool(tool,args,bindings?)`. The trusted tool set is `bridge_status` and `ipc_get_backend_state`. Queries use `{"kind":"value"}`, `{"kind":"text"}`, or `{"kind":"attribute","name":"data-id"}`. Any step can declare `expect` and `timeoutMs`; a failed required expectation blocks later steps.
 
 Locators use `{"by":"role"|"label"|"testId"|"css","value":...}` with optional `name`, nested `scope`, and `entity:{"attribute":"data-id","value":...}`. Constraints intersect and must yield one actionable target. Fill replaces that target's value; type appends. Legacy `@ref` fallback, native-input guarantees, arbitrary JS, unknown IPC and parallel execution are unsupported.
@@ -451,9 +466,85 @@ Expressions are scalar literals, `{"literal":<any JSON>}`, `{"fromInput":{"key":
 
 Conditions: `element(target,state)`, `valueEquals(target,expected)`, `textContains(target,expected)`, `attributeEquals(target,name,expected)`, `result(stepId,pointer,operator,expected?)`, and `all/any(conditions)`. Element states are visible/hidden/attached/detached/enabled/editable. Result operators are eq/exists/nonEmptyString. State-only observations cannot prove business persistence or action causality.
 
+A `query` on a password input, on anything inside `[data-sensitive="true"]` / `[data-connector-sensitive="true"]`, or on an element (or requested attribute) whose `id`/`name`/`autocomplete` looks like a credential (`password`, `secret`, `token`, `auth…`, `cookie`, `credential`, `api-key`, `one-time-code`) fails with `capability_unavailable`; reports and journals also redact credential-named keys as `[redacted]`. Scoped failure evidence is structural only -- tag, role, visible/enabled/editable for at most 40 elements, never text, values, or ids -- so capture any value you need with a `query` step. Actionability for `click`/`fill`/`type` requires visible, enabled (and editable for input), inside the viewport, and not covered by another element at the hit point; otherwise the step fails with `not_actionable` before dispatch.
+
 For a retained reference, call `workflow_get(runId: ..., evidenceId: ..., offset: 0)`. It returns minimal run metadata plus `evidencePage: { id, offset, content, nextOffset, totalBytes }`. `content` is a bounded JSON text chunk; follow `nextOffset` to retrieve later chunks and reassemble the text. Offsets count UTF-8 bytes; `offset` requires `evidenceId`; `nextOffset: null` marks the final chunk. This path makes each retained evidence reference readable even when the report summary is truncated.
 
 Reports separate `execution`, `verification`, `effect`, `goalStatus`, and `originalTestVerdict`. Use the returned `runId`, `revision`, `checkpointId`, `allowedNextActions`, and coverage. Reuse the original `runKey` and identical spec after a lost submission response. Resume cannot replay an uncertain write or restart historical work after application restart. Reconciliation preserves the original failed verdict. Cancellation is not rollback. Workflow lifecycle calls cannot be nested in batches.
+
+### Minimal spec
+
+```json
+{
+  "schemaVersion": 1,
+  "runKey": "create-task-smoke-001",
+  "inputs": { "title": "Isolated test task" },
+  "steps": [
+    { "id": "open", "op": "click",
+      "target": { "by": "role", "value": "button", "name": "New task" },
+      "expect": { "kind": "element", "target": { "by": "role", "value": "dialog", "name": "New task" }, "state": "visible" } },
+    { "id": "title", "op": "fill",
+      "target": { "scope": { "by": "role", "value": "dialog", "name": "New task" }, "by": "label", "value": "Title" },
+      "value": { "fromInput": { "key": "title" } } },
+    { "id": "save", "op": "click",
+      "target": { "scope": { "by": "role", "value": "dialog", "name": "New task" }, "by": "role", "value": "button", "name": "Save" },
+      "expect": { "kind": "element",
+        "target": { "by": "testId", "value": "task-row", "entity": { "attribute": "data-task-title", "value": { "fromInput": { "key": "title" } } } },
+        "state": "visible" } },
+    { "id": "read-id", "op": "query",
+      "target": { "by": "testId", "value": "task-row", "entity": { "attribute": "data-task-title", "value": { "fromInput": { "key": "title" } } } },
+      "query": { "kind": "attribute", "name": "data-task-id" } }
+  ],
+  "goal": { "kind": "result", "stepId": "read-id", "pointer": "/value", "operator": "nonEmptyString" }
+}
+```
+
+`goal` is an optional final condition evaluated after the last step; without one, `goalStatus` is `not_requested`. A `query` step's result lands in that step's outcome `data` (for example `{"value": "..."}`), which later `fromStep` expressions and `result` conditions address by JSON Pointer. Optional spec fields: `mode: "strict"`, `schedule: "sequential"`, `windowId`, `deadlineMs`, `defaults`, and `evidence: { success: "summary", failure: "scoped", maxInlineBytes }`. Specs are capped at 256 KiB.
+
+### Capabilities response
+
+`workflow_capabilities` returns `schemaVersions`, `modes`, `schedules`, `ops`, `conditions`, `tools` (the trusted `tool` allowlist), `authentication: { required, configured, minimumTokenBytes }`, `recovery` (`clientReconnect`, `sameProcessContinue: "undispatched_only"`, `restartHistory`, `automaticRestartReplay: false`, `unknownWriteReplay: false`), `journal`, `unsupported[]`, `coverage`, and `limits` (`activeRuns: 4`, `queuedRuns: 16`, `maxSteps: 100`, `maxSpecBytes: 262144`, `maxDeadlineMs: 300000`, plus live `quarantinedScopes` and retention-budget usage). When a workflow call returns `unauthorized`, check `authentication.configured` first: `false` means the host never configured a token (or configured one shorter than 32 bytes, which is ignored).
+
+### Run report fields
+
+`workflow_run`, `workflow_get`, `workflow_cancel`, and `workflow_resume` all return the run report:
+
+| Field | Meaning |
+|---|---|
+| `runId`, `revision`, `cursor`, `checkpointId` | Identity, plus the values `workflow_resume` must echo back as `expectedRevision` / `checkpointId` |
+| `status` | `queued`, `running`, `cancelling`, `paused`, `completed`, `failed`, `cancelled`, or `interrupted` (a run found in history after an app restart) |
+| `reason` | Stable error code (table below) explaining a `paused`, `failed`, or `cancelled` status |
+| `allowedNextActions` | Subset of `get`, `cancel`, `continue`, `reconcile`; only these are accepted next |
+| `goalStatus` | `not_requested`, `passed`, `failed`, or `inconclusive` for the spec-level `goal` |
+| `originalTestVerdict` | Verdict of the original run; reconciliation never rewrites it |
+| `mayHaveEffects`, `resourceIsolation` | Whether a dispatched write may have landed, and whether its resources are `quarantined` |
+| `steps[]`, `summary` | Per-step `outcome` objects (below) with `data`; `summary` counts `completedSteps` / `remainingSteps` |
+| `blockedOutcome`, `blockedStep` | The outcome and step that stopped the run |
+| `evidenceRefs[]`, `evidence`, `events` | Retained evidence ids (each readable via `evidenceId`), inline evidence, and the event log when included |
+| `coverage` | `truncated`, `omittedFields`, `omittedEvidenceRefs`, `businessPersistence: "unobserved"`, `correlation: "state_only"`, `sources` |
+
+Every outcome -- workflow steps and, since 0.15, legacy tools inside `batch_actions` -- separates `execution` (`not_dispatched`, `completed`, `failed`, `outcome_unknown`), `verification` (`not_requested`, `passed`, `failed`, `inconclusive`), and `effect` (`none`, `possible`, `confirmed`), alongside `data`, `error: { code, stage, message, retryableBeforeDispatch }`, `timing`, `dispatch` (with `requestId`), `evidenceRefs`, `coverage`, and `warnings`. Success means `execution: completed`, no `error`, and a passed or not-requested verification; business JSON never decides it. When a report exceeds its byte budget, evidence bodies, events, and error messages are dropped first and `coverage.truncated` is set -- identity, status, outcome facts, and evidence ids survive.
+
+### Error codes
+
+`error.code` and `reason` use these stable values:
+
+| Code | Meaning / next move |
+|---|---|
+| `invalid_spec` | Spec or arguments rejected before dispatch (unknown field, bad range, `waitMs` > 30000). Fix and resubmit |
+| `unauthorized` | Host has no token >= 32 bytes, or the supplied `authToken` does not match |
+| `capability_unavailable`, `protocol_mismatch`, `unsupported_feature`, `unsupported_condition` | Plugin older than 0.15, page script out of sync, or an unsupported feature (`networkidle`, parallel schedule, unknown `op`, unknown resume intent) |
+| `target_not_found`, `ambiguous_target`, `not_actionable` | Locator matched zero, several, or a disabled/hidden/read-only element. Narrow with `name`, `scope`, or `entity` |
+| `target_changed`, `stale_ref` | The window vanished or the page identity changed between steps; a legacy `@eN` ref no longer resolves |
+| `binding_missing`, `binding_type_mismatch` | `fromInput` / `fromStep` did not resolve, or resolved to the wrong JSON type |
+| `precondition_failed`, `postcondition_failed`, `condition_timeout` | The last verified boundary no longer holds before dispatch; a required `expect`/`goal` failed; a `wait` or expectation ran out of time |
+| `execution_failed` | The action itself threw; read `effect` to see whether it may still have landed |
+| `outcome_unknown` | Dispatched, result lost: `effect: possible`, resources quarantined until the app restarts. Inspect, then `reconcile`; never replay |
+| `run_key_conflict`, `run_not_found`, `run_expired` | Key reused with a different spec; unknown run id; run or evidence no longer retained in this app instance |
+| `stale_checkpoint`, `resume_not_safe`, `app_instance_changed`, `resume_requires_inputs` | Resume rejected: re-read the report for the current `revision`/`checkpointId`; the run is still executing or has nothing to reconcile; the app restarted (history is read-only); continuing needs inputs that were not persisted |
+| `cancel_requested`, `cancelled_before_dispatch` | Cancellation reasons, with or without a dispatched step |
+| `resource_busy` | A conflicting operation holds the window resource (`retryableBeforeDispatch: true`; `quarantined: true` means an uncertain write holds it, and only an app restart releases that), or the 4-active / 16-queued workflow capacity is full |
+| `persistence_unavailable`, `evidence_persistence_failed`, `capture_incomplete`, `observation_failed` | Journal storage unusable (workflows fail closed), evidence could not be stored, a result exceeded the retention budget, or the page observation failed |
 
 ## Batch Tool
 
@@ -510,7 +601,7 @@ The response is the run report (also what `save` writes):
 ```
 
 - Log `status` is `ok`, `error` (with an `error` message), or `skipped` (a dependency failed, or `stopOnError` aborted the batch). `startedAtMs` is the offset from batch start, so overlapping ranges show real concurrency.
-- Typed execution/verification failures, including wait timeout and failed `act_and_verify`, fail the action and its success dependencies. Arbitrary business JSON containing `error` is preserved. Failed outcomes retain diagnostic data in `outcome`.
+- Typed execution/verification failures, including wait timeout and failed `act_and_verify`, fail the action and its success dependencies. Arbitrary business JSON containing `error` is preserved: only the legacy interaction tools with a genuine error-string contract (`webview_interact`, `webview_keyboard`, `webview_wait_for`, `webview_act_and_verify`, `webview_locator`, `webview_select_option`, `webview_scroll`) fail on a top-level `error` field. A per-action `timeoutMs` expiry yields `outcome_unknown` ("remote execution may continue"), not a plain failure. Every log entry carries the typed `outcome`, and failed outcomes retain their diagnostic data there.
 - With `stopOnError: false`, sequential mode still runs the remaining actions in order after a failure -- only explicit `dependsOn` edges on the failed action skip their dependents. That is the "run all checks, report which failed" shape.
 - Mix order and concurrency: `mode: "parallel"` plus `dependsOn` chains gives a DAG -- independent actions overlap while dependent ones wait.
 - Batch screenshots default to `save: true`; a valid saved artifact replaces inline base64 in reports. Explicit `save: false` preserves legacy inline output. If saving fails or a usable artifact is unavailable, diagnostics/evidence are retained rather than silently discarded.
@@ -520,6 +611,10 @@ The response is the run report (also what `save` writes):
 ---
 
 ## Setup & Info Tools
+
+### bridge_status
+
+Show the internal JS bridge: `bridge_port`, `workflowProtocolVersion` (`1` on plugins >= 0.15), `clients[]` (`windowId`, `url`, `title`, `ageMs` per connected webview), `pending` evals, and `fallbackAvailable` (whether the pre-dispatch eval+event fallback exists). No parameters. Call it first when a window seems unresponsive or before relying on `workflow_*` tools.
 
 ### get_setup_instructions
 

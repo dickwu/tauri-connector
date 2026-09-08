@@ -1,6 +1,6 @@
 # Code Review Playbook
 
-Workflow recipes for reviewing Tauri app code changes using live inspection. Each workflow uses the running app to validate code correctness beyond static analysis.
+Workflow recipes for reviewing Tauri app code changes using live inspection. Each workflow uses the running app to validate code correctness beyond static analysis. (The numbered "Workflow N" sections are review recipes; the application-owned `workflow_*` tools appear in Workflow 10.)
 
 ---
 
@@ -373,6 +373,32 @@ ipc_get_captured(limit: 100)
 ```bash
 webview_execute_js(script: "(() => { const perf = performance.getEntriesByType('navigation')[0]; return perf ? { domContentLoaded: Math.round(perf.domContentLoadedEventEnd - perf.startTime), loadEvent: Math.round(perf.loadEventEnd - perf.startTime), domInteractive: Math.round(perf.domInteractive - perf.startTime) } : 'No navigation timing' })()")
 ```
+
+---
+
+## Workflow 10: Regression Flow as a Workflow Spec
+
+Encode each critical user flow (create, edit, delete, login) once as a strict workflow spec and replay it against the running app before and after a change (plugin >= 0.15, host token configured -- see `SETUP.md`, Step 6b).
+
+### Write the Spec
+- Locate by `role`+`name`, `label`, or `testId`, scoped to the dialog or panel; a `css` locator is the last resort. A locator that matches several elements fails the run (`ambiguous_target`) instead of picking one.
+- Put an `expect` on every step that changes state, and a spec-level `goal` on the final observable (the new row, the closed dialog, the success heading).
+- Feed test data through `inputs` and reference it with `fromInput`; chain generated ids with `fromStep` + JSON Pointer.
+- Give every run a fresh `runKey` (for example `create-task-<commit>-<n>`): an identical spec under an existing key returns the *old* run instead of executing again.
+
+### Run Before and After
+```bash
+tauri-connector workflow run flows/create-task.json --wait-ms 30000   # baseline build
+# ...apply the change, rebuild / hot-reload, bump runKey...
+tauri-connector workflow run flows/create-task.json --wait-ms 30000   # candidate build
+tauri-connector workflow get <runId> --include steps,evidence
+```
+
+### Validation
+- Both runs end `status: completed` with `goalStatus: passed`; exit code `0`.
+- Compare `steps[].outcome.data` from `query` steps (ids, values, text) across the two runs.
+- A `failed`/`paused` candidate run names the regression: `blockedStep` plus `blockedOutcome.error.code` (`target_not_found` = renamed/removed control, `not_actionable` = newly disabled, `postcondition_failed` / `condition_timeout` = the expected state never appeared).
+- `goalStatus: passed` covers observed UI state only; pair it with `ipc_get_captured` or backend logs when the change touches persistence.
 
 ---
 

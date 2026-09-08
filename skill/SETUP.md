@@ -149,7 +149,7 @@ From now on, `bun run tauri:dev` (or `cargo tauri dev --features dev-connector`)
 
 ## Step 4: Verify `withGlobalTauri` (REQUIRED, both patterns)
 
-Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` section. This is **required** for the eval+event fallback JS execution path and the auto-push DOM feature. If missing, add it:
+Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` section. This is **required** for the eval+event fallback JS execution path and the auto-push DOM feature. (Since 0.15 the fallback is only used before a command is dispatched; a slow, failed, or lost response is never replayed through it.) If missing, add it:
 
 ```json
 {
@@ -201,6 +201,34 @@ Add to `.mcp.json` in the project root:
 
 The MCP server is embedded in the plugin -- no separate command or install needed.
 
+If a client cannot reach the embedded HTTP server, register the standalone binary instead: `"command": "tauri-connector-mcp"` with an `env` block carrying `TAURI_CONNECTOR_HOST`, `TAURI_CONNECTOR_PORT` and, for workflows, `TAURI_CONNECTOR_WORKFLOW_TOKEN`. It forwards every call to the running app and never executes workflow steps itself.
+
+## Step 6b: Enable application-owned workflows (optional, plugin >= 0.15)
+
+The `workflow_*` MCP tools and `tauri-connector workflow` run known multi-step sequences inside the app. They stay locked until the host configures a workflow token of **at least 32 bytes** -- a shorter value is ignored as if no token were set. `workflow_capabilities` answers without a token and reports `authentication.configured`; `run`, `get`, `cancel` and `resume` return `unauthorized` until the token is configured on the host and supplied by the client.
+
+Generate a token for the development session without printing it, then start the app and every client from the same environment:
+
+```bash
+export TAURI_CONNECTOR_WORKFLOW_TOKEN="$(openssl rand -hex 32)"
+bun run tauri:dev                        # init() / ConnectorBuilder::new() read the variable
+tauri-connector workflow capabilities    # expect "authentication": { "configured": true }
+```
+
+Alternatively pass a secret from the host's own configuration in code (never a literal in source), inside the same cfg gate as the plugin registration:
+
+```rust
+builder = builder.plugin(
+    ConnectorBuilder::new()
+        .workflow_token(token)   // >= 32 bytes
+        .build()
+);
+```
+
+Client side: the CLI and the standalone `tauri-connector-mcp` read `TAURI_CONNECTOR_WORKFLOW_TOKEN` from their environment (for the standalone server, add it to the `env` block of its `.mcp.json` entry); embedded MCP callers pass `authToken` as a tool argument next to `spec`. Keep the token out of the workflow `spec`, `inputs`, checked-in config, logs and prompts.
+
+Run history is journaled to private files under the app's data directory. Windows currently fails closed with `persistence_unavailable` because private-file ACLs are not implemented; native macOS is validated, native Windows/Linux WebView validation is still outstanding.
+
 ## Step 7: Verify
 
 Run the app:
@@ -213,7 +241,7 @@ Look for these log lines:
 ```
 [connector][bridge] Internal bridge on port 9300
 [connector][mcp] MCP ready for 'App Name' -- url: http://127.0.0.1:9556/mcp (/sse legacy)
-[connector] Plugin ready for 'App Name' (com.app.id) -- WS on 0.0.0.0:9555
+[connector] Plugin ready for 'App Name' (com.app.id) -- WS on 127.0.0.1:9555
 [connector] PID file: /path/to/src-tauri/target/debug/.connector.json
 ```
 
@@ -251,7 +279,7 @@ tauri-connector hook remove
 
 ## Custom Configuration
 
-For localhost-only access, custom ports, or disabling the embedded MCP, substitute the cfg gate matching your active pattern:
+For a different bind address, custom ports, disabling the embedded MCP, or a code-supplied workflow token, substitute the cfg gate matching your active pattern:
 
 ```rust
 use tauri_plugin_connector::ConnectorBuilder;
@@ -260,9 +288,11 @@ use tauri_plugin_connector::ConnectorBuilder;
 {
     builder = builder.plugin(
         ConnectorBuilder::new()
-            .bind_address("127.0.0.1")   // default: 0.0.0.0
+            .bind_address("127.0.0.1")   // default (localhost only); "0.0.0.0" exposes the connector to the network
             .port_range(9600, 9700)      // WS port range (default: 9555-9655)
             .mcp_port_range(9700, 9800)  // MCP port range (default: 9556-9656)
+            .disable_mcp()               // skip the embedded MCP HTTP server (default: enabled)
+            .workflow_token(token)       // enable workflow_* tools; >= 32 bytes, see Step 6b
             .build()
     );
 }
