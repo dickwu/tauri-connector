@@ -44,6 +44,11 @@ const SKILL_DOCS: &[SkillDoc] = &[
         display_path: "references/code-review-playbook.md",
         content: include_str!("../skill/references/code-review-playbook.md"),
     },
+    SkillDoc {
+        name: "upgrade-and-smoke",
+        display_path: "references/upgrade-and-smoke.md",
+        content: include_str!("../skill/references/upgrade-and-smoke.md"),
+    },
 ];
 
 pub fn get(name: &str) -> Option<&'static SkillDoc> {

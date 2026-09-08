@@ -1,5 +1,7 @@
 # Tauri Connector Setup
 
+For an existing app upgrade and live validation, use [references/upgrade-and-smoke.md](references/upgrade-and-smoke.md); preserve the app's existing feature names and account for shared build directories.
+
 Step-by-step guide to add tauri-connector to a Tauri v2 project. Detect the project by looking for `src-tauri/` directory and `tauri.conf.json`.
 
 ## Step 0: Install the CLI (macOS/Linux)
@@ -242,7 +244,7 @@ Look for these log lines:
 [connector][bridge] Internal bridge on port 9300
 [connector][mcp] MCP ready for 'App Name' -- url: http://127.0.0.1:9556/mcp (/sse legacy)
 [connector] Plugin ready for 'App Name' (com.app.id) -- WS on 127.0.0.1:9555
-[connector] PID file: /path/to/src-tauri/target/debug/.connector.json
+[connector] PID file: /path/to/src-tauri/target/.connector.json
 ```
 
 The PID file enables the Rust CLI, standalone MCP server, and bun scripts to auto-discover ports without configuration. Run `tauri-connector status --json` to inspect the selected endpoint and stale candidates.

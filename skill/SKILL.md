@@ -21,11 +21,11 @@ The plugin injects a JavaScript bridge into each Tauri webview. Commands flow th
 |---|---|
 | **MCP tools** (preferred) | Claude has MCP access via `.mcp.json` -- tools appear as `webview_*`, `ipc_*`, etc. |
 | **CLI** (`tauri-connector`) | Shell commands with `@eN` ref addressing from snapshots |
-| **Bun scripts** (fallback) | Neither MCP nor CLI binary available -- scripts at `skill/scripts/` |
+| **Bun scripts** (fallback) | Neither MCP nor CLI binary available -- scripts at `scripts/` relative to this skill |
 
 Pick the first path available, in that order: MCP tools need no shell round-trip; the CLI needs the binary (`which tauri-connector`); Bun scripts need only `bun` plus this skill's `scripts/` dir. All three drive the same WebSocket protocol, so refs and capabilities behave identically.
 
-Verify the app is running: `lsof -i :9555 -P -n 2>/dev/null | grep LISTEN`
+Verify the intended application using its live PID record and actual ports; port 9555 is only a default. Match the PID, executable, app identifier and window before acting.
 
 Port layout:
 
@@ -48,26 +48,9 @@ tauri-connector workflow get <runId> --include evidence
 tauri-connector workflow resume <runId> --expected-revision 7 --checkpoint-id <checkpointId> --intent reconcile
 ```
 
-A minimal strict spec (`schemaVersion`, `runKey`, `steps` are required; `inputs`, `expect`, `goal` are optional):
+For a complete local form spec with an explicit final goal, use the [isolated-form example](references/upgrade-and-smoke.md#example-workflow). Prepare its dedicated test controls first; use real business controls only when that action is the user's intended test.
 
-```json
-{
-  "schemaVersion": 1,
-  "runKey": "login-smoke-001",
-  "inputs": { "email": "qa@example.com" },
-  "steps": [
-    { "id": "email", "op": "fill",
-      "target": { "by": "label", "value": "Email" },
-      "value": { "fromInput": { "key": "email" } },
-      "expect": { "kind": "valueEquals", "target": { "by": "label", "value": "Email" }, "expected": { "fromInput": { "key": "email" } } } },
-    { "id": "submit", "op": "click",
-      "target": { "by": "role", "value": "button", "name": "Sign in" },
-      "expect": { "kind": "element", "target": { "by": "role", "value": "heading", "name": "Dashboard" }, "state": "visible" } }
-  ]
-}
-```
-
-Each locator must resolve to exactly one actionable element (`target_not_found` / `ambiguous_target` / `not_actionable` otherwise) -- narrow it with `name`, a nested `scope` locator, or `entity: {attribute, value}`. `runKey` is the idempotency key: resubmitting the identical spec returns the existing run, while a changed spec under the same key returns `run_key_conflict`. Check `authentication.configured` in `workflow_capabilities` when a call returns `unauthorized`.
+Each locator must resolve to exactly one actionable element (`target_not_found` / `ambiguous_target` / `not_actionable` otherwise) -- narrow it with `name`, a nested `scope` locator, or `entity: {attribute, value}`. `runKey` identifies a logical workflow submission: resubmitting the identical spec returns the existing run, while a changed spec under the same key returns `run_key_conflict`. Check `authentication.configured` in `workflow_capabilities` when a call returns `unauthorized`.
 
 The Bun fallback uses the same app-owned service: `bun run $SCRIPTS/workflow.ts run @arguments.json`, where the file contains `{"spec": {...}}`. Use `get`, `cancel`, `resume` or `capabilities` with their JSON arguments. It reads `TAURI_CONNECTOR_WORKFLOW_TOKEN`, checks application support, and preserves incomplete/failure exit codes.
 
@@ -221,7 +204,7 @@ When investigating a bug, use `debug_snapshot` first to collect app/bridge state
 2. `webview_act_and_verify(action: "...", selector: "@eN", waitForText: "...", includeLogs: true, includeIpc: true, includeRuntime: true)`
 3. Manual fallback: `webview_dom_snapshot` -> `ipc_monitor(start)` -> action -> `read_logs` / `runtime_get_captured` / `ipc_get_captured` -> `webview_screenshot` -> `ipc_monitor(stop)`
 
-For more recipes: read `skill/references/debug-playbook.md`
+For more recipes: read [references/debug-playbook.md](references/debug-playbook.md).
 
 ---
 
@@ -306,7 +289,7 @@ Verify correct event sequences after user actions:
 2. Perform the action being reviewed
 3. `event_get_captured()` -- verify events fired in correct order with expected payloads
 
-For more workflows: read `skill/references/code-review-playbook.md`
+For more workflows: read [references/code-review-playbook.md](references/code-review-playbook.md).
 
 ---
 
@@ -419,7 +402,7 @@ webview_search_snapshot(pattern: "submit|confirm", context: 3)
 tauri-connector snapshots list                           # then: snapshots read <uuid> subtree-0.txt
 ```
 
-Splitting mechanics, sibling collapsing, storage layout, and session pruning: read `skill/references/snapshot-budget.md`.
+Splitting mechanics, sibling collapsing, storage layout, and session pruning: read [references/snapshot-budget.md](references/snapshot-budget.md).
 
 ## Artifacts
 
@@ -489,7 +472,7 @@ Apps with several non-blocking dialog windows open and typeable at once (SelfMod
 When MCP and CLI are unavailable. Requires `bun` runtime:
 
 ```bash
-SCRIPTS=<tauri-connector-repo>/skill/scripts
+SCRIPTS=<directory-containing-this-SKILL.md>/scripts
 bun run $SCRIPTS/snapshot.ts              # DOM snapshot with refs
 bun run $SCRIPTS/click.ts "button.submit" # Click element
 bun run $SCRIPTS/fill.ts "input" "value"  # Fill input
@@ -506,9 +489,13 @@ bun run $SCRIPTS/events.ts listen user:login  # Listen for events
 bun run $SCRIPTS/workflow.ts capabilities     # Workflow lifecycle: run|get|cancel|resume|capabilities '<args JSON>' or @file.json
 ```
 
+## Upgrade an existing app and test it
+
+For a dependency upgrade or live smoke test, read [references/upgrade-and-smoke.md](references/upgrade-and-smoke.md). It covers focused lockfile updates, shared-target detection, isolated launch/configuration, exact app/port selection, ephemeral workflow credentials and a local form test with an independently checked click count. Rebuild the app after changing the plugin; updating the CLI alone cannot update a running WebView.
+
 ## Setup
 
-For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
+For first-time setup in a Tauri v2 project, read [SETUP.md](SETUP.md). The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
 
 1. `tauri-plugin-connector = { version = "0.15", optional = true }` in `src-tauri/Cargo.toml`
 2. Declare the cargo feature: `[features] dev-connector = ["dep:tauri-plugin-connector"]`
@@ -560,11 +547,12 @@ For full parameter tables and extended workflows:
 
 | File | Contents |
 |---|---|
-| `skill/references/mcp-tools.md` | MCP tool parameter tables with types and defaults |
-| `skill/references/cli-commands.md` | Every CLI subcommand with all flags and examples |
-| `skill/references/snapshot-budget.md` | Snapshot splitting mechanics, subtree files, storage and pruning |
-| `skill/references/debug-playbook.md` | Step-by-step recipes for common debug scenarios |
-| `skill/references/code-review-playbook.md` | Code review workflow recipes and checklists |
+| `references/mcp-tools.md` | MCP tool parameter tables with types and defaults |
+| `references/cli-commands.md` | Every CLI subcommand with all flags and examples |
+| `references/snapshot-budget.md` | Snapshot splitting mechanics, subtree files, storage and pruning |
+| `references/debug-playbook.md` | Step-by-step recipes for common debug scenarios |
+| `references/code-review-playbook.md` | Code review workflow recipes and checklists |
+| [references/upgrade-and-smoke.md](references/upgrade-and-smoke.md) | Focused app upgrade, isolated startup and real WebView smoke test |
 
 ## Troubleshooting
 
@@ -576,7 +564,7 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | `Permission connector:default not found` in release `tauri build` | The connector capability JSON is being loaded by `tauri-build`'s default `./capabilities/**/*` glob. Migrate to the feature-gated layout: move it to `src-tauri/capabilities-dev/dev-connector.json` and register it at runtime via `app.add_capability(include_str!(...))` inside `cfg(feature = "dev-connector")`. Re-run `tauri-connector doctor`. |
 | `tauri build` still compiles the plugin / pulls xcap, aws-sdk-s3 | Plugin is gated on `cfg(debug_assertions)` (legacy). Migrate to `cfg(feature = "dev-connector")` with `optional = true` so the dep is skipped entirely when the feature is off. Doctor's legacy nudge has the full migration checklist. |
 | Connection refused | App not running or plugin not loaded. Check: `lsof -i :9555 \| grep LISTEN` |
-| Stale PID file | App crashed. Delete: `rm target/debug/.connector.json` |
+| Stale PID file | Verify its PID and executable are no longer live. Use the new launch's actual PID path/ports; remove only a stale record you own, especially when target directories are shared |
 | Port conflict | Use `ConnectorBuilder::new().port_range(9600, 9700)` or set `TAURI_CONNECTOR_PORT=9600` |
 | Refs not found | DOM changed since snapshot. Re-run snapshot for fresh refs |
 | Acting on the wrong window | Pass `windowId` (MCP) / `--window-id` (CLI). Default is `main`; each window has independent DOM and refs |
@@ -591,7 +579,7 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | `unauthorized` from a `workflow_*` call | The host has no workflow token, or one shorter than 32 bytes (silently ignored). Set `TAURI_CONNECTOR_WORKFLOW_TOKEN` before launching the app (or call `ConnectorBuilder::workflow_token`), and give the same value to the CLI / standalone MCP environment or the embedded `authToken` argument. `workflow capabilities` reports `authentication.configured` |
 | `capability_unavailable` on `workflow` | The app runs a plugin older than 0.15 (`bridge_status` lacks `workflowProtocolVersion: 1`). Upgrade `tauri-plugin-connector`; single tools and `batch` keep working meanwhile |
 | `run_key_conflict` | The same `runKey` was reused with a different spec. Recover a lost submission with the identical spec; use a new key only for genuinely new work |
-| `resource_busy` | Another workflow, batch, or single tool (screenshots and snapshots included) holds the same window resource, or an uncertain write is quarantined there. Retry before dispatch (`retryableBeforeDispatch: true`); never treat it as permission to replay a write. With `quarantined: true`, only restarting the app frees the resource -- no tool releases it |
+| `resource_busy` | Another workflow, batch, or single tool (screenshots and snapshots included) holds the same window resource, or an uncertain write is quarantined there. Follow the run's allowed next actions. Quarantine does not expire merely by waiting; never treat contention as permission to replay a write. With `quarantined: true`, only restarting the app frees the resource -- no tool releases it |
 | `outcome_unknown` / `effect: possible` | The action was dispatched but its result was lost (timeout, disconnect). Read `workflow_get`, then `resume --intent reconcile`; do not resubmit under a fresh key. The quarantine on that window persists until the app restarts |
-| `persistence_unavailable` | The workflow journal cannot use private storage (Windows, or an unusable app data dir). Workflows fail closed; legacy tools are unaffected |
-| Wait timed out inside `batch`, or `act_and_verify` verdict `failed` | Since 0.15 these are real failures (`condition_timeout`, `postcondition_failed`): the action fails and its dependents skip. Raise `timeout`, or wait for a state that actually appears |
+| `persistence_unavailable` | The workflow journal cannot use private storage (Windows, or an unusable app data dir). Workflows fail closed; conflicting legacy writes may also be blocked until recovery is safe. Read-only diagnostics remain available |
+| Wait timed out inside `batch`, or `act_and_verify` verdict `failed` | Since 0.15 these are real failures (`condition_timeout`, `postcondition_failed`): the action fails and its dependents skip. Inspect the failed condition and effect first; adjust future test budgets only when justified, without replaying a possibly completed write |

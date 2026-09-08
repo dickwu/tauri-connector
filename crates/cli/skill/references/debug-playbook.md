@@ -416,7 +416,7 @@ Use an application-owned workflow (plugin >= 0.15) when the failing scenario is 
 ```bash
 tauri-connector workflow capabilities        # ops, conditions, limits, authentication.configured
 ```
-`authentication.configured: false` means the host never set `TAURI_CONNECTOR_WORKFLOW_TOKEN` (see `SETUP.md`, Step 6b). `capability_unavailable` means the plugin is older than 0.15.
+`authentication.configured: false` means the host never set `TAURI_CONNECTOR_WORKFLOW_TOKEN` (see [SETUP.md](../SETUP.md), Step 6b). `capability_unavailable` means the plugin is older than 0.15.
 
 **Step 2: Collect strict locators from a snapshot**
 ```bash
@@ -442,6 +442,6 @@ Look at `status`, `reason`, `blockedStep`, and `blockedOutcome.error.code` (see 
 - Lost the submission response? Resubmit the *identical* spec with the same `runKey`: the app returns the existing run. A changed spec under the same key is `run_key_conflict`.
 - `paused` with `allowedNextActions` containing `continue`? `tauri-connector workflow resume <runId> --expected-revision <n> --checkpoint-id <id> --intent continue` (same app instance, undispatched step, deadline remaining).
 - `outcome_unknown` / `effect: possible`? Use `--intent reconcile` to recheck the postcondition. It never replays the click, and the original verdict stays failed if it was failed.
-- `resource_busy`? Another operation or a quarantined uncertain write holds the window; wait, then retry before dispatch.
+- `resource_busy`? Inspect whether another operation is active or an uncertain write is quarantined. Quarantine is not cleared by waiting; follow the reported safe next actions instead of replaying writes.
 
-A passing `expect` proves observed UI state only. Confirm backend persistence separately (`ipc_get_captured`, backend logs, or a `tool` step on `ipc_get_backend_state`).
+A passing DOM `expect` proves observed UI state only. Backend persistence requires an application receipt or an independent check of the isolated backing store. `ipc_get_backend_state` returns app/runtime metadata; it does not confirm business persistence.
