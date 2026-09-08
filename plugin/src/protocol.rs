@@ -8,11 +8,18 @@ pub struct Request {
     pub command: Command,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Command {
     // --- Session ---
     Ping,
+
+    /// Workflow lifecycle operations execute only in the application service.
+    Workflow {
+        operation: String,
+        #[serde(default)]
+        args: serde_json::Value,
+    },
 
     // --- JavaScript Execution ---
     ExecuteJs {
@@ -222,6 +229,8 @@ pub enum Command {
     },
     IpcMonitor {
         action: String,
+        #[serde(default = "default_window", alias = "windowId")]
+        window_id: String,
     },
     IpcGetCaptured {
         #[serde(default)]
@@ -453,6 +462,8 @@ pub struct Response {
     pub id: String,
     #[serde(flatten)]
     pub payload: ResponsePayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<connector_client::outcome::ExecutionOutcome>,
 }
 
 #[derive(Debug, Serialize)]
@@ -463,10 +474,71 @@ pub enum ResponsePayload {
 }
 
 impl Response {
+    pub fn rejected(id: String, error: &serde_json::Value) -> Self {
+        let mut error_details = connector_client::outcome::WorkflowError::new(
+            error
+                .get("code")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("execution_failed"),
+            error
+                .get("stage")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("preparing"),
+            error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Operation was rejected before dispatch"),
+        );
+        error_details.retryable_before_dispatch = error
+            .get("retryableBeforeDispatch")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        Self::outcome_error(
+            id,
+            connector_client::outcome::ExecutionOutcome::not_dispatched(error_details),
+        )
+    }
+
+    pub fn requires_quarantine(&self) -> bool {
+        use connector_client::outcome::{EffectStatus, ExecutionStatus};
+        self.outcome.as_ref().is_some_and(|outcome| {
+            (outcome.execution == ExecutionStatus::OutcomeUnknown
+                && outcome.effect != EffectStatus::None)
+                || (outcome.execution == ExecutionStatus::Failed
+                    && outcome.effect == EffectStatus::Possible)
+        })
+    }
+
+    pub fn not_dispatched(id: String, code: &str, message: impl Into<String>) -> Self {
+        let outcome = connector_client::outcome::ExecutionOutcome::not_dispatched(
+            connector_client::outcome::WorkflowError::new(code, "preparing", message),
+        );
+        Self::outcome_error(id, outcome)
+    }
+
+    /// Keep typed execution facts intact; classify only registered legacy tool contracts.
+    pub fn into_outcome(self, tool: &str) -> connector_client::outcome::ExecutionOutcome {
+        use connector_client::outcome::{ExecutionOutcome, WorkflowError, legacy_outcome};
+        if let Some(outcome) = self.outcome {
+            return outcome;
+        }
+        match self.payload {
+            ResponsePayload::Success { result } => legacy_outcome(tool, result),
+            // A legacy handler error carries no dispatch acknowledgement. It cannot
+            // justify releasing a possibly active write's lease or replaying it.
+            ResponsePayload::Error { error } => ExecutionOutcome::unknown(WorkflowError::new(
+                "outcome_unknown",
+                "dispatching",
+                error,
+            )),
+        }
+    }
+
     pub fn success(id: String, result: serde_json::Value) -> Self {
         Self {
             id,
             payload: ResponsePayload::Success { result },
+            outcome: None,
         }
     }
 
@@ -476,6 +548,118 @@ impl Response {
             payload: ResponsePayload::Error {
                 error: error.into(),
             },
+            outcome: None,
+        }
+    }
+
+    pub fn outcome_error(id: String, outcome: connector_client::outcome::ExecutionOutcome) -> Self {
+        let error = outcome
+            .error
+            .as_ref()
+            .map(|error| error.message.clone())
+            .unwrap_or_else(|| "Tool execution or verification failed".into());
+        Self {
+            id,
+            payload: ResponsePayload::Error { error },
+            outcome: Some(outcome),
+        }
+    }
+
+    pub fn with_outcome(id: String, outcome: connector_client::outcome::ExecutionOutcome) -> Self {
+        if !outcome.is_success(false) {
+            return Self::outcome_error(id, outcome);
+        }
+        Self {
+            id,
+            payload: ResponsePayload::Success {
+                result: outcome.data.clone(),
+            },
+            outcome: Some(outcome),
+        }
+    }
+}
+
+#[cfg(test)]
+mod workflow_protocol_tests {
+    use super::*;
+    use connector_client::outcome::{EffectStatus, ExecutionOutcome, WorkflowError};
+    use serde_json::json;
+
+    #[test]
+    fn workflow_preserves_camel_case_service_arguments() {
+        let request: Request = serde_json::from_value(json!({
+            "id":"request-1", "type":"workflow", "operation":"workflow_resume",
+            "args":{"runId":"run-1","expectedRevision":7,"checkpointId":"checkpoint-1","intent":"reconcile"}
+        })).unwrap();
+        let Command::Workflow { operation, args } = request.command else {
+            panic!("wrong command");
+        };
+        assert_eq!(operation, "workflow_resume");
+        assert_eq!(args["expectedRevision"], 7);
+        assert_eq!(args["checkpointId"], "checkpoint-1");
+    }
+
+    #[test]
+    fn response_failure_preserves_typed_outcome_and_legacy_error() {
+        let mut outcome = ExecutionOutcome::failed(
+            WorkflowError::new("condition_timeout", "verifying", "condition did not match"),
+            EffectStatus::None,
+        );
+        outcome.data = json!({"found":false,"timeout":true});
+        let wire =
+            serde_json::to_value(Response::outcome_error("request-1".into(), outcome)).unwrap();
+        assert_eq!(wire["error"], "condition did not match");
+        assert_eq!(wire["outcome"]["error"]["code"], "condition_timeout");
+        assert_eq!(wire["outcome"]["data"]["timeout"], true);
+        assert!(wire.get("result").is_none());
+    }
+
+    #[test]
+    fn rejected_requests_preserve_machine_code_and_quarantine_tracks_possible_effects() {
+        let rejected = Response::rejected(
+            "test".into(),
+            &json!({"code":"persistence_unavailable","stage":"acquiring","message":"Storage unavailable"}),
+        );
+        assert_eq!(
+            rejected
+                .outcome
+                .as_ref()
+                .unwrap()
+                .error
+                .as_ref()
+                .unwrap()
+                .code,
+            "persistence_unavailable"
+        );
+        assert!(!rejected.requires_quarantine());
+        let failed = ExecutionOutcome::failed(
+            WorkflowError::new("execution_failed", "dispatching", "partial effect"),
+            EffectStatus::Possible,
+        );
+        assert!(Response::outcome_error("test".into(), failed).requires_quarantine());
+        let mut read = ExecutionOutcome::unknown(WorkflowError::new(
+            "outcome_unknown",
+            "observing",
+            "lost read",
+        ));
+        read.effect = EffectStatus::None;
+        assert!(!Response::outcome_error("test".into(), read).requires_quarantine());
+    }
+
+    #[test]
+    fn ipc_monitor_accepts_legacy_default_and_explicit_window() {
+        for (args, expected) in [
+            (json!({"type":"ipc_monitor","action":"start"}), "main"),
+            (
+                json!({"type":"ipc_monitor","action":"start","windowId":"secondary"}),
+                "secondary",
+            ),
+        ] {
+            let Command::IpcMonitor { window_id, .. } = serde_json::from_value(args).unwrap()
+            else {
+                panic!("wrong command");
+            };
+            assert_eq!(window_id, expected);
         }
     }
 }

@@ -43,6 +43,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Execute and inspect app-owned workflows (requires host workflow token)
+    Workflow {
+        #[command(subcommand)]
+        command: WorkflowCommand,
+    },
     /// Take DOM snapshot with ref IDs
     Snapshot {
         /// Interactive only (elements with refs)
@@ -418,6 +423,46 @@ enum Commands {
         #[command(subcommand)]
         action: SkillCommands,
     },
+}
+
+#[derive(Subcommand)]
+enum WorkflowCommand {
+    /// Submit a v1 spec; a lost response must be recovered with the same runKey
+    Run {
+        /// Inline JSON, JSON file path, or '-' for stdin
+        spec: String,
+        /// Response wait budget; the app continues executing after this expires
+        #[arg(long, default_value_t = 1000, value_parser = clap::value_parser!(u64).range(0..=30000))]
+        wait_ms: u64,
+    },
+    /// Inspect an existing run and incremental evidence
+    Get {
+        run_id: String,
+        #[arg(long)]
+        cursor: Option<u64>,
+        #[arg(long, value_delimiter = ',')]
+        include: Vec<String>,
+        /// Read one retained evidence reference as bounded JSON text chunks
+        #[arg(long)]
+        evidence_id: Option<String>,
+        /// UTF-8 byte offset from a previous evidencePage.nextOffset
+        #[arg(long, requires = "evidence_id")]
+        offset: Option<u64>,
+    },
+    /// Stop future dispatch; cancellation does not roll back effects
+    Cancel { run_id: String },
+    /// Continue a safe checkpoint or reconcile observations without replaying writes
+    Resume {
+        run_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        checkpoint_id: String,
+        #[arg(long, value_parser = ["continue", "reconcile"])]
+        intent: String,
+    },
+    /// Query supported operations, conditions, and recovery guarantees
+    Capabilities,
 }
 
 #[derive(Subcommand)]
@@ -1112,6 +1157,21 @@ async fn main() {
             )
             .await
         }
+        Commands::Workflow { command } => {
+            match commands::workflow(
+                &client,
+                &resolved.host,
+                resolved.port,
+                command,
+                &cli.window_id,
+            )
+            .await
+            {
+                Ok(0) => Ok(()),
+                Ok(code) => std::process::exit(code),
+                Err(error) => Err(error),
+            }
+        }
         Commands::State => commands::state(&client).await,
         Commands::Status { .. } => unreachable!(),
         Commands::Bridge => commands::bridge_status(&client).await,
@@ -1137,6 +1197,16 @@ tauri-connector CLI - interact with Tauri apps
 
 USAGE:
   tauri-connector <command> [args...]
+
+WORKFLOWS:
+  workflow capabilities             Inspect application support
+  workflow run spec.json --wait-ms 30000
+  workflow get <runId>               Inspect progress after timeout/disconnect
+  workflow get <runId> --evidence-id <id> [--offset <nextOffset>]
+  workflow cancel <runId>            Stop future dispatch; no rollback
+  workflow resume <runId> --expected-revision 7 --checkpoint-id <id> --intent reconcile
+  Set TAURI_CONNECTOR_WORKFLOW_TOKEN to the trusted host workflow token.
+  Exit codes: 0 completed, 1 failed/cancelled, 2 running/paused/unknown.
 
 CONNECTION:
   Resolves the connector endpoint as:
@@ -1259,4 +1329,92 @@ EXAMPLES:
   tauri-connector eval "document.title"
 "##
     );
+}
+
+#[cfg(test)]
+mod workflow_cli_tests {
+    use super::*;
+
+    #[test]
+    fn workflow_commands_parse_without_starting_a_client_executor() {
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "workflow",
+            "get",
+            "run-1",
+            "--offset",
+            "20"
+        ])
+        .is_err());
+        assert!(matches!(
+            Cli::try_parse_from([
+                "tauri-connector",
+                "workflow",
+                "get",
+                "run-1",
+                "--evidence-id",
+                "ev-1",
+                "--offset",
+                "20"
+            ])
+            .unwrap()
+            .command,
+            Commands::Workflow {
+                command: WorkflowCommand::Get {
+                    evidence_id: Some(_),
+                    offset: Some(20),
+                    ..
+                }
+            }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from([
+                "tauri-connector",
+                "workflow",
+                "run",
+                "spec.json",
+                "--wait-ms",
+                "0"
+            ])
+            .unwrap()
+            .command,
+            Commands::Workflow {
+                command: WorkflowCommand::Run { wait_ms: 0, .. }
+            }
+        ));
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "workflow",
+            "run",
+            "spec.json",
+            "--wait-ms",
+            "30001"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from(["tauri-connector", "workflow", "resume", "run-1"]).is_err());
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "workflow",
+            "resume",
+            "run-1",
+            "--expected-revision",
+            "7",
+            "--checkpoint-id",
+            "cp-1",
+            "--intent",
+            "reconcile"
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "workflow",
+            "get",
+            "run-1",
+            "--cursor",
+            "2",
+            "--include",
+            "evidence"
+        ])
+        .is_ok());
+    }
 }

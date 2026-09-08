@@ -1,6 +1,9 @@
 //! Command handlers for all supported operations.
 
 use base64::Engine;
+use connector_client::outcome::{
+    EffectStatus, ExecutionOutcome, VerificationStatus, WorkflowError,
+};
 use regex::Regex;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, Seek, SeekFrom, Write};
@@ -10,7 +13,7 @@ use tauri::{Emitter, Manager};
 #[cfg(unix)]
 use std::os::unix::fs::DirBuilderExt;
 
-use crate::bridge::Bridge;
+use crate::bridge::{Bridge, BridgeError};
 use crate::protocol::{
     AppInfo, BackendState, EnvInfo, Response, ResponsePayload, TauriInfo, WindowEntry,
 };
@@ -220,15 +223,34 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
+    let request_id = error.request_id().to_string();
+    let dispatched = error.is_dispatched();
+    let mut outcome = match error {
+        BridgeError::NotDispatched { reason, .. } => ExecutionOutcome::not_dispatched(
+            WorkflowError::new("execution_failed", "dispatching", reason),
+        ),
+        BridgeError::ExecutionFailed { error, .. } => ExecutionOutcome::failed(
+            WorkflowError::new("execution_failed", "executing", error),
+            EffectStatus::Possible,
+        ),
+        BridgeError::DispatchedOutcomeUnknown { reason, .. } => {
+            ExecutionOutcome::unknown(WorkflowError::new("outcome_unknown", "dispatching", reason))
+        }
+    };
+    outcome.dispatch = serde_json::json!({"requestId": request_id, "dispatched": dispatched});
+    outcome
+}
+
 // ============ JavaScript Execution ============
 
 pub async fn execute_js(id: &str, script: &str, window_id: &str, bridge: &Bridge) -> Response {
     match bridge
-        .execute_js_for_window(script, 30_000, window_id)
+        .execute_js_for_window_typed(script, 30_000, window_id)
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), e),
+        Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
     }
 }
 
@@ -837,11 +859,11 @@ pub async fn interact(
     );
 
     match bridge
-        .execute_js_for_window(&script, 5_000, window_id)
+        .execute_js_for_window_typed(&script, 5_000, window_id)
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), format!("Interact failed: {e}")),
+        Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
     }
 }
 
@@ -986,11 +1008,11 @@ pub async fn drag(
 
     let timeout = duration_ms as u64 + 5000;
     match bridge
-        .execute_js_for_window(&script, timeout, window_id)
+        .execute_js_for_window_typed(&script, timeout, window_id)
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), format!("Drag failed: {e}")),
+        Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
     }
 }
 
@@ -1003,83 +1025,130 @@ pub async fn keyboard(
     window_id: &str,
     bridge: &Bridge,
 ) -> Response {
-    let mod_opts = modifiers
-        .map(|mods| {
-            mods.iter()
-                .map(|m| match m.to_lowercase().as_str() {
-                    "ctrl" | "control" => "ctrlKey: true",
-                    "shift" => "shiftKey: true",
-                    "alt" => "altKey: true",
-                    "meta" | "cmd" => "metaKey: true",
-                    _ => "",
-                })
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join(", ")
-        })
-        .unwrap_or_default();
+    if !matches!(action, "type" | "press") {
+        return Response::error(
+            id.to_string(),
+            format!("Unknown keyboard action: {action}. Use: type, press"),
+        );
+    }
+    let options = input_options(action, text, key, modifiers);
+    let script = input_script("const el = document.activeElement;", &options);
+    execute_input(id, &script, window_id, bridge).await
+}
 
-    let script = match action {
-        "type" => {
-            let t = text.unwrap_or("");
-            let mods_str = if mod_opts.is_empty() {
-                String::new()
-            } else {
-                format!(", {}", mod_opts)
-            };
-            format!(
-                r#"(() => {{
-                    const el = document.activeElement;
-                    if (!el) return {{ error: 'No focused element' }};
-                    const chars = "{text}";
-                    for (const ch of chars) {{
-                        el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch{mods} }}));
-                        el.dispatchEvent(new KeyboardEvent('keypress', {{ key: ch{mods} }}));
-                        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
-                            el.value += ch;
-                            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        }}
-                        el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch{mods} }}));
-                    }}
-                    return {{ typed: "{text}", target: el.tagName.toLowerCase() }};
-                }})()"#,
-                text = t.replace('"', r#"\""#),
-                mods = mods_str,
-            )
-        }
-        "press" => {
-            let k = key.unwrap_or("Enter");
-            let mods_str = if mod_opts.is_empty() {
-                String::new()
-            } else {
-                format!(", {}", mod_opts)
-            };
-            format!(
-                r#"(() => {{
-                    const el = document.activeElement || document.body;
-                    el.dispatchEvent(new KeyboardEvent('keydown', {{ key: '{key}', bubbles: true{mods} }}));
-                    el.dispatchEvent(new KeyboardEvent('keyup', {{ key: '{key}', bubbles: true{mods} }}));
-                    return {{ pressed: '{key}', target: el.tagName.toLowerCase() }};
-                }})()"#,
-                key = k,
-                mods = mods_str,
-            )
-        }
-        _ => {
-            return Response::error(
-                id.to_string(),
-                format!("Unknown keyboard action: {action}. Use: type, press"),
-            );
-        }
-    };
+fn input_options(
+    action: &str,
+    text: Option<&str>,
+    key: Option<&str>,
+    modifiers: Option<&[String]>,
+) -> serde_json::Value {
+    let mut mods = serde_json::Map::new();
+    for modifier in modifiers.unwrap_or_default() {
+        let name = match modifier.to_lowercase().as_str() {
+            "ctrl" | "control" => "ctrlKey",
+            "shift" => "shiftKey",
+            "alt" => "altKey",
+            "meta" | "cmd" => "metaKey",
+            _ => continue,
+        };
+        mods.insert(name.into(), true.into());
+    }
+    serde_json::json!({"action": action, "text": text.unwrap_or(""), "key": key.unwrap_or("Enter"), "modifiers": mods})
+}
 
+fn input_script(resolver: &str, options: &serde_json::Value) -> String {
+    format!(
+        "(async () => {{ {resolver} return await ({}) (el, {options}); }})()",
+        include_str!("../js/input.js")
+    )
+}
+
+async fn execute_input(id: &str, script: &str, window_id: &str, bridge: &Bridge) -> Response {
     match bridge
-        .execute_js_for_window(&script, 5_000, window_id)
+        .execute_js_for_window_typed(script, 5_000, window_id)
         .await
     {
-        Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), format!("Keyboard failed: {e}")),
+        Ok(result) => Response::with_outcome(id.to_string(), input_outcome(result)),
+        Err(error) => Response::outcome_error(
+            id.to_string(),
+            ExecutionOutcome::unknown(WorkflowError::new(
+                "outcome_unknown",
+                "dispatching",
+                format!("Input failed: {error}"),
+            )),
+        ),
     }
+}
+
+// This adapter is specific to the connector input helper's contract. Arbitrary
+// JS/IPC business data is never inspected for similarly named fields.
+fn input_outcome(result: serde_json::Value) -> ExecutionOutcome {
+    if let Some(code) = result.get("code").and_then(|value| value.as_str()) {
+        let message = result
+            .get("error")
+            .and_then(|value| value.as_str())
+            .unwrap_or("Input failed");
+        let mut outcome = ExecutionOutcome::failed(
+            WorkflowError::new(code, "executing", message),
+            EffectStatus::Possible,
+        );
+        outcome.data = result;
+        return outcome;
+    }
+    let scope = if result.get("pressed").is_some() {
+        "ui_event_dispatch"
+    } else {
+        "dom_input"
+    };
+    let mut outcome = ExecutionOutcome::completed(result, EffectStatus::Confirmed);
+    outcome.effect_scope = Some(scope.into());
+    outcome
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn targeted_input(
+    id: &str,
+    action: &str,
+    selector: Option<&str>,
+    text: Option<&str>,
+    key: Option<&str>,
+    window_id: &str,
+    bridge: &Bridge,
+    state: &PluginState,
+) -> Response {
+    let resolver = if let Some(selector) = selector {
+        let selector = match cached_ref(state, window_id, selector).await {
+            Ok(Some((ref_id, _, _, _))) => format!("[data-connector-ref={}]", js_string(&ref_id)),
+            Ok(None) => selector.to_string(),
+            Err(error) => {
+                return Response::outcome_error(
+                    id.to_string(),
+                    ExecutionOutcome::not_dispatched(WorkflowError::new(
+                        "stale_ref",
+                        "resolving",
+                        error,
+                    )),
+                );
+            }
+        };
+        format!(
+            "const matches = document.querySelectorAll({}); if (matches.length !== 1) return {{code: matches.length ? 'ambiguous_target' : 'target_not_found', error: 'Expected exactly one input target', count: matches.length}}; const el = matches[0];",
+            js_string(&selector)
+        )
+    } else if action == "press" {
+        "const el = document.activeElement;".to_string()
+    } else {
+        return Response::outcome_error(
+            id.to_string(),
+            ExecutionOutcome::not_dispatched(WorkflowError::new(
+                "target_not_found",
+                "resolving",
+                "fill and type require a selector",
+            )),
+        );
+    };
+    let script = input_script(&resolver, &input_options(action, text, key, None));
+    execute_input(id, &script, window_id, bridge).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1112,15 +1181,29 @@ pub async fn wait_for(
     .await
     {
         Ok(script) => script,
-        Err(e) => return Response::error(id.to_string(), e),
+        Err(e) => {
+            return Response::outcome_error(id.to_string(), ExecutionOutcome::not_dispatched(e));
+        }
     };
 
     match bridge
-        .execute_js_for_window(&script, timeout + 2000, window_id)
+        .execute_js_for_window_typed(&script, timeout.saturating_add(2000), window_id)
         .await
     {
-        Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), format!("Wait failed: {e}")),
+        Ok(result) => {
+            let mut outcome = wait_outcome(result);
+            if function.is_some() {
+                outcome.effect = EffectStatus::Possible;
+            }
+            Response::with_outcome(id.to_string(), outcome)
+        }
+        Err(error) => {
+            let mut outcome = bridge_error_outcome(error);
+            if function.is_none() {
+                outcome.effect = EffectStatus::None;
+            }
+            Response::outcome_error(id.to_string(), outcome)
+        }
     }
 }
 
@@ -1136,13 +1219,23 @@ async fn build_wait_script(
     timeout: u64,
     window_id: &str,
     state: &PluginState,
-) -> Result<String, String> {
+) -> Result<String, WorkflowError> {
+    if load_state.is_some_and(|value| value.eq_ignore_ascii_case("networkidle")) {
+        return Err(WorkflowError::new(
+            "unsupported_condition",
+            "validating",
+            "networkidle requires a real network counter; use load for document readiness",
+        ));
+    }
     let mut checks = Vec::new();
 
     if let Some(sel) = selector {
         let state_name = selector_state.unwrap_or("attached");
         let state_js = js_string(state_name);
-        let condition = match cached_ref(state, window_id, sel).await? {
+        let condition = match cached_ref(state, window_id, sel)
+            .await
+            .map_err(|error| WorkflowError::new("stale_ref", "resolving", error))?
+        {
             Some((ref_id, entry, _, _)) => {
                 let block = ref_resolver_block("__waitEl", &ref_id, &entry);
                 format!(
@@ -1197,14 +1290,16 @@ async fn build_wait_script(
     }
 
     if checks.is_empty() {
-        return Err("Provide selector, text, url, loadState, or fn to wait for".to_string());
+        return Err(WorkflowError::new(
+            "invalid_spec",
+            "validating",
+            "Provide selector, text, url, loadState, or fn to wait for",
+        ));
     }
 
     let combined = checks.join(" && ");
     Ok(format!(
-        r#"new Promise((resolve) => {{
-            const start = Date.now();
-            const timeout = {timeout};
+        r#"(() => {{
             const __connectorElementState = (el, state) => {{
                 const target = String(state || 'attached').toLowerCase();
                 if (target === 'attached') return !!el;
@@ -1226,7 +1321,6 @@ async fn build_wait_script(
                 const target = String(state || 'load').toLowerCase();
                 if (target === 'domcontentloaded') return document.readyState === 'interactive' || document.readyState === 'complete';
                 if (target === 'load') return document.readyState === 'complete';
-                if (target === 'networkidle') return document.readyState === 'complete';
                 return document.readyState === target;
             }};
             const __connectorUserCondition = async (src) => {{
@@ -1244,23 +1338,38 @@ async fn build_wait_script(
                     }}
                 }}
             }};
-            const check = async () => {{
-                try {{
-                    const found = !!({combined});
-                    if (found) {{
-                        resolve({{ found: true, elapsed_ms: Date.now() - start }});
-                    }} else if (Date.now() - start > timeout) {{
-                        resolve({{ found: false, timeout: true, elapsed_ms: Date.now() - start }});
-                    }} else {{
-                        setTimeout(check, 100);
-                    }}
-                }} catch (error) {{
-                    resolve({{ found: false, error: String(error && error.message || error), elapsed_ms: Date.now() - start }});
-                }}
-            }};
-            check();
-        }})"#
+            return ({poller})(async () => !!({combined}), {timeout});
+        }})()"#,
+        poller = include_str!("../js/wait.js")
     ))
+}
+
+fn wait_outcome(result: serde_json::Value) -> ExecutionOutcome {
+    let mut outcome = ExecutionOutcome::completed(result, EffectStatus::None);
+    if outcome.data.get("found").and_then(|value| value.as_bool()) == Some(true) {
+        outcome.verification = VerificationStatus::Passed;
+    } else {
+        let timed_out = outcome
+            .data
+            .get("timeout")
+            .and_then(|value| value.as_bool())
+            == Some(true);
+        outcome.verification = VerificationStatus::Failed;
+        outcome.error = Some(WorkflowError::new(
+            if timed_out {
+                "condition_timeout"
+            } else {
+                "observation_failed"
+            },
+            "verifying",
+            outcome
+                .data
+                .get("error")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Wait condition did not become true before the deadline"),
+        ));
+    }
+    outcome
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1315,175 +1424,26 @@ pub async fn locator(
     });
     let query_js = query.to_string();
     let script = format!(
-        r#"(() => {{
-            const query = {query_js};
-            const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-            const matchText = (value, expected) => {{
-                if (expected == null) return true;
-                const a = normalize(value);
-                const b = normalize(expected);
-                return query.exact ? a === b : a.toLowerCase().includes(b.toLowerCase());
-            }};
-            const implicitRole = (el) => {{
-                const tag = (el.tagName || '').toLowerCase();
-                const type = (el.getAttribute('type') || '').toLowerCase();
-                if (el.getAttribute('role')) return el.getAttribute('role');
-                if (tag === 'button') return 'button';
-                if (tag === 'a' && el.hasAttribute('href')) return 'link';
-                if (tag === 'select') return 'combobox';
-                if (tag === 'textarea') return 'textbox';
-                if (tag === 'img') return 'img';
-                if (/^h[1-6]$/.test(tag)) return 'heading';
-                if (tag === 'input') {{
-                    if (['button', 'submit', 'reset'].includes(type)) return 'button';
-                    if (type === 'checkbox') return 'checkbox';
-                    if (type === 'radio') return 'radio';
-                    if (type === 'range') return 'slider';
-                    return 'textbox';
-                }}
-                return '';
-            }};
-            const labelText = (el) => {{
-                const id = el.id;
-                const labels = [];
-                if (el.labels) for (const label of el.labels) labels.push(label.textContent || '');
-                if (id) {{
-                    for (const label of document.querySelectorAll('label[for="' + CSS.escape(id) + '"]')) {{
-                        labels.push(label.textContent || '');
-                    }}
-                }}
-                const wrapping = el.closest && el.closest('label');
-                if (wrapping) labels.push(wrapping.textContent || '');
-                return normalize(labels.join(' '));
-            }};
-            const accessibleName = (el) => {{
-                const labelledBy = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
-                    .map((id) => document.getElementById(id)?.textContent || '').join(' ');
-                return normalize(
-                    el.getAttribute('aria-label') ||
-                    labelledBy ||
-                    labelText(el) ||
-                    el.getAttribute('alt') ||
-                    el.getAttribute('title') ||
-                    el.getAttribute('placeholder') ||
-                    el.textContent ||
-                    ''
-                );
-            }};
-            const cssPath = (el) => {{
-                if (!el || el.nodeType !== 1) return '';
-                if (el.id) return '#' + CSS.escape(el.id);
-                const parts = [];
-                let cur = el;
-                while (cur && cur.nodeType === 1 && cur !== document.documentElement) {{
-                    let part = cur.tagName.toLowerCase();
-                    const parent = cur.parentElement;
-                    if (parent) {{
-                        const siblings = Array.from(parent.children).filter((child) => child.tagName === cur.tagName);
-                        if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(cur) + 1) + ')';
-                    }}
-                    parts.unshift(part);
-                    cur = parent;
-                }}
-                return parts.join(' > ');
-            }};
-            const all = Array.from(document.querySelectorAll('*'));
-            const matches = [];
-            const push = (el) => {{
-                if (el && !matches.includes(el)) matches.push(el);
-            }};
-            if (query.role) {{
-                for (const el of all) if (matchText(implicitRole(el), query.role)) push(el);
-            }}
-            if (query.text) {{
-                for (const el of all) {{
-                    if (!matchText(el.textContent || '', query.text)) continue;
-                    const childMatches = Array.from(el.children || []).some((child) => matchText(child.textContent || '', query.text));
-                    if (!childMatches) push(el);
-                }}
-            }}
-            if (query.label) {{
-                for (const el of all) if (matchText(labelText(el), query.label)) push(el);
-            }}
-            if (query.placeholder) {{
-                for (const el of all) if (matchText(el.getAttribute('placeholder'), query.placeholder)) push(el);
-            }}
-            if (query.alt) {{
-                for (const el of all) if (matchText(el.getAttribute('alt'), query.alt)) push(el);
-            }}
-            if (query.title) {{
-                for (const el of all) if (matchText(el.getAttribute('title'), query.title)) push(el);
-            }}
-            if (query.testId) {{
-                for (const el of all) {{
-                    const value = el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('testid');
-                    if (matchText(value, query.testId)) push(el);
-                }}
-            }}
-            let filtered = query.name ? matches.filter((el) => matchText(accessibleName(el), query.name)) : matches;
-            const count = filtered.length;
-            let index = query.last ? count - 1 : 0;
-            if (query.nth !== null && query.nth !== undefined) index = Number(query.nth);
-            if (query.first) index = 0;
-            const el = filtered[index];
-            if (!el) return {{ count, index, error: 'No element matched locator' }};
-            const action = query.action || null;
-            const value = query.value || '';
-            if (action) {{
-                if (action === 'click') el.click();
-                else if (action === 'hover') {{
-                    const rect = el.getBoundingClientRect();
-                    const opts = {{ bubbles: true, cancelable: true, view: window, clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2 }};
-                    el.dispatchEvent(new PointerEvent('pointerover', opts));
-                    el.dispatchEvent(new MouseEvent('mouseover', opts));
-                }}
-                else if (action === 'focus') el.focus();
-                else if (action === 'fill') {{
-                    el.focus();
-                    el.value = value;
-                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                }}
-                else if (action === 'type') {{
-                    el.focus();
-                    for (const ch of value) {{
-                        el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch, bubbles: true }}));
-                        if ('value' in el) {{
-                            el.value = String(el.value || '') + ch;
-                            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        }}
-                        el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch, bubbles: true }}));
-                    }}
-                }}
-                else if (action === 'check') {{ if (!el.checked) el.click(); }}
-                else if (action === 'uncheck') {{ if (el.checked) el.click(); }}
-                else if (action !== 'text') return {{ count, index, error: 'Unsupported locator action: ' + action }};
-            }}
-            const rect = el.getBoundingClientRect();
-            return {{
-                count,
-                index,
-                action,
-                value: action === 'text' ? normalize(el.textContent || '') : undefined,
-                matched: {{
-                    tag: el.tagName.toLowerCase(),
-                    role: implicitRole(el) || null,
-                    name: accessibleName(el),
-                    text: normalize(el.textContent || '').slice(0, 300),
-                    selector: cssPath(el),
-                    rect: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }},
-                    visible: !!(rect.width || rect.height || el.getClientRects().length)
-                }}
-            }};
-        }})()"#
+        "({})({query_js}, {})",
+        include_str!("../js/locator.js"),
+        include_str!("../js/input.js")
     );
 
     match bridge
-        .execute_js_for_window(&script, 15_000, window_id)
+        .execute_js_for_window_typed(&script, 15_000, window_id)
         .await
     {
-        Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), format!("Locator failed: {e}")),
+        Ok(result) => {
+            let mut outcome = input_outcome(result);
+            if action.is_none() || action == Some("text") {
+                outcome.effect = EffectStatus::None;
+                outcome.effect_scope = None;
+            } else if !matches!(action, Some("fill" | "type")) {
+                outcome.effect_scope = Some("ui_event_dispatch".into());
+            }
+            Response::with_outcome(id.to_string(), outcome)
+        }
+        Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
     }
 }
 
@@ -1639,53 +1599,103 @@ pub async fn ipc_execute_command(
     let script = format!(
         r#"(async () => {{
             if (window.__TAURI_INTERNALS__) {{
-                return await window.__TAURI_INTERNALS__.invoke("{cmd}", {args});
+                return await window.__TAURI_INTERNALS__.invoke({cmd}, {args});
             }} else if (window.__TAURI__) {{
-                return await window.__TAURI__.core.invoke("{cmd}", {args});
+                return await window.__TAURI__.core.invoke({cmd}, {args});
             }} else {{
-                return {{ error: "Tauri IPC not available" }};
+                throw new Error("Tauri IPC not available");
             }}
         }})()"#,
-        cmd = command.replace('"', r#"\""#),
+        cmd = js_string(command),
         args = args_json,
     );
 
     match bridge
-        .execute_js_for_window(&script, 15_000, window_id)
+        .execute_js_for_window_typed(&script, 15_000, window_id)
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), format!("IPC command failed: {e}")),
+        Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
     }
 }
 
 pub async fn ipc_monitor(
     id: &str,
     action: &str,
+    window_id: &str,
     state: &PluginState,
     bridge: &crate::bridge::Bridge,
 ) -> Response {
-    match action {
-        "start" | "stop" => {
-            let on = action == "start";
-            // Hold the flag's lock across the JS commit so concurrent
-            // start/stop toggles serialize and the Rust flag can never
-            // disagree with the in-page flag.
-            let mut monitoring = state.ipc_monitor_active.lock().await;
-            let script = if on {
-                "window.__CONNECTOR_IPC_MONITOR__ = true"
-            } else {
-                "window.__CONNECTOR_IPC_MONITOR__ = false"
-            };
-            let _ = bridge.execute_js(script, 2_000).await;
-            *monitoring = on;
-            Response::success(id.to_string(), serde_json::json!({ "monitoring": on }))
-        }
-        _ => Response::error(
+    if !matches!(action, "start" | "stop") {
+        return Response::error(
             id.to_string(),
             format!("Unknown action: {action}. Use: start, stop"),
-        ),
+        );
     }
+    let desired = action == "start";
+    // Serialize toggles until their page-side acknowledgement. A failed or
+    // missing reply makes applied unknown, never an optimistic success.
+    let mut monitors = state.ipc_monitors.lock().await;
+    let status = monitors.entry(window_id.to_string()).or_default();
+    status.desired = desired;
+    status.applied = None;
+    status.acknowledged_at = None;
+    let script = format!(
+        "({})({}, {desired}, {})",
+        include_str!("../js/ipc-monitor.js"),
+        js_string(window_id),
+        js_string(&uuid::Uuid::new_v4().to_string())
+    );
+    let result = bridge
+        .execute_js_for_window_typed(&script, 2_000, window_id)
+        .await;
+    let mut failure = None;
+    match result {
+        Ok(ref value) if monitor_acknowledged(value, window_id, desired) => {
+            status.applied = Some(desired);
+            status.page_epoch = value
+                .get("pageEpoch")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            status.acknowledged_at = Some(now_ms());
+        }
+        Ok(value) => {
+            failure = Some(ExecutionOutcome::failed(
+                WorkflowError::new(
+                    "observation_failed",
+                    "verifying",
+                    value
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("IPC monitor installation was not acknowledged"),
+                ),
+                EffectStatus::Possible,
+            ))
+        }
+        Err(cause) => failure = Some(bridge_error_outcome(cause)),
+    }
+
+    let data = serde_json::json!({"monitoring": status.applied == Some(true), "windowId": window_id, "desired": status.desired, "applied": status.applied, "pageEpoch": status.page_epoch, "acknowledgedAt": status.acknowledged_at});
+    *state.ipc_monitor_active.lock().await =
+        monitors.values().any(|entry| entry.applied == Some(true));
+    let outcome = if let Some(mut outcome) = failure {
+        outcome.data = data;
+        outcome
+    } else {
+        let mut outcome = ExecutionOutcome::completed(data, EffectStatus::Confirmed);
+        outcome.effect_scope = Some("page_monitor_flag".into());
+        outcome
+    };
+    Response::with_outcome(id.to_string(), outcome)
+}
+
+fn monitor_acknowledged(value: &serde_json::Value, window_id: &str, desired: bool) -> bool {
+    value.get("windowId").and_then(|v| v.as_str()) == Some(window_id)
+        && value.get("applied").and_then(|v| v.as_bool()) == Some(desired)
+        && value
+            .get("pageEpoch")
+            .and_then(|v| v.as_str())
+            .is_some_and(|v| !v.is_empty())
 }
 
 pub async fn ipc_get_captured(
@@ -2657,7 +2667,7 @@ fn uuid8() -> String {
     format!("{:08x}", (nanos as u64) ^ u64::from(std::process::id()))[0..8].to_string()
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
         0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
@@ -3408,19 +3418,9 @@ pub async fn webview_act_and_verify(
         .unwrap_or_else(now_ms);
 
     let action_result = match action {
-        "fill" | "type" => {
-            keyboard(
-                id,
-                if action == "fill" { "type" } else { action },
-                text,
-                None,
-                None,
-                window_id,
-                bridge,
-            )
-            .await
+        "fill" | "type" | "press" => {
+            targeted_input(id, action, selector, text, key, window_id, bridge, state).await
         }
-        "press" => keyboard(id, "press", None, key, None, window_id, bridge).await,
         "drag" => {
             drag(
                 id,
@@ -3448,30 +3448,51 @@ pub async fn webview_act_and_verify(
         }
     };
 
-    let action_value = response_to_value(action_result);
-    let action_failed = action_value.get("error").is_some();
-    let wait_result = if wait_for_selector.is_some() || wait_for_text.is_some() {
-        response_to_value(
-            wait_for(
-                id,
-                wait_for_selector,
-                "css",
-                wait_for_text,
-                None,
-                None,
-                None,
-                None,
-                timeout,
-                window_id,
-                bridge,
-                state,
-            )
-            .await,
+    let mut outcome = action_response_outcome(action_result);
+    let action_value = outcome.data.clone();
+    let action_failed = !outcome.is_success(false);
+    let requested = wait_for_selector.is_some() || wait_for_text.is_some();
+    let wait_outcome = if !action_failed && requested {
+        let response = wait_for(
+            id,
+            wait_for_selector,
+            "css",
+            wait_for_text,
+            None,
+            None,
+            None,
+            None,
+            timeout,
+            window_id,
+            bridge,
+            state,
         )
+        .await;
+        Some(action_response_outcome(response))
     } else {
-        serde_json::json!({ "skipped": true })
+        None
     };
-    let wait_failed = wait_result.get("error").is_some();
+    let wait_failed = wait_outcome
+        .as_ref()
+        .is_some_and(|result| !result.is_success(true));
+    let wait_result = wait_outcome
+        .as_ref()
+        .map(|result| result.data.clone())
+        .unwrap_or_else(|| serde_json::json!({"skipped": true}));
+    if !action_failed && requested {
+        outcome.verification = if wait_failed {
+            VerificationStatus::Failed
+        } else {
+            VerificationStatus::Passed
+        };
+        if wait_failed {
+            outcome.error = Some(WorkflowError::new(
+                "postcondition_failed",
+                "verifying",
+                "Action completed but its wait condition did not pass",
+            ));
+        }
+    }
 
     let snapshot = debug_snapshot(
         id,
@@ -3520,17 +3541,44 @@ pub async fn webview_act_and_verify(
         "passed"
     };
 
-    Response::success(
-        id.to_string(),
-        serde_json::json!({
-            "verdict": verdict,
-            "mark": mark_value,
-            "actionResult": action_value,
-            "waitResult": wait_result,
-            "snapshot": snapshot_value,
-            "suggestions": suggestions,
-        }),
-    )
+    outcome.data = serde_json::json!({
+        "verdict": verdict,
+        "mark": mark_value,
+        "actionResult": action_value,
+        "waitResult": wait_result,
+        "waitOutcome": wait_outcome,
+        "snapshot": snapshot_value,
+        "suggestions": suggestions,
+    });
+    Response::with_outcome(id.to_string(), outcome)
+}
+
+fn action_response_outcome(response: Response) -> ExecutionOutcome {
+    if let Some(outcome) = response.outcome {
+        return outcome;
+    }
+    match response.payload {
+        ResponsePayload::Success { result } => {
+            // Legacy action handlers own this soft-error contract; this adapter
+            // is used only by act_and_verify, never by arbitrary JS/IPC queries.
+            if let Some(error) = result.get("error").and_then(|value| value.as_str()) {
+                let mut outcome = ExecutionOutcome::failed(
+                    WorkflowError::new("execution_failed", "executing", error),
+                    EffectStatus::Possible,
+                );
+                outcome.data = result;
+                outcome
+            } else {
+                let mut outcome = ExecutionOutcome::completed(result, EffectStatus::Confirmed);
+                outcome.effect_scope = Some("ui_event_dispatch".into());
+                outcome
+            }
+        }
+        ResponsePayload::Error { error } => ExecutionOutcome::failed(
+            WorkflowError::new("execution_failed", "executing", error),
+            EffectStatus::Possible,
+        ),
+    }
 }
 
 async fn resolve_since_mark(
@@ -3546,9 +3594,12 @@ async fn resolve_since_mark(
 }
 
 fn response_to_value(response: Response) -> serde_json::Value {
+    let outcome = response.outcome;
     match response.payload {
         ResponsePayload::Success { result } => result,
-        ResponsePayload::Error { error } => serde_json::json!({ "error": error }),
+        ResponsePayload::Error { error } => {
+            serde_json::json!({ "error": error, "outcome": outcome })
+        }
     }
 }
 
@@ -3621,7 +3672,10 @@ pub async fn ipc_listen(
 
             let script = events_js.join("\n");
             drop(listeners); // release lock before bridge call
-            match bridge.execute_js(&script, 5_000).await {
+            match bridge
+                .execute_js_for_window_typed(&script, 5_000, "main")
+                .await
+            {
                 Ok(_) => {
                     // Re-diff under the second lock: a concurrent start may
                     // have registered some of these while the lock was
@@ -3642,9 +3696,7 @@ pub async fn ipc_listen(
                         }),
                     )
                 }
-                Err(e) => {
-                    Response::error(id.to_string(), format!("Failed to register listeners: {e}"))
-                }
+                Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
             }
         }
         "stop" => {
@@ -3655,7 +3707,12 @@ pub async fn ipc_listen(
                 });
                 window.__CONNECTOR_EVENT_LISTENERS__ = {};
             })()"#;
-            let _ = bridge.execute_js(script, 5_000).await;
+            if let Err(error) = bridge
+                .execute_js_for_window_typed(script, 5_000, "main")
+                .await
+            {
+                return Response::outcome_error(id.to_string(), bridge_error_outcome(error));
+            }
 
             let mut listeners = state.event_listeners.lock().await;
             listeners.clear();
@@ -3836,6 +3893,226 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn wait_timeout_preserves_diagnostics_in_a_typed_failure() {
+        let data = serde_json::json!({"found":false,"timeout":true,"elapsed_ms":25,"lastObservation":false});
+        let outcome = super::wait_outcome(data.clone());
+        assert_eq!(outcome.error.as_ref().unwrap().code, "condition_timeout");
+        assert_eq!(
+            outcome.verification,
+            connector_client::outcome::VerificationStatus::Failed
+        );
+        assert!(!outcome.is_success(false));
+        let response = crate::protocol::Response::with_outcome("wait".into(), outcome);
+        assert!(matches!(
+            response.payload,
+            crate::protocol::ResponsePayload::Error { .. }
+        ));
+        assert_eq!(response.outcome.unwrap().data, data);
+    }
+
+    #[test]
+    fn transport_error_mapping_preserves_dispatch_certainty() {
+        use crate::bridge::BridgeError;
+        use connector_client::outcome::{EffectStatus, ExecutionStatus};
+        let before = super::bridge_error_outcome(BridgeError::NotDispatched {
+            request_id: "r1".into(),
+            reason: "missing window".into(),
+        });
+        assert_eq!(before.execution, ExecutionStatus::NotDispatched);
+        assert_eq!(before.effect, EffectStatus::None);
+        let unknown = super::bridge_error_outcome(BridgeError::DispatchedOutcomeUnknown {
+            request_id: "r2".into(),
+            reason: "disconnected".into(),
+        });
+        assert_eq!(unknown.execution, ExecutionStatus::OutcomeUnknown);
+        assert_eq!(unknown.dispatch["requestId"], "r2");
+        let failed = super::bridge_error_outcome(BridgeError::ExecutionFailed {
+            request_id: "r3".into(),
+            error: "threw after writing".into(),
+        });
+        assert_eq!(failed.execution, ExecutionStatus::Failed);
+        assert_eq!(failed.effect, EffectStatus::Possible);
+    }
+
+    #[test]
+    fn monitor_ack_requires_matching_window_state_and_epoch() {
+        use serde_json::json;
+        assert!(!super::monitor_acknowledged(&json!(true), "main", true));
+        assert!(!super::monitor_acknowledged(
+            &json!({"windowId":"other","applied":true,"pageEpoch":"a"}),
+            "main",
+            true
+        ));
+        assert!(!super::monitor_acknowledged(
+            &json!({"windowId":"main","applied":false,"pageEpoch":"a"}),
+            "main",
+            true
+        ));
+        assert!(super::monitor_acknowledged(
+            &json!({"windowId":"main","applied":true,"pageEpoch":"a"}),
+            "main",
+            true
+        ));
+    }
+
+    #[tokio::test]
+    async fn legacy_boundaries_preserve_failure_and_dispatch_counts() {
+        use crate::protocol::ResponsePayload;
+        use connector_client::outcome::{ExecutionStatus, VerificationStatus};
+        use futures_util::{SinkExt, StreamExt};
+        use serde_json::json;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let dir = std::env::temp_dir().join(format!(
+            "connector-handler-boundary-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let state = PluginState::new(dir.clone()).unwrap();
+        let bridge = crate::bridge::Bridge::start().unwrap();
+        let address = format!("ws://127.0.0.1:{}", bridge.port());
+        let mut socket = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok((socket, _)) = tokio_tungstenite::connect_async(&address).await {
+                    break socket;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        socket
+            .send(Message::Text(
+                json!({"type":"hello","windowId":"main"}).to_string().into(),
+            ))
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while bridge.status().await["clients"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let worker = tokio::spawn(async move {
+            let replies = [
+                json!({"found":false,"timeout":true,"elapsed_ms":5}),
+                json!({"action":"click","tag":"button"}),
+                json!({"found":false,"timeout":true,"elapsed_ms":5}),
+                json!({"error":"user saved text","ok":false}),
+                json!({"windowId":"wrong","applied":true,"pageEpoch":"page"}),
+                json!({"windowId":"main","applied":true,"pageEpoch":"page"}),
+            ];
+            let mut dispatches = 0;
+            let mut writes = 0;
+            for result in replies {
+                let message = socket.next().await.unwrap().unwrap();
+                let command: serde_json::Value =
+                    serde_json::from_str(message.to_text().unwrap()).unwrap();
+                dispatches += 1;
+                if command["script"]
+                    .as_str()
+                    .unwrap()
+                    .contains("action: \"click\"")
+                {
+                    writes += 1;
+                }
+                socket
+                    .send(Message::Text(
+                        json!({"id":command["id"],"result":result})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+            }
+            (dispatches, writes)
+        });
+
+        let wait = super::wait_for(
+            "wait",
+            Some("#missing"),
+            "css",
+            None,
+            None,
+            None,
+            None,
+            None,
+            5,
+            "main",
+            &bridge,
+            &state,
+        )
+        .await;
+        assert!(matches!(wait.payload, ResponsePayload::Error { .. }));
+        assert_eq!(
+            wait.outcome.unwrap().error.unwrap().code,
+            "condition_timeout"
+        );
+        let act = super::webview_act_and_verify(
+            "act",
+            "click",
+            Some("#save"),
+            None,
+            None,
+            None,
+            Some("#receipt"),
+            None,
+            5,
+            false,
+            false,
+            false,
+            false,
+            false,
+            "main",
+            &bridge,
+            None,
+            &state,
+        )
+        .await;
+        assert!(matches!(act.payload, ResponsePayload::Error { .. }));
+        let outcome = act.outcome.unwrap();
+        assert_eq!(outcome.execution, ExecutionStatus::Completed);
+        assert_eq!(outcome.verification, VerificationStatus::Failed);
+        assert_eq!(outcome.error.unwrap().code, "postcondition_failed");
+        assert_eq!(outcome.data["actionResult"]["action"], "click");
+        assert_eq!(
+            outcome.data["waitOutcome"]["error"]["code"],
+            "condition_timeout"
+        );
+        let query = super::execute_js("query", "readStoredValue()", "main", &bridge).await;
+        assert!(
+            matches!(query.payload, ResponsePayload::Success { .. }),
+            "business error fields are not tool errors"
+        );
+        let rejected = super::ipc_monitor("monitor", "start", "main", &state, &bridge).await;
+        assert!(matches!(rejected.payload, ResponsePayload::Error { .. }));
+        assert_eq!(state.ipc_monitors.lock().await["main"].applied, None);
+        let accepted = super::ipc_monitor("monitor", "start", "main", &state, &bridge).await;
+        assert!(matches!(accepted.payload, ResponsePayload::Success { .. }));
+        assert_eq!(state.ipc_monitors.lock().await["main"].applied, Some(true));
+        let missing =
+            super::ipc_monitor("missing-monitor", "start", "missing", &state, &bridge).await;
+        assert!(matches!(missing.payload, ResponsePayload::Error { .. }));
+        assert_eq!(
+            missing.outcome.unwrap().execution,
+            ExecutionStatus::NotDispatched
+        );
+        assert_eq!(state.ipc_monitors.lock().await["missing"].applied, None);
+        assert_eq!(state.ipc_monitors.lock().await["main"].applied, Some(true));
+        assert_eq!(
+            worker.await.unwrap(),
+            (6, 1),
+            "one action dispatch; no retry after failed verification"
+        );
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn sha256_hex_matches_known_vector() {
         assert_eq!(
             sha256_hex(b"abc"),
@@ -3875,6 +4152,31 @@ mod tests {
         assert!(script.contains("__connectorGlobMatch"));
         assert!(script.contains("__connectorLoadStateReady"));
         assert!(script.contains("__connectorUserCondition"));
+    }
+
+    #[tokio::test]
+    async fn wait_network_idle_is_explicitly_unsupported() {
+        let dir =
+            std::env::temp_dir().join(format!("connector-networkidle-test-{}", std::process::id()));
+        let state = PluginState::new(dir).unwrap();
+        let result = build_wait_script(
+            None,
+            "css",
+            None,
+            None,
+            Some("networkidle"),
+            None,
+            None,
+            1,
+            "main",
+            &state,
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "document complete does not establish network idle"
+        );
+        assert_eq!(result.unwrap_err().code, "unsupported_condition");
     }
 
     #[tokio::test]

@@ -1,0 +1,5 @@
+{
+  "identifier": "fixture-connector",
+  "windows": ["main", "secondary"],
+  "permissions": ["connector:default"]
+}

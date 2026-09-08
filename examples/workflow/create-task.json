@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "runKey": "fixture-create-task-run-001",
+  "mode": "strict",
+  "schedule": "sequential",
+  "windowId": "main",
+  "inputs": {
+    "taskName": "connector-fixture-unique-001"
+  },
+  "deadlineMs": 60000,
+  "defaults": {
+    "stepTimeoutMs": 10000,
+    "locatorTimeoutMs": 3000
+  },
+  "evidence": {
+    "success": "summary",
+    "failure": "scoped",
+    "maxInlineBytes": 16384
+  },
+  "steps": [
+    {
+      "id": "open",
+      "op": "click",
+      "target": {
+        "by": "role",
+        "value": "button",
+        "name": "新建任务"
+      },
+      "expect": {
+        "kind": "element",
+        "target": {
+          "by": "role",
+          "value": "dialog",
+          "name": "新建任务"
+        },
+        "state": "visible"
+      }
+    },
+    {
+      "id": "fillName",
+      "op": "fill",
+      "target": {
+        "scope": {
+          "by": "role",
+          "value": "dialog",
+          "name": "新建任务"
+        },
+        "by": "label",
+        "value": "名称"
+      },
+      "value": {
+        "fromInput": {
+          "key": "taskName"
+        }
+      },
+      "expect": {
+        "kind": "valueEquals",
+        "target": {
+          "scope": {
+            "by": "role",
+            "value": "dialog",
+            "name": "新建任务"
+          },
+          "by": "label",
+          "value": "名称"
+        },
+        "expected": {
+          "fromInput": {
+            "key": "taskName"
+          }
+        }
+      }
+    },
+    {
+      "id": "submit",
+      "op": "click",
+      "target": {
+        "scope": {
+          "by": "role",
+          "value": "dialog",
+          "name": "新建任务"
+        },
+        "by": "role",
+        "value": "button",
+        "name": "保存"
+      },
+      "expect": {
+        "kind": "element",
+        "target": {
+          "by": "testId",
+          "value": "task-row",
+          "entity": {
+            "attribute": "data-task-name",
+            "value": {
+              "fromInput": {
+                "key": "taskName"
+              }
+            }
+          }
+        },
+        "state": "visible"
+      }
+    },
+    {
+      "id": "readTaskId",
+      "op": "query",
+      "target": {
+        "by": "testId",
+        "value": "task-row",
+        "entity": {
+          "attribute": "data-task-name",
+          "value": {
+            "fromInput": {
+              "key": "taskName"
+            }
+          }
+        }
+      },
+      "query": {
+        "kind": "attribute",
+        "name": "data-task-id"
+      },
+      "expect": {
+        "kind": "result",
+        "stepId": "readTaskId",
+        "pointer": "/value",
+        "operator": "nonEmptyString"
+      }
+    }
+  ],
+  "goal": {
+    "kind": "element",
+    "target": {
+      "by": "testId",
+      "value": "task-row",
+      "entity": {
+        "attribute": "data-task-id",
+        "value": {
+          "fromStep": {
+            "stepId": "readTaskId",
+            "pointer": "/value"
+          }
+        }
+      }
+    },
+    "state": "visible"
+  }
+}

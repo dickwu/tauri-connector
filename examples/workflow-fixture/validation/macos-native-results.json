@@ -1,0 +1,135 @@
+{
+  "platform": "darwin",
+  "runtime": "actual Tauri Wry native WebView",
+  "instance": "dev.connector.workflow-fixture.677beb1e-1fe2-4b6b-9076-190649d58d9a",
+  "isolatedInstances": [
+    "dev.connector.workflow-fixture.677beb1e-1fe2-4b6b-9076-190649d58d9a",
+    "dev.connector.workflow-fixture.f4917c79-a02d-4cf4-a524-e8e09a9c48f9"
+  ],
+  "tests": [
+    {
+      "name": "native React controlled input reaches Rust save exactly once",
+      "passed": true,
+      "durationMs": 189,
+      "runId": "8cd714a6-afd6-41ec-ae58-9d97a24c4e0d",
+      "saveEffects": 1,
+      "workflowClientRequests": 1,
+      "elapsedMs": 188,
+      "reportBytes": 3348
+    },
+    {
+      "name": "same UI path via one caller request per step",
+      "passed": true,
+      "durationMs": 305,
+      "saveEffects": 1,
+      "workflowClientRequests": 4
+    },
+    {
+      "name": "two clients share one runKey and cannot change its inputs",
+      "passed": true,
+      "durationMs": 251,
+      "runId": "a324349c-406b-4118-91c0-6b2edcffd4b5",
+      "saveEffects": 1
+    },
+    {
+      "name": "disconnect and resubmit retain the existing logical run",
+      "passed": true,
+      "durationMs": 1419,
+      "runId": "5faa2f82-1050-4aa4-86b2-201e0e864759",
+      "saveEffects": 1
+    },
+    {
+      "name": "cancel stops an outstanding wait and releases bridge waiters/resources",
+      "passed": true,
+      "durationMs": 144,
+      "runId": "bcc6e57b-cdbc-4d4d-bdf8-8b8ab0c63c62",
+      "status": "cancelled",
+      "bridgePending": 0,
+      "saveEffects": 0
+    },
+    {
+      "name": "WS operation beyond two seconds produces one native write",
+      "passed": true,
+      "durationMs": 5006,
+      "saveEffects": 1
+    },
+    {
+      "name": "JS exception after native write does not replay through eval",
+      "passed": true,
+      "durationMs": 21,
+      "saveEffects": 1,
+      "outcome": {
+        "execution": "failed",
+        "verification": "not_requested",
+        "effect": "possible",
+        "data": null,
+        "error": {
+          "code": "execution_failed",
+          "stage": "executing",
+          "message": "fixture exception after write",
+          "retryableBeforeDispatch": false
+        },
+        "timing": {},
+        "dispatch": {
+          "dispatched": true,
+          "requestId": "01bfeb7c-44e2-45b5-919d-25f7ecab92f2"
+        },
+        "evidenceRefs": [],
+        "coverage": {
+          "businessPersistence": "unobserved"
+        },
+        "warnings": []
+      },
+      "conflictingWriteBlocked": true
+    },
+    {
+      "name": "unknown write response quarantines resource without replay",
+      "passed": true,
+      "durationMs": 30004,
+      "saveEffects": 1,
+      "outcome": {
+        "execution": "outcome_unknown",
+        "verification": "not_requested",
+        "effect": "possible",
+        "data": null,
+        "error": {
+          "code": "outcome_unknown",
+          "stage": "dispatching",
+          "message": "WS bridge timeout",
+          "retryableBeforeDispatch": false
+        },
+        "timing": {},
+        "dispatch": {
+          "dispatched": true,
+          "requestId": "6e7e7617-56d8-4afc-8315-bd60718a588a"
+        },
+        "evidenceRefs": [],
+        "coverage": {
+          "businessPersistence": "unobserved"
+        },
+        "warnings": []
+      },
+      "conflictingWriteBlocked": true,
+      "bridgePending": 0,
+      "isolatedInstance": "dev.connector.workflow-fixture.f4917c79-a02d-4cf4-a524-e8e09a9c48f9"
+    }
+  ],
+  "metrics": {
+    "clientRequests": 85,
+    "sentBytes": 32271,
+    "receivedBytes": 204575
+  },
+  "passed": true,
+  "untestedPlatforms": [
+    "win32",
+    "linux"
+  ],
+  "caveats": [
+    "UI state and isolated native fixture store only; no production service or business persistence provider",
+    "Synthetic DOM input and event dispatch"
+  ],
+  "command": "node examples/workflow-fixture/scripts/native-test.mjs",
+  "buildCommand": "cargo build --manifest-path examples/workflow-fixture/Cargo.toml --target-dir target --offline",
+  "clippyCommand": "cargo clippy --manifest-path examples/workflow-fixture/Cargo.toml --all-targets --target-dir target --offline -- -D warnings",
+  "clippyPassed": true
+}

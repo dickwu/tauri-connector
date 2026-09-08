@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Isolated workflow fixture</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; margin: 24px; color: #14202b; background: #f4f6f8; }
+    button, input, textarea { font: inherit; padding: 8px 12px; margin: 6px; }
+    [role="dialog"] { position: fixed; top: 100px; left: 200px; width: 560px; padding: 24px; background: white; border: 2px solid #456; z-index: 10; }
+    [data-testid="task-row"] { padding: 12px; margin: 8px 0; border: 1px solid #789; background: white; }
+  </style>
+</head>
+<body>
+  <div id="fixture"></div>
+  <script src="react.js"></script>
+  <script src="fixture-app.js"></script>
+</body>
+</html>

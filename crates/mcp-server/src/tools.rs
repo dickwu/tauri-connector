@@ -52,8 +52,31 @@ pub async fn call_tool(
     };
 
     match result {
-        Ok(data) => text_content(&data),
-        Err(e) => text_content(&json!({ "error": e })),
+        Ok(data) => {
+            let mut content = text_content(&data);
+            if name.starts_with("workflow_")
+                && name != "workflow_capabilities"
+                && workflow_result_exit_code(&data) == 1
+            {
+                content["isError"] = json!(true);
+            }
+            if name == "batch_actions" && data.get("ok") == Some(&json!(false)) {
+                content["isError"] = json!(true);
+            }
+            if data.is_object() {
+                content["structuredContent"] = data;
+            }
+            content
+        }
+        Err(e) => {
+            let data = serde_json::from_str::<Value>(&e).unwrap_or_else(|_| json!({ "error": e }));
+            let mut content = text_content(&data);
+            content["isError"] = json!(true);
+            if data.is_object() {
+                content["structuredContent"] = data;
+            }
+            content
+        }
     }
 }
 
@@ -70,6 +93,11 @@ pub async fn dispatch_tool(
     args: &Value,
 ) -> Result<Value, String> {
     match name {
+        "workflow_run"
+        | "workflow_get"
+        | "workflow_cancel"
+        | "workflow_resume"
+        | "workflow_capabilities" => handle_workflow(client, name, args).await,
         "driver_session" => Err("driver_session is not allowed inside batch_actions".to_string()),
         "batch_actions" => Err("batch_actions cannot be nested".to_string()),
         "webview_execute_js" => handle_execute_js(client, args).await,
@@ -112,6 +140,46 @@ pub async fn dispatch_tool(
     }
 }
 
+/// Classify only the workflow report contract, never arbitrary business JSON.
+/// 0 = completed, 1 = known failure, 2 = running/paused/unknown.
+pub fn workflow_result_exit_code(report: &Value) -> i32 {
+    embedded_mcp_tool_schema::workflow_report_exit_code(report)
+}
+
+async fn handle_workflow(
+    client: &ConnectorClient,
+    operation: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let bridge = handle_bridge_status(client).await?;
+    if bridge
+        .get("workflowProtocolVersion")
+        .and_then(Value::as_u64)
+        != Some(1)
+    {
+        return Err("capability_unavailable: connected app does not support workflow protocol v1; upgrade the plugin".into());
+    }
+    let mut args = args.clone();
+    if !args.is_object() {
+        return Err("invalid_spec: workflow arguments must be an object".into());
+    }
+    if operation != "workflow_capabilities" && args.get("authToken").is_none() {
+        if let Ok(token) = std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN") {
+            args["authToken"] = json!(token);
+        }
+    }
+    let timeout = args
+        .get("waitMs")
+        .and_then(Value::as_u64)
+        .unwrap_or(1000)
+        .min(30_000)
+        + 5000;
+    client.send_with_timeout(json!({ "type": "workflow", "operation": operation, "args": args }), timeout).await
+        .map_err(|error| if error.contains("unknown variant") && error.contains("workflow") {
+            "capability_unavailable: connected app does not support workflow; upgrade the plugin".into()
+        } else { error })
+}
+
 async fn handle_batch_actions(
     client: &ConnectorClient,
     host: &str,
@@ -119,6 +187,9 @@ async fn handle_batch_actions(
     args: &Value,
 ) -> Result<Value, String> {
     let report = connector_client::batch::run_from_value(args, |tool, targs| async move {
+        if tool.starts_with("workflow_") {
+            return Err("workflow lifecycle operations cannot be nested in batch_actions".into());
+        }
         dispatch_tool(client, host, port, &tool, &targs).await
     })
     .await?;
@@ -495,7 +566,7 @@ async fn handle_ipc_execute_command(
 async fn handle_ipc_monitor(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let action = str_arg(args, "action").ok_or("Missing 'action' parameter")?;
     client
-        .send(json!({ "type": "ipc_monitor", "action": action }))
+        .send(json!({ "type": "ipc_monitor", "action": action, "window_id": window_id(args) }))
         .await
 }
 
@@ -847,7 +918,132 @@ The MCP server connects to this WebSocket to bridge Claude Code ↔ your Tauri a
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workflow_exit_codes_keep_pending_and_unknown_distinct_from_success() {
+        assert_eq!(
+            workflow_result_exit_code(
+                &json!({"status":"completed","goalStatus":"passed","originalTestVerdict":"failed","recoveryOccurred":true})
+            ),
+            1
+        );
+        for status in [
+            "created",
+            "running",
+            "paused",
+            "cancel_requested",
+            "interrupted",
+            "outcome_unknown",
+        ] {
+            assert_eq!(workflow_result_exit_code(&json!({"status":status})), 2);
+        }
+        for status in ["failed", "cancelled", "expired"] {
+            assert_eq!(workflow_result_exit_code(&json!({"status":status})), 1);
+        }
+        assert_eq!(
+            workflow_result_exit_code(&json!({"status":"completed","goalStatus":"passed"})),
+            0
+        );
+        assert_eq!(
+            workflow_result_exit_code(
+                &json!({"status":"completed","goalStatus":"not_requested","data":{"error":"business data"}})
+            ),
+            0
+        );
+        assert_eq!(
+            workflow_result_exit_code(&json!({"status":"completed","goalStatus":"failed"})),
+            1
+        );
+        assert_eq!(
+            workflow_result_exit_code(&json!({"status":"completed","goalStatus":"inconclusive"})),
+            2
+        );
+    }
     use std::collections::BTreeSet;
+
+    #[test]
+    fn workflow_schemas_define_app_owned_lifecycle() {
+        let get_schema = tool("workflow_get")["inputSchema"].clone();
+        assert_eq!(get_schema["properties"]["evidenceId"]["type"], "string");
+        assert_eq!(get_schema["properties"]["offset"]["minimum"], 0);
+        assert_eq!(
+            get_schema["dependentRequired"]["offset"],
+            json!(["evidenceId"])
+        );
+        for name in [
+            "workflow_run",
+            "workflow_get",
+            "workflow_cancel",
+            "workflow_resume",
+            "workflow_capabilities",
+        ] {
+            let definition = tool(name);
+            assert_eq!(definition["inputSchema"]["type"], "object");
+        }
+        assert_eq!(
+            tool("workflow_run")["inputSchema"]["required"],
+            json!(["spec"])
+        );
+        assert_eq!(
+            tool("workflow_run")["inputSchema"]["properties"]["waitMs"]["maximum"],
+            30_000
+        );
+        assert_eq!(
+            tool("workflow_resume")["inputSchema"]["required"],
+            json!(["runId", "expectedRevision", "checkpointId", "intent"])
+        );
+        let schema = tool("workflow_run")["inputSchema"].clone();
+        assert_eq!(
+            schema["properties"]["spec"]["required"],
+            json!(["schemaVersion", "runKey", "steps"])
+        );
+        fn check_references(value: &Value, root: &Value) {
+            match value {
+                Value::Object(fields) => {
+                    if let Some(reference) = fields.get("$ref").and_then(Value::as_str) {
+                        assert!(
+                            root.pointer(reference.strip_prefix('#').unwrap()).is_some(),
+                            "broken schema reference {reference}"
+                        );
+                    }
+                    for value in fields.values() {
+                        check_references(value, root);
+                    }
+                }
+                Value::Array(values) => {
+                    for value in values {
+                        check_references(value, root);
+                    }
+                }
+                _ => {}
+            }
+        }
+        check_references(&schema, &schema);
+    }
+
+    #[tokio::test]
+    async fn workflow_requests_are_forwarded_even_without_a_local_executor() {
+        let client = ConnectorClient::new();
+        for operation in [
+            "workflow_run",
+            "workflow_get",
+            "workflow_cancel",
+            "workflow_resume",
+            "workflow_capabilities",
+        ] {
+            let error = dispatch_tool(&client, "127.0.0.1", 9555, operation, &json!({}))
+                .await
+                .unwrap_err();
+            assert!(!error.contains("Unknown tool"), "{operation}: {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_transport_failure_sets_mcp_error_flag() {
+        let mut client = ConnectorClient::new();
+        let response = call_tool(&mut client, "127.0.0.1", 9555, "bridge_status", &json!({})).await;
+        assert_eq!(response["isError"], true);
+    }
 
     fn tool(name: &str) -> Value {
         tool_definitions()["tools"]
@@ -978,8 +1174,8 @@ mod tests {
         );
 
         // Pin the totals so accidental additions/deletions are caught.
-        assert_eq!(embedded.len(), 37, "shared tool count changed");
-        assert_eq!(standalone.len(), 38, "standalone tool count changed");
+        assert_eq!(embedded.len(), 42, "shared tool count changed");
+        assert_eq!(standalone.len(), 43, "standalone tool count changed");
     }
 
     #[test]

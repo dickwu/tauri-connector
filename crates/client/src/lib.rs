@@ -4,18 +4,20 @@
 //! running Tauri app's connector plugin over WebSocket.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 pub mod batch;
 pub mod discovery;
+pub mod outcome;
+pub mod workflow;
 
 const DEFAULT_TIMEOUT_MS: u64 = 35_000;
 
@@ -25,10 +27,32 @@ struct PendingRequest {
     tx: oneshot::Sender<Result<Value, String>>,
 }
 
+type PendingMap = Arc<Mutex<HashMap<String, PendingRequest>>>;
+
+/// Removing a local waiter never means the remote operation was cancelled.
+struct PendingGuard {
+    pending: PendingMap,
+    id: String,
+}
+
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        self.pending.lock().unwrap().remove(&self.id);
+    }
+}
+
+fn reject_pending(pending: &PendingMap, reason: &str) {
+    for (id, req) in pending.lock().unwrap().drain() {
+        let _ = req.tx.send(Err(format!(
+            "outcome_unknown: {reason} (requestId: {id}); remote execution may continue"
+        )));
+    }
+}
+
 /// WebSocket client that communicates with tauri-plugin-connector.
 pub struct ConnectorClient {
     write_tx: Option<mpsc::UnboundedSender<String>>,
-    pending: Arc<Mutex<HashMap<String, PendingRequest>>>,
+    pending: PendingMap,
     _reader_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -44,6 +68,9 @@ impl ConnectorClient {
     /// Connect to the plugin's WebSocket server.
     pub async fn connect(&mut self, host: &str, port: u16) -> Result<(), String> {
         self.disconnect().await;
+        // An old I/O task finishing concurrently must not reject requests made
+        // on the replacement connection.
+        self.pending = Arc::new(Mutex::new(HashMap::new()));
 
         let url = format!("ws://{host}:{port}");
         let (ws, _) = tokio_tungstenite::connect_async(&url)
@@ -52,49 +79,52 @@ impl ConnectorClient {
 
         let (ws_write, ws_read) = ws.split();
 
-        // Writer task: forwards messages from channel to WebSocket
+        // One task owns both halves: exiting either direction drops the other,
+        // closes the queue, and releases all waiters. No detached writer remains.
         let (write_tx, mut write_rx) = mpsc::unbounded_channel::<String>();
-        let writer_handle = tokio::spawn(async move {
-            let mut ws_write = ws_write;
-            while let Some(msg) = write_rx.recv().await {
-                if ws_write.send(Message::Text(msg.into())).await.is_err() {
-                    break;
-                }
-            }
-        });
-
-        // Reader task: receives messages from WebSocket and resolves pending requests
         let pending = self.pending.clone();
         let reader_handle = tokio::spawn(async move {
+            let mut ws_write = ws_write;
             let mut ws_read = ws_read;
-            while let Some(Ok(msg)) = ws_read.next().await {
-                if let Message::Text(text) = msg {
-                    let text: &str = text.as_ref();
-                    if let Ok(response) = serde_json::from_str::<Value>(text) {
-                        let id = response
-                            .get("id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-
-                        let mut pending = pending.lock().await;
-                        if let Some(req) = pending.remove(&id) {
-                            let result = if let Some(error) = response.get("error") {
-                                Err(error.as_str().unwrap_or("Unknown error").to_string())
-                            } else {
-                                Ok(response.get("result").cloned().unwrap_or(Value::Null))
-                            };
-                            let _ = req.tx.send(result);
+            loop {
+                tokio::select! {
+                    outbound = write_rx.recv() => {
+                        match outbound {
+                            Some(msg) => {
+                                if ws_write.send(Message::Text(msg.into())).await.is_err() {
+                                    break;
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    inbound = ws_read.next() => {
+                        match inbound {
+                            Some(Ok(Message::Text(text))) => {
+                                if let Ok(response) = serde_json::from_str::<Value>(&text) {
+                                    let id = response.get("id").and_then(Value::as_str).unwrap_or("");
+                                    if let Some(req) = pending.lock().unwrap().remove(id) {
+                                        let result = if let Some(error) = response.get("error") {
+                                            if let Some(outcome) = response.get("outcome") {
+                                                Err(serde_json::json!({ "error": error, "outcome": outcome }).to_string())
+                                            } else {
+                                                Err(error.as_str().unwrap_or("Unknown error").to_string())
+                                            }
+                                        } else {
+                                            Ok(response.get("result").cloned().unwrap_or(Value::Null))
+                                        };
+                                        let _ = req.tx.send(result);
+                                    }
+                                }
+                            }
+                            Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                            Some(Ok(_)) => {}
                         }
                     }
                 }
             }
-            // Connection closed — reject all pending
-            let mut pending = pending.lock().await;
-            for (_, req) in pending.drain() {
-                let _ = req.tx.send(Err("Connection closed".to_string()));
-            }
-            drop(writer_handle);
+            write_rx.close();
+            reject_pending(&pending, "Connection closed");
         });
 
         self.write_tx = Some(write_tx);
@@ -109,15 +139,12 @@ impl ConnectorClient {
         if let Some(handle) = self._reader_handle.take() {
             handle.abort();
         }
-        let mut pending = self.pending.lock().await;
-        for (_, req) in pending.drain() {
-            let _ = req.tx.send(Err("Disconnected".to_string()));
-        }
+        reject_pending(&self.pending, "Disconnected");
     }
 
     /// Check if connected.
     pub fn is_connected(&self) -> bool {
-        self.write_tx.is_some()
+        self.write_tx.as_ref().is_some_and(|tx| !tx.is_closed())
     }
 
     /// Send a command and wait for a response.
@@ -131,48 +158,206 @@ impl ConnectorClient {
         command: Value,
         timeout_ms: u64,
     ) -> Result<Value, String> {
-        let write_tx = self
-            .write_tx
-            .as_ref()
-            .ok_or_else(|| "Not connected".to_string())?;
-
-        let id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = oneshot::channel();
-
-        {
-            let mut pending = self.pending.lock().await;
-            pending.insert(id.clone(), PendingRequest { tx });
-        }
-
-        // Build the message with the id
+        // Validate and serialize before registering any request state.
         let mut msg = match command {
             Value::Object(map) => map,
             _ => return Err("Command must be a JSON object".to_string()),
         };
+        let write_tx = self
+            .write_tx
+            .as_ref()
+            .ok_or_else(|| "Not connected".to_string())?;
+        let id = uuid::Uuid::new_v4().to_string();
         msg.insert("id".to_string(), Value::String(id.clone()));
-
         let json = serde_json::to_string(&msg).map_err(|e| e.to_string())?;
+        let (tx, rx) = oneshot::channel();
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(id.clone(), PendingRequest { tx });
+        let _waiter = PendingGuard {
+            pending: self.pending.clone(),
+            id: id.clone(),
+        };
         write_tx
             .send(json)
-            .map_err(|_| "Send failed: connection closed".to_string())?;
+            .map_err(|_| "not_dispatched: Send failed: connection closed".to_string())?;
 
-        // Wait for response with timeout
+        // Once queued, a timeout or connection loss cannot prove non-execution.
         match tokio::time::timeout(Duration::from_millis(timeout_ms), rx).await {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => {
-                self.pending.lock().await.remove(&id);
-                Err("Response channel closed".to_string())
-            }
-            Err(_) => {
-                self.pending.lock().await.remove(&id);
-                Err("Request timeout".to_string())
-            }
+            Ok(Err(_)) => Err(format!("outcome_unknown: Response channel closed (requestId: {id}); remote execution may continue")),
+            Err(_) => Err(format!("outcome_unknown: Request timeout (requestId: {id}); remote execution may continue")),
         }
+    }
+}
+
+impl Drop for ConnectorClient {
+    fn drop(&mut self) {
+        self.write_tx = None;
+        if let Some(handle) = self._reader_handle.take() {
+            handle.abort();
+        }
+        reject_pending(&self.pending, "Client dropped");
     }
 }
 
 impl Default for ConnectorClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn queued_client() -> (ConnectorClient, mpsc::UnboundedReceiver<String>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut client = ConnectorClient::new();
+        client.write_tx = Some(tx);
+        (client, rx)
+    }
+
+    #[tokio::test]
+    async fn invalid_command_does_not_register_a_waiter() {
+        let (client, _rx) = queued_client();
+        assert!(client.send(Value::Null).await.is_err());
+        assert!(client.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_enqueue_removes_waiter() {
+        let (client, rx) = queued_client();
+        drop(rx);
+        assert!(client.send(json!({"command": "test"})).await.is_err());
+        assert!(client.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropped_send_future_removes_waiter_without_remote_cancellation() {
+        let (client, mut rx) = queued_client();
+        let client = Arc::new(client);
+        let cloned = client.clone();
+        let task = tokio::spawn(async move { cloned.send(json!({"command": "test"})).await });
+        let dispatched = rx.recv().await.unwrap();
+        assert!(serde_json::from_str::<Value>(&dispatched).unwrap()["id"].is_string());
+        assert_eq!(client.pending.lock().unwrap().len(), 1);
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(client.pending.lock().unwrap().is_empty());
+        assert!(
+            rx.try_recv().is_err(),
+            "dropping the waiter must not send another command"
+        );
+    }
+
+    #[tokio::test]
+    async fn timeout_retains_unknown_remote_outcome_and_request_id() {
+        let (client, mut rx) = queued_client();
+        let error = client
+            .send_with_timeout(json!({"command": "test"}), 1)
+            .await
+            .unwrap_err();
+        let sent: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert!(error.contains("outcome_unknown"), "{error}");
+        assert!(error.contains(sent["id"].as_str().unwrap()), "{error}");
+        assert!(client.pending.lock().unwrap().is_empty());
+    }
+
+    async fn fixture_client(
+        response: Option<Value>,
+    ) -> (ConnectorClient, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let command = socket.next().await.unwrap().unwrap();
+            let command: Value = serde_json::from_str(command.to_text().unwrap()).unwrap();
+            if let Some(mut response) = response {
+                response["id"] = command["id"].clone();
+                socket
+                    .send(Message::Text(response.to_string().into()))
+                    .await
+                    .unwrap();
+            }
+            socket.close(None).await.unwrap();
+        });
+        let mut client = ConnectorClient::new();
+        client.connect("127.0.0.1", port).await.unwrap();
+        (client, server)
+    }
+
+    #[tokio::test]
+    async fn closed_socket_cleans_pending_and_preserves_unknown_remote_state() {
+        let (client, server) = fixture_client(None).await;
+        let error = client.send(json!({"command":"write"})).await.unwrap_err();
+        assert!(error.contains("outcome_unknown"));
+        assert!(error.contains("requestId:"));
+        assert!(client.pending.lock().unwrap().is_empty());
+        server.await.unwrap();
+        assert!(!client.is_connected());
+    }
+
+    #[tokio::test]
+    async fn protocol_error_retains_the_explicit_outcome_envelope() {
+        let outcome =
+            json!({"execution":"completed", "verification":"failed", "effect":"possible"});
+        let (client, server) = fixture_client(Some(
+            json!({"error":"Postcondition failed", "outcome":outcome}),
+        ))
+        .await;
+        let error = client.send(json!({"command":"write"})).await.unwrap_err();
+        let envelope: Value = serde_json::from_str(&error).unwrap();
+        assert_eq!(envelope["outcome"], outcome);
+        assert_eq!(envelope["error"], "Postcondition failed");
+        assert!(client.pending.lock().unwrap().is_empty());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn business_error_fields_remain_successful_data() {
+        let data = json!({"error":"user content", "found":false, "ok":false});
+        let (client, server) = fixture_client(Some(json!({"result":data}))).await;
+        assert_eq!(client.send(json!({"command":"read"})).await.unwrap(), data);
+        assert!(client.pending.lock().unwrap().is_empty());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_disconnect_releases_every_waiter() {
+        let (mut client, _rx) = queued_client();
+        let (tx, result) = oneshot::channel();
+        client
+            .pending
+            .lock()
+            .unwrap()
+            .insert("queued-id".into(), PendingRequest { tx });
+        client.disconnect().await;
+        assert!(!client.is_connected());
+        let error = result.await.unwrap().unwrap_err();
+        assert!(error.contains("outcome_unknown"));
+        assert!(error.contains("queued-id"));
+        assert!(client.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropping_client_closes_socket_without_detached_writer() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            match tokio::time::timeout(Duration::from_secs(1), socket.next()).await {
+                Ok(None | Some(Err(_)) | Some(Ok(Message::Close(_)))) => {}
+                other => panic!("client drop must close the connection: {other:?}"),
+            }
+        });
+        let mut client = ConnectorClient::new();
+        client.connect("127.0.0.1", port).await.unwrap();
+        drop(client);
+        server.await.unwrap();
     }
 }

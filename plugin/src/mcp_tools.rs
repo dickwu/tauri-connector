@@ -2,9 +2,6 @@
 //!
 //! Calls existing handler functions directly — no WebSocket hop.
 
-use std::future::Future;
-use std::pin::Pin;
-
 use serde_json::{Value, json};
 
 use crate::bridge::Bridge;
@@ -14,16 +11,30 @@ use crate::state::PluginState;
 
 /// Convert a handler Response to MCP content format.
 fn to_mcp_content(response: Response) -> Value {
+    let outcome = response.outcome;
     match response.payload {
         ResponsePayload::Success { result } => {
             let text = match &result {
                 Value::String(s) => s.clone(),
                 _ => serde_json::to_string_pretty(&result).unwrap_or_default(),
             };
-            json!({ "content": [{ "type": "text", "text": text }] })
+            let mut content = json!({ "content": [{ "type": "text", "text": text }] });
+            if result.is_object() {
+                content["structuredContent"] = result;
+            }
+            if let Some(outcome) = outcome {
+                content["outcome"] = json!(outcome);
+            }
+            content
         }
         ResponsePayload::Error { error } => {
-            json!({ "content": [{ "type": "text", "text": error }], "isError": true })
+            let structured = match outcome {
+                Some(outcome) => json!({"error":error,"outcome":outcome}),
+                None => {
+                    serde_json::from_str::<Value>(&error).unwrap_or_else(|_| json!({"error":error}))
+                }
+            };
+            json!({ "content": [{ "type": "text", "text": structured.to_string() }], "isError": true, "structuredContent": structured })
         }
     }
 }
@@ -72,17 +83,18 @@ fn window_id(args: &Value) -> String {
     str_arg(args, "windowId").unwrap_or_else(|| "main".to_string())
 }
 
-/// Dispatch an MCP tool call to the appropriate handler.
-pub async fn call_tool(
+/// Dispatch internally without acquiring a lease. Only trusted callers that already
+/// hold a lease may call this function. No MCP formatting occurs on this path.
+pub(crate) async fn dispatch_raw(
     name: &str,
     args: &Value,
     bridge: &Bridge,
     app: Option<&tauri::AppHandle>,
     state: &PluginState,
-) -> Value {
+) -> Response {
     let id = "mcp";
 
-    let response = match name {
+    match name {
         "webview_execute_js" => {
             let script = str_arg(args, "script").unwrap_or_default();
             let wid = window_id(args);
@@ -108,7 +120,7 @@ pub async fn call_tool(
                 .get("annotate")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let resp = handlers::screenshot(
+            handlers::screenshot(
                 id,
                 &format,
                 quality,
@@ -124,9 +136,7 @@ pub async fn call_tool(
                 selector.as_deref(),
                 annotate,
             )
-            .await;
-            // Return image content if base64 data is present
-            return to_mcp_image_or_text(resp);
+            .await
         }
 
         "webview_dom_snapshot" => {
@@ -362,7 +372,7 @@ pub async fn call_tool(
 
         "ipc_monitor" => {
             let action = str_arg(args, "action").unwrap_or_default();
-            handlers::ipc_monitor(id, &action, state, bridge).await
+            handlers::ipc_monitor(id, &action, &window_id(args), state, bridge).await
         }
 
         "ipc_get_captured" => {
@@ -405,17 +415,12 @@ pub async fn call_tool(
             .await
         }
 
-        "get_setup_instructions" => {
-            return json!({
-                "content": [{ "type": "text", "text": SETUP_INSTRUCTIONS }]
-            });
-        }
+        "get_setup_instructions" => Response::success(id.into(), json!(SETUP_INSTRUCTIONS)),
 
-        "list_devices" => {
-            return json!({
-                "content": [{ "type": "text", "text": "This MCP server is embedded in the Tauri app. The app is running." }]
-            });
-        }
+        "list_devices" => Response::success(
+            id.into(),
+            json!("This MCP server is embedded in the Tauri app. The app is running."),
+        ),
 
         "clear_logs" => {
             let source = str_arg(args, "source").unwrap_or_else(|| "all".to_string());
@@ -614,89 +619,103 @@ pub async fn call_tool(
             handlers::search_snapshot(id, &pattern, context, &mode, &wid, state, bridge).await
         }
 
-        "batch_actions" => {
-            return handle_batch_actions(args, bridge, app, state).await;
-        }
-
-        _ => {
-            return json!({
-                "content": [{ "type": "text", "text": format!("Unknown tool: {name}") }],
-                "isError": true,
-            });
-        }
-    };
-
-    to_mcp_content(response)
-}
-
-/// Pin-box a dispatch future so `batch_actions` can recurse into `call_tool`
-/// without an infinitely sized future type.
-fn boxed_dispatch<'a>(
-    fut: impl Future<Output = Result<Value, String>> + Send + 'a,
-) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>> {
-    Box::pin(fut)
-}
-
-/// Run several embedded tool calls from one JSON spec via the shared batch
-/// executor, returning the run report as MCP content.
-///
-/// Returns an explicitly boxed future: `call_tool` recurses into this for the
-/// `batch_actions` arm, and the explicit `Send` bound breaks the auto-trait
-/// inference cycle a plain `async fn` would create.
-fn handle_batch_actions<'a>(
-    args: &'a Value,
-    bridge: &'a Bridge,
-    app: Option<&'a tauri::AppHandle>,
-    state: &'a PluginState,
-) -> Pin<Box<dyn Future<Output = Value> + Send + 'a>> {
-    Box::pin(async move {
-        let dispatch = |tool: String, targs: Value| {
-            boxed_dispatch(async move {
-                if tool == "batch_actions" {
-                    return Err("batch_actions cannot be nested".to_string());
-                }
-                let envelope = call_tool(&tool, &targs, bridge, app, state).await;
-                envelope_to_result(envelope)
-            })
-        };
-        match connector_client::batch::run_from_value(args, dispatch).await {
-            Ok(report) => {
-                let text = serde_json::to_string_pretty(&report).unwrap_or_default();
-                json!({ "content": [{ "type": "text", "text": text }] })
-            }
-            Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
-        }
-    })
-}
-
-/// Convert an MCP content envelope back into a plain result for batch logs:
-/// errors become `Err`, single text items parse back to JSON when possible,
-/// and anything else (e.g. image content) is kept as the raw envelope.
-fn envelope_to_result(envelope: Value) -> Result<Value, String> {
-    let is_error = envelope
-        .get("isError")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let first_text = envelope
-        .get("content")
-        .and_then(|v| v.as_array())
-        .and_then(|items| {
-            items
-                .iter()
-                .find_map(|item| item.get("text").and_then(|t| t.as_str()))
-        })
-        .map(|s| s.to_string());
-    if is_error {
-        return Err(first_text.unwrap_or_else(|| "Unknown error".to_string()));
+        "batch_actions" => Response::not_dispatched(
+            id.into(),
+            "unsupported_feature",
+            "batch_actions cannot be nested",
+        ),
+        name if name.starts_with("workflow_") => Response::not_dispatched(
+            id.into(),
+            "unsupported_feature",
+            "workflow lifecycle operations cannot be nested",
+        ),
+        _ => Response::not_dispatched(
+            id.into(),
+            "unsupported_feature",
+            format!("Unknown tool: {name}"),
+        ),
     }
-    let single_text = envelope
-        .get("content")
-        .and_then(|v| v.as_array())
-        .map(|items| items.len() == 1)
-        .unwrap_or(false);
-    match (single_text, first_text) {
-        (true, Some(text)) => Ok(serde_json::from_str(&text).unwrap_or(Value::String(text))),
-        _ => Ok(envelope),
+}
+
+/// App-owned resource arbitration is shared by every legacy embedded entry point.
+pub(crate) async fn call_raw(
+    name: &str,
+    args: &Value,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+    state: &PluginState,
+) -> Response {
+    let lease = match crate::workflow::resources::acquire(state, name, args).await {
+        Ok(lease) => lease,
+        Err(error) => return Response::rejected("mcp".into(), &error),
+    };
+    let response = dispatch_raw(name, args, bridge, app, state).await;
+    let id = response.id.clone();
+    let response = Response::with_outcome(id, response.into_outcome(name));
+    if response.requires_quarantine() {
+        lease.quarantine("outcome_unknown");
+    }
+    response
+}
+
+/// Format at the protocol boundary only; internal batch dispatch keeps raw data.
+pub async fn call_tool(
+    name: &str,
+    args: &Value,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+    state: &PluginState,
+) -> Value {
+    if name.starts_with("workflow_") {
+        return match crate::workflow::call(name, args, bridge, app, state).await {
+            Ok(report) => {
+                let failed = name != "workflow_capabilities"
+                    && crate::mcp_tool_schema::workflow_report_exit_code(&report) == 1;
+                let mut result = to_mcp_content(Response::success("mcp".into(), report));
+                if failed {
+                    result["isError"] = json!(true);
+                }
+                result
+            }
+            Err(error) => to_mcp_content(Response::error("mcp".into(), error.to_string())),
+        };
+    }
+    if name == "batch_actions" {
+        let result =
+            connector_client::batch::run_from_value_outcomes(args, |tool, args| async move {
+                call_raw(&tool, &args, bridge, app, state)
+                    .await
+                    .into_outcome(&tool)
+            })
+            .await;
+        return match result {
+            Ok(report) => {
+                let failed = !report.ok;
+                let mut result = to_mcp_content(Response::success("mcp".into(), json!(report)));
+                if failed {
+                    result["isError"] = json!(true);
+                }
+                result
+            }
+            Err(error) => to_mcp_content(Response::error("mcp".into(), error)),
+        };
+    }
+    let response = call_raw(name, args, bridge, app, state).await;
+    if name == "webview_screenshot" {
+        to_mcp_image_or_text(response)
+    } else {
+        to_mcp_content(response)
+    }
+}
+
+#[cfg(test)]
+fn response_to_result(response: Response) -> Result<Value, String> {
+    match response.payload {
+        ResponsePayload::Success { result } => Ok(result),
+        ResponsePayload::Error { error } => match response.outcome {
+            Some(outcome) => Err(json!({"error":error,"outcome":outcome}).to_string()),
+            None => Err(error),
+        },
     }
 }
 
@@ -708,7 +727,7 @@ const SETUP_INSTRUCTIONS: &str = r#"## tauri-plugin-connector Setup
 In your Tauri app's `src-tauri/Cargo.toml`:
 ```toml
 [dependencies]
-tauri-plugin-connector = "0.14"
+tauri-plugin-connector = "0.15"
 ```
 
 ### 2. Register the plugin (feature-gated dev tooling)
@@ -762,39 +781,21 @@ mod tests {
     }
 
     #[test]
-    fn envelope_to_result_maps_error_and_json_text() {
-        // isError envelopes become Err with the text as message.
-        let err = envelope_to_result(json!({
-            "content": [{ "type": "text", "text": "boom" }],
-            "isError": true,
-        }));
-        assert_eq!(err, Err("boom".to_string()));
-
-        // Single text items parse back to JSON when possible.
-        let ok = envelope_to_result(json!({
-            "content": [{ "type": "text", "text": "{\"clicked\":true}" }],
-        }));
-        assert_eq!(ok, Ok(json!({ "clicked": true })));
-
-        // Non-JSON text stays a string; multi-item envelopes pass through.
-        let plain = envelope_to_result(json!({
-            "content": [{ "type": "text", "text": "hello" }],
-        }));
-        assert_eq!(plain, Ok(json!("hello")));
-        let multi = json!({
-            "content": [
-                { "type": "image", "data": "...", "mimeType": "image/png" },
-                { "type": "text", "text": "{}" }
-            ],
-        });
-        assert_eq!(envelope_to_result(multi.clone()), Ok(multi));
-
-        // A "successful" envelope whose payload carries a soft error passes
-        // through here — the batch executor demotes it to a failure.
-        let soft = envelope_to_result(json!({
-            "content": [{ "type": "text", "text": "{\"error\":\"Element not found\"}" }],
-        }));
-        assert_eq!(soft, Ok(json!({ "error": "Element not found" })));
+    fn raw_results_preserve_json_like_strings_business_errors_and_images() {
+        for value in [
+            json!("{\"clicked\":true}"),
+            json!({"error":"user data"}),
+            json!({"base64":"abc","mimeType":"image/png"}),
+        ] {
+            assert_eq!(
+                response_to_result(Response::success("test".into(), value.clone())),
+                Ok(value)
+            );
+        }
+        assert_eq!(
+            response_to_result(Response::error("test".into(), "failed")),
+            Err("failed".into())
+        );
     }
 
     #[test]

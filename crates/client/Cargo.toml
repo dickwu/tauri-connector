@@ -1,6 +1,6 @@
 [package]
 name = "connector-client"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 description = "Shared WebSocket client for tauri-plugin-connector"
 license = "MIT"
@@ -11,7 +11,7 @@ categories = ["development-tools", "network-programming"]
 readme = "../../README.md"
 
 [dependencies]
-tokio = { version = "1", features = ["rt", "net", "sync", "time"] }
+tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros"] }
 tokio-tungstenite = "0.30"
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }

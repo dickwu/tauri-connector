@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "runKey": "fixture-unknown-save-001",
+  "inputs": {
+    "taskName": "connector-fixture-unknown-save"
+  },
+  "deadlineMs": 60000,
+  "steps": [
+    {
+      "id": "save",
+      "op": "click",
+      "target": {
+        "by": "testId",
+        "value": "save-with-lost-response"
+      },
+      "expect": {
+        "kind": "element",
+        "target": {
+          "by": "testId",
+          "value": "task-row",
+          "entity": {
+            "attribute": "data-task-name",
+            "value": {
+              "fromInput": {
+                "key": "taskName"
+              }
+            }
+          }
+        },
+        "state": "visible"
+      }
+    },
+    {
+      "id": "readTaskId",
+      "op": "query",
+      "target": {
+        "by": "testId",
+        "value": "task-row",
+        "entity": {
+          "attribute": "data-task-name",
+          "value": {
+            "fromInput": {
+              "key": "taskName"
+            }
+          }
+        }
+      },
+      "query": {
+        "kind": "attribute",
+        "name": "data-task-id"
+      }
+    }
+  ]
+}

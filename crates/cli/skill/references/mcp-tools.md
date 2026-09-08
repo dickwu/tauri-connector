@@ -53,7 +53,7 @@ Poll for an element state, text, URL glob, document load state, or JavaScript co
 | `strategy` | string | `css` | `css`, `xpath`, `text` |
 | `text` | string | | Text content to wait for (alternative to selector) |
 | `url` | string | | Glob pattern matched against `location.href` (for example `**/settings*`) |
-| `loadState` | string | | `domcontentloaded`, `load`, or `networkidle` |
+| `loadState` | string | | `domcontentloaded` or `load`; `networkidle` explicitly returns `unsupported_condition` |
 | `fn` | string | | JavaScript expression/function/body that returns truthy |
 | `state` | string | `attached` | Selector state: `attached`, `detached`, `visible`, `hidden` |
 | `timeout` | number | 5000 | Timeout in ms |
@@ -429,6 +429,32 @@ Perform one action, wait for a selector/text, and collect fresh evidence since a
 
 ---
 
+## Workflow tools
+
+Known multi-step intent should use the app-owned workflow executor. Token-based authorization is required for durable operations; pass `authToken` outside the spec in embedded MCP. The standalone server reads `TAURI_CONNECTOR_WORKFLOW_TOKEN` unless an explicit token is supplied. The host must configure the matching token (minimum 32 bytes).
+
+| Tool | Arguments | Meaning |
+| --- | --- | --- |
+| `workflow_capabilities` | optional `windowId` | Actual ops, conditions, recovery, authorization and collection support |
+| `workflow_run` | `spec`, optional `waitMs` (0–30000, default 1000), `authToken` | Create/get one logical run; waiting expiration does not cancel execution |
+| `workflow_get` | `runId`, optional numeric `cursor`, optional `include: ["steps", "events", "evidence"]`, `evidenceId`, numeric `offset`, `authToken` | Read progress and retained evidence without replaying actions |
+| `workflow_cancel` | `runId`, `authToken` | Stop future dispatch; distinguish in-flight effects from cancellation |
+| `workflow_resume` | `runId`, `expectedRevision`, `checkpointId`, `intent: "continue" \| "reconcile"`, `authToken` | Continue only an undispatched paused step, or recheck a postcondition without replay |
+
+Required spec fields: `schemaVersion: 1`, `runKey`, and 1–100 `steps`. Optional `mode` is only `strict`; `schedule` is only `sequential`; `windowId` defaults to `main`; `deadlineMs` defaults to 60000 and cannot exceed 300000. `inputs` is an object. `evidence.maxInlineBytes` is 1024–65536 (default 16384). `defaults` accepts `stepTimeoutMs`, `locatorTimeoutMs`, `pollIntervalMs`, and `failureEvidenceGraceMs`. The `workflow_run` schema defines all accepted fields and union variants.
+
+Each step has an `id` and `op`: `click(target)`, `fill(target,value)`, `type(target,value)`, `press(key,target?)`, `wait(condition)`, `query(target,query)`, or trusted `tool(tool,args,bindings?)`. The trusted tool set is `bridge_status` and `ipc_get_backend_state`. Queries use `{"kind":"value"}`, `{"kind":"text"}`, or `{"kind":"attribute","name":"data-id"}`. Any step can declare `expect` and `timeoutMs`; a failed required expectation blocks later steps.
+
+Locators use `{"by":"role"|"label"|"testId"|"css","value":...}` with optional `name`, nested `scope`, and `entity:{"attribute":"data-id","value":...}`. Constraints intersect and must yield one actionable target. Fill replaces that target's value; type appends. Legacy `@ref` fallback, native-input guarantees, arbitrary JS, unknown IPC and parallel execution are unsupported.
+
+Expressions are scalar literals, `{"literal":<any JSON>}`, `{"fromInput":{"key":"title"}}`, or `{"fromStep":{"stepId":"read","pointer":"/value"}}`. Step references address prior outcome data and support escaped JSON Pointer tokens. Objects outside declared expression slots remain business data.
+
+Conditions: `element(target,state)`, `valueEquals(target,expected)`, `textContains(target,expected)`, `attributeEquals(target,name,expected)`, `result(stepId,pointer,operator,expected?)`, and `all/any(conditions)`. Element states are visible/hidden/attached/detached/enabled/editable. Result operators are eq/exists/nonEmptyString. State-only observations cannot prove business persistence or action causality.
+
+For a retained reference, call `workflow_get(runId: ..., evidenceId: ..., offset: 0)`. It returns minimal run metadata plus `evidencePage: { id, offset, content, nextOffset, totalBytes }`. `content` is a bounded JSON text chunk; follow `nextOffset` to retrieve later chunks and reassemble the text. Offsets count UTF-8 bytes; `offset` requires `evidenceId`; `nextOffset: null` marks the final chunk. This path makes each retained evidence reference readable even when the report summary is truncated.
+
+Reports separate `execution`, `verification`, `effect`, `goalStatus`, and `originalTestVerdict`. Use the returned `runId`, `revision`, `checkpointId`, `allowedNextActions`, and coverage. Reuse the original `runKey` and identical spec after a lost submission response. Resume cannot replay an uncertain write or restart historical work after application restart. Reconciliation preserves the original failed verdict. Cancellation is not rollback. Workflow lifecycle calls cannot be nested in batches.
+
 ## Batch Tool
 
 ### batch_actions
@@ -448,7 +474,7 @@ Each entry in `actions`:
 
 | Param | Type | Description |
 |---|---|---|
-| `tool` | string | Any tool name except `batch_actions` and `driver_session` |
+| `tool` | string | Any tool name except `batch_actions`, `driver_session`, and `workflow_*` lifecycle tools |
 | `args` | object | Tool arguments, same shape as a direct call (`@eN` refs and `windowId` work as usual) |
 | `id` | string | Stable id other actions reference in `dependsOn` |
 | `dependsOn` | array | Ids that must all succeed before this action starts |
@@ -484,11 +510,12 @@ The response is the run report (also what `save` writes):
 ```
 
 - Log `status` is `ok`, `error` (with an `error` message), or `skipped` (a dependency failed, or `stopOnError` aborted the batch). `startedAtMs` is the offset from batch start, so overlapping ranges show real concurrency.
-- A tool result that "succeeds" but carries a top-level `error` string (e.g. `{"error": "Element not found", "selector": ...}` from a bad selector or stale `@eN` ref) counts as a **failure**: it fails the action, triggers `stopOnError`, and skips its dependents.
+- Typed execution/verification failures, including wait timeout and failed `act_and_verify`, fail the action and its success dependencies. Arbitrary business JSON containing `error` is preserved. Failed outcomes retain diagnostic data in `outcome`.
 - With `stopOnError: false`, sequential mode still runs the remaining actions in order after a failure -- only explicit `dependsOn` edges on the failed action skip their dependents. That is the "run all checks, report which failed" shape.
 - Mix order and concurrency: `mode: "parallel"` plus `dependsOn` chains gives a DAG -- independent actions overlap while dependent ones wait.
-- Screenshots inside batches: prefer `args: { "save": true }` (artifact path in the log) over inline base64 payloads.
-- Actions that mutate the same DOM still serialize inside the webview's JS run loop; parallel mode pays off for mixed reads (logs, IPC, screenshots) and multi-window work via per-action `windowId`.
+- Batch screenshots default to `save: true`; a valid saved artifact replaces inline base64 in reports. Explicit `save: false` preserves legacy inline output. If saving fails or a usable artifact is unavailable, diagnostics/evidence are retained rather than silently discarded.
+- Application-owned resource arbitration is shared with workflows and single tools. Conflicting operations return `resource_busy`; independent read-only diagnostics remain available during uncertain write isolation.
+- Report-save failures return the business report plus `persistenceWarning`; `savedTo` is present only after a successful write. Do not repeat successful actions to repair report persistence.
 
 ---
 

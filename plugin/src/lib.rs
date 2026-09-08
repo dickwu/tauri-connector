@@ -38,6 +38,7 @@ mod mcp_tools;
 mod protocol;
 mod server;
 mod state;
+mod workflow;
 
 use bridge::Bridge;
 use server::Server;
@@ -250,6 +251,7 @@ pub struct ConnectorBuilder {
     port_range: (u16, u16),
     mcp_port_range: (u16, u16),
     mcp_enabled: bool,
+    workflow_token: Option<String>,
 }
 
 impl Default for ConnectorBuilder {
@@ -265,6 +267,7 @@ impl ConnectorBuilder {
             port_range: DEFAULT_PORT_RANGE,
             mcp_port_range: DEFAULT_MCP_PORT_RANGE,
             mcp_enabled: true,
+            workflow_token: std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN").ok(),
         }
     }
 
@@ -301,12 +304,20 @@ impl ConnectorBuilder {
         }
     }
 
+    /// Enable authenticated workflows with a host-owned token (minimum 32 bytes).
+    /// Legacy diagnostic tools retain their existing transport contract.
+    pub fn workflow_token(mut self, token: impl Into<String>) -> Self {
+        self.workflow_token = Some(token.into());
+        self
+    }
+
     /// Build the plugin.
     pub fn build(self) -> TauriPlugin<Wry> {
         let bind_address = self.bind_address;
         let port_range = self.port_range;
         let mcp_port_range = self.mcp_port_range;
         let mcp_enabled = self.mcp_enabled;
+        let workflow_token = self.workflow_token;
 
         PluginBuilder::<Wry>::new("connector")
             .invoke_handler(tauri::generate_handler![
@@ -334,11 +345,13 @@ impl ConnectorBuilder {
                         "[connector][security] Remote debug exposed on {bind_address}; prefer 127.0.0.1 unless this is intentional"
                     );
                 }
-                let log_dir = app.path().app_data_dir()
+                let application_directory = app.path().app_data_dir();
+                let workflow_storage_available = application_directory.is_ok();
+                let log_dir = application_directory
                     .unwrap_or_else(|_| std::env::temp_dir())
                     .join(".tauri-connector");
 
-                let plugin_state = match PluginState::new(log_dir.clone()) {
+                let mut plugin_state = match PluginState::new(log_dir.clone()) {
                     Ok(s) => s,
                     Err(e) => {
                         eprintln!("[connector] Failed to init log dir: {e}, falling back to temp dir");
@@ -346,6 +359,10 @@ impl ConnectorBuilder {
                             .expect("temp dir should be writable")
                     }
                 };
+                // Logging fallback must never create a fresh workflow identity namespace.
+                plugin_state.workflow = std::sync::Arc::new(workflow::WorkflowService::new(log_dir.join("workflow")));
+                if !workflow_storage_available {plugin_state.workflow.disable_storage();}
+                plugin_state.workflow.set_token(workflow_token.clone());
                 app.manage(plugin_state.clone());
 
                 let handle = app.clone();

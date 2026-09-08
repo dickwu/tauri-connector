@@ -5,6 +5,8 @@
 
 A Tauri v2 plugin with **embedded MCP server** + Rust CLI for deep inspection and interaction with Tauri desktop applications. Drop-in replacement for `tauri-plugin-mcp-bridge` that **fixes the `__TAURI__ not available` bug** on macOS.
 
+**New in v0.15:** [application-owned workflows](#application-owned-workflows) execute a known sequence in one submission, bind results between steps, and retain progress for reconnects. Available through the CLI, WebSocket API, and both MCP servers.
+
 ## The Problem
 
 `tauri-plugin-mcp-bridge` injects JavaScript into the webview that relies on `window.__TAURI__` to send execution results back to Rust. On macOS with WKWebView, the injected scripts run in an isolated content world where `window.__TAURI__` doesn't exist -- causing all JS-based tools (execute_js, dom_snapshot, console logs) to time out.
@@ -15,9 +17,9 @@ tauri-connector uses a **dual-path JS execution** strategy:
 
 1. **WS Bridge (primary)** -- A small JS client injected into the webview connects back to the plugin via `ws://127.0.0.1:{port}`. Scripts and results flow through this dedicated WebSocket channel.
 
-2. **Eval+Event fallback** -- If the WS bridge times out (2s), the plugin falls back to injecting JS via Tauri's `window.eval()` and receiving results through Tauri's event system. This path requires `withGlobalTauri: true`.
+2. **Eval+Event fallback** -- Only when the WS bridge confirms that execution was not dispatched, the plugin can inject JS via Tauri's `window.eval()` and receive the result through Tauri events. Both paths share one request ID and deadline. This path requires `withGlobalTauri: true`.
 
-The fallback is transparent -- callers get the same result regardless of which path succeeds. The **MCP server runs inside the plugin** -- when your Tauri app starts, it starts automatically.
+Timeouts and JavaScript errors after dispatch never trigger automatic replay; callers receive an explicit failure or uncertain outcome. The **MCP server runs inside the plugin** -- when your Tauri app starts, it starts automatically.
 
 ```
 Frontend JS (app context)
@@ -27,7 +29,7 @@ Frontend JS (app context)
 
 Plugin (Rust)
   |-- bridge.execute_js()
-  |   |-- try WS bridge (2s timeout) --------> webview JS via WebSocket
+  |   |-- try WS bridge (shared deadline) --------> webview JS via WebSocket
   |   '-- fallback: window.eval() + event ---> webview JS via Tauri IPC
   |-- xcap native capture (cross-platform) --> PNG/JPEG/WebP with resize
   '-- snapdom fallback ---------------------> DOM-to-image via @zumer/snapdom
@@ -76,7 +78,7 @@ The skill provides a **debug & code review suite** with progressive disclosure:
 |---|---|
 | `SKILL.md` | Main skill -- core workflow, debugging, code review, interaction reference |
 | `SETUP.md` | Step-by-step setup guide for new Tauri projects |
-| `scripts/` | 14 Bun TypeScript scripts for fallback WebSocket automation |
+| `scripts/` | Bun TypeScript scripts for fallback WebSocket automation, including workflow lifecycle calls |
 | `references/mcp-tools.md` | MCP tool parameter tables |
 | `references/cli-commands.md` | Every CLI subcommand with flags and examples |
 | `references/debug-playbook.md` | 10 step-by-step debug recipes (blank screen, silent clicks, form failures, slow IPC, drag issues, memory leaks, multi-window) |
@@ -105,6 +107,87 @@ Once installed, Claude will automatically:
 
 ## Features
 
+### Application-owned workflows
+
+Submit a known sequence of locating, filling, clicking, waiting and querying with `workflow_run`. The application owns execution, deadlines, result bindings and progress; clients can reconnect and inspect the same run. Each required expectation must pass before the next step runs.
+
+#### Enable and discover
+
+Use matching v0.15 plugin and client versions. In a running app, `workflow_capabilities` is available without authentication and reports supported operations and recovery limits:
+
+```bash
+tauri-connector status
+tauri-connector workflow capabilities
+tauri-connector workflow --help
+```
+
+The host must configure a token of at least 32 bytes before starting the plugin. `init()` and `ConnectorBuilder::new()` read `TAURI_CONNECTOR_WORKFLOW_TOKEN`; hosts can instead pass a secret obtained from their own configuration to `ConnectorBuilder::workflow_token(token)`. For a local development session, generate a token without printing it:
+
+```bash
+export TAURI_CONNECTOR_WORKFLOW_TOKEN="$(openssl rand -hex 32)"
+# Launch the Tauri app and CLI/standalone MCP with this same environment value.
+```
+
+The CLI and standalone MCP read the matching environment variable. Embedded MCP and direct WebSocket callers pass `authToken` alongside the spec in each authenticated call. Keep credentials out of workflow JSON, checked-in configuration and result bindings. Creation, history, cancellation and resume require authorization; the host checks authorization again before each dispatch.
+
+#### Submit and inspect
+
+With the app running and the matching token exported, this complete stdin example reads bridge diagnostics:
+
+```bash
+tauri-connector workflow run - --wait-ms 30000 <<'JSON'
+{
+  "schemaVersion": 1,
+  "runKey": "bridge-check-001",
+  "steps": [
+    { "id": "bridge", "op": "tool", "tool": "bridge_status", "args": {} }
+  ]
+}
+JSON
+```
+
+The CLI also accepts a JSON file or inline JSON. `--wait-ms` only bounds how long the response waits (0–30000 ms); execution continues until the run's own deadline. A spec defaults to `windowId: "main"`, `mode: "strict"`, `schedule: "sequential"` and a 60000 ms deadline. Set `windowId` in the spec or step to target another window. The diagnostic example has no goal, so its `goalStatus` is `not_requested`.
+
+For a form flow with scoped locators, input binding, a returned task ID and a goal, use the checked-in [create-task spec](examples/workflow/create-task.json) against the [isolated native fixture](examples/workflow-fixture/README.md). The fixture guide includes build and run commands; its harness configures private credentials and submits this spec. For a matching fixture already running, submit from the repository root using its host, port and token:
+
+```bash
+tauri-connector --port 19555 workflow run examples/workflow/create-task.json --wait-ms 30000
+```
+
+Use the returned `runId` to read progress and evidence:
+
+```bash
+tauri-connector workflow get RUN_ID --include steps,events,evidence
+tauri-connector workflow get RUN_ID --evidence-id EVIDENCE_REF --offset 0
+tauri-connector workflow cancel RUN_ID
+tauri-connector workflow resume RUN_ID --expected-revision 7 --checkpoint-id CHECKPOINT_ID --intent reconcile
+```
+
+Replace placeholders and revision `7` with values from the latest report, and retain the same connection options as the submission. For paged evidence, follow `evidencePage.nextOffset` until it is `null`; offsets count UTF-8 bytes.
+
+#### Outcomes and recovery
+
+Reports separate `execution`, `verification` and `effect`, and include `allowedNextActions`, `revision` and `checkpointId`. A completed UI action does not establish that a backend write succeeded.
+
+| Situation | Next action |
+|---|---|
+| Response wait expires or client disconnects | Call `workflow_get`. If no run ID was received, resubmit the identical spec with its original `runKey`. |
+| Same `runKey` with changed inputs or steps | Expect `run_key_conflict`; keep the original spec when recovering that submission. |
+| A write has an unknown outcome | Inspect progress and evidence. Do not replay it using a fresh key. Conflicting mutations remain quarantined; read-only diagnostics remain available. |
+| Report permits `continue` | Supply the current revision/checkpoint. Only undispatched work can continue, in the same app instance and within the original deadline. |
+| Report permits `reconcile` | Recheck supported current-state postconditions without replay. The original test verdict and uncertain-write quarantine remain intact. |
+| Cancellation or application restart | Cancellation stops future dispatch without undoing effects. Restarted runs are historical records; execution is not automatically resumed. |
+
+CLI exit codes are `0` for completed success or capabilities, `1` for failure/cancellation or transport/validation errors, and `2` for pending, paused, interrupted or uncertain runs. Nonzero exit status is not permission to retry a write with a new key.
+
+#### Contract and limits
+
+Workflow v1 supports 1–100 sequential steps, strict scoped locators, bounded current-state conditions, and prior-step JSON Pointer bindings. `tool` steps allow only `bridge_status` and `ipc_get_backend_state`. Workflow locators must uniquely identify their targets; legacy `@ref` fallback, arbitrary scripts, unknown IPC commands, branching, loops and parallel workflows are unsupported.
+
+Workflows and legacy tools share application-owned resource leases; conflicting operations can return `resource_busy`. Durable history requires safe private storage. Windows workflow persistence currently fails closed because private ACL support is not implemented. Native macOS scenarios have been verified; native Windows/Linux workflow behavior remains unverified. Synthetic input and DOM conditions do not establish native OS input, action causality or production business persistence.
+
+See the [CLI reference](skill/references/cli-commands.md#application-owned-workflows), [MCP reference](skill/references/mcp-tools.md#workflow-tools), [WebSocket envelope](#workflow-requests), [workflow design and migration notes](docs/workflow-design.md), and [implementation evidence](docs/workflow-implementation-status.md). P0–P2 are implemented; P3 features, including business receipt providers and general restart continuation, remain deferred.
+
 ### MCP + CLI Tools with Drag and Drop, Artifacts, and Runtime Capture
 
 Every tool is available via both the embedded MCP server (for Claude Code) and the Rust CLI (for terminal use). The CLI uses ref-based element addressing inspired by [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser).
@@ -125,6 +208,7 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Screenshot | `webview_screenshot` | `screenshot [path] [--selector @eN] [--annotate] [--name-hint debug]` |
 | Artifacts | `artifact_list` / `artifact_read` / `artifact_compare` / `artifact_prune` | `artifacts list\|show\|compare\|prune` |
 | Debug | `debug_mark` / `debug_snapshot` / `webview_act_and_verify` | `debug mark\|snapshot`, `act` |
+| Workflows | `workflow_run` / `workflow_get` / `workflow_cancel` / `workflow_resume` / `workflow_capabilities` | `workflow run\|get\|cancel\|resume\|capabilities` |
 | Batch | `batch_actions` | `batch <spec.json\|-\|inline> [--mode sequential\|parallel] [--save report.json]` |
 | Windows | `manage_window` | `windows`, `resize <w> <h>` |
 | State | `ipc_get_backend_state` | `state` |
@@ -218,7 +302,7 @@ The recommended pattern keeps `tauri-plugin-connector` and its transitive deps (
 # ...
 
 # Optional dep — only pulled when --features dev-connector is set.
-tauri-plugin-connector = { version = "0.14", optional = true }
+tauri-plugin-connector = { version = "0.15", optional = true }
 
 [features]
 default = []
@@ -299,7 +383,7 @@ If you don't want a separate dev script and don't mind the plugin (and its trans
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.14"
+tauri-plugin-connector = "0.15"
 ```
 
 ```rust
@@ -347,13 +431,13 @@ window.snapdom = snapdom;
 ### 7. Run
 
 ```bash
-bun run tauri dev
+bun run tauri:dev
 ```
 
 Look for:
 ```
 [connector][mcp] MCP ready for 'MyApp' -- url: http://127.0.0.1:9556/mcp (/sse legacy)
-[connector] Plugin ready for 'MyApp' (com.example.app) -- WS on 0.0.0.0:9555
+[connector] Plugin ready for 'MyApp' (com.example.app) -- WS on 127.0.0.1:9555
 ```
 
 The MCP server is now live. Claude Code connects automatically via the URL in `.mcp.json`.
@@ -390,10 +474,10 @@ Sections reported:
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.14.0
+tauri-connector doctor v0.15.0
 
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.14" (optional, feature-gated)
+  ✓ Cargo dependency: tauri-plugin-connector = "0.15" (optional, feature-gated)
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(feature = "dev-connector"))
   ✓ Permission "connector:default" in src-tauri/capabilities-dev/dev-connector.json
   ✓ app.withGlobalTauri: true
@@ -408,14 +492,14 @@ Example output for a legacy setup (passes, with the migration nudge):
 
 ```
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.14"
+  ✓ Cargo dependency: tauri-plugin-connector = "0.15"
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(debug_assertions))
   ✓ Permission "connector:default" in src-tauri/capabilities/default.json
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
   ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
   ! Using legacy debug_assertions gate — consider migrating to --features dev-connector
-      Fix: 1. tauri-plugin-connector = { version = "0.14", optional = true }
+      Fix: 1. tauri-plugin-connector = { version = "0.15", optional = true }
            2. [features] dev-connector = ["dep:tauri-plugin-connector"]
            3. replace cfg(debug_assertions) with cfg(feature = "dev-connector")
            4. move connector:default to capabilities-dev/dev-connector.json
@@ -426,6 +510,45 @@ Plugin Setup
 ## WebSocket API via Bun
 
 Connect directly to the plugin WebSocket on port 9555 using `bun -e`. No build step or extra dependencies -- bun has native WebSocket support.
+
+### Workflow requests
+
+The bundled Bun helper supports `run`, `get`, `cancel`, `resume` and `capabilities`, reads the host token from the environment, and accepts an argument object as JSON or `@path.json`:
+
+```bash
+bun skill/scripts/workflow.ts capabilities
+bun skill/scripts/workflow.ts get '{"runId":"RUN_ID","include":["evidence"]}'
+```
+
+Workflow lifecycle requests use `type: "workflow"` with an `operation` and camelCase `args`. The unauthenticated `workflow_capabilities` operation accepts only an optional `windowId`. Other operations require the matching host token outside `spec`:
+
+```bash
+# The app must already have the same TAURI_CONNECTOR_WORKFLOW_TOKEN configured.
+bun -e '
+const authToken = process.env.TAURI_CONNECTOR_WORKFLOW_TOKEN;
+if (!authToken) throw new Error("Set the matching host workflow token");
+const ws = new WebSocket("ws://127.0.0.1:9555");
+const timer = setTimeout(() => process.exit(1), 15000);
+ws.onopen = () => ws.send(JSON.stringify({
+  id: "workflow-1", type: "workflow", operation: "workflow_run",
+  args: {
+    authToken, waitMs: 1000,
+    spec: {
+      schemaVersion: 1, runKey: "ws-bridge-check-001",
+      steps: [{ id: "bridge", op: "tool", tool: "bridge_status", args: {} }]
+    }
+  }
+}));
+ws.onmessage = (event) => {
+  console.log(JSON.parse(event.data));
+  clearTimeout(timer);
+  ws.close();
+};
+ws.onerror = () => process.exit(1);
+'
+```
+
+Use the same envelope with `operation: "workflow_get"` and `args: { runId, authToken }` after disconnect or response timeout. Supporting apps report `bridge_status.workflowProtocolVersion: 1`; the CLI and standalone MCP check this before sending a workflow request to an older plugin. Full lifecycle arguments are in the [workflow API contract](docs/workflow-design.md#apis-and-authorization).
 
 ### Execute JavaScript
 
@@ -527,6 +650,7 @@ All commands use `{ id, type, ...params }` with snake_case types:
 | Type | Key Params |
 |---|---|
 | `ping` | -- |
+| `workflow` | `operation`: `workflow_capabilities`, `workflow_run`, `workflow_get`, `workflow_cancel` or `workflow_resume`; `args`: lifecycle arguments including `authToken` where required |
 | `execute_js` | `script`, `window_id` |
 | `screenshot` | `format`, `quality`, `max_width`, `window_id`, `save`, `output_dir`, `name_hint`, `overwrite`, `selector`, `annotate` |
 | `dom_snapshot` | `mode` (ai/accessibility/structure), `selector`, `max_depth`, `max_elements`, `max_tokens`, `no_split`, `react_enrich`, `follow_portals`, `shadow_dom`, `window_id` |
@@ -559,6 +683,9 @@ A Rust CLI with ref-based element addressing is also available:
 ```bash
 # Homebrew (macOS/Linux)
 brew install dickwu/tap/tauri-connector
+
+# Or install the version-matched CLI from crates.io
+cargo install connector-cli --version 0.15.0 --locked
 
 # Or build from source
 cargo build -p connector-cli --release
@@ -601,7 +728,7 @@ tauri-connector events stop                      # Stop listening
 tauri-connector clear all                        # Clear all log files
 ```
 
-Environment: `TAURI_CONNECTOR_HOST` (default `127.0.0.1`), `TAURI_CONNECTOR_PORT` (default `9555`).
+Connection selection is `--host`/`--port` > `TAURI_CONNECTOR_HOST`/`TAURI_CONNECTOR_PORT` > nearby `.connector.json` > port scan. The default host is `127.0.0.1`; `--app-id` and `--pid-file` can select an application explicitly. Authenticated workflows also require `TAURI_CONNECTOR_WORKFLOW_TOKEN`. See [application-owned workflows](#application-owned-workflows) for run, recovery and exit-code examples.
 
 ## MCP Server
 
@@ -621,9 +748,11 @@ The MCP server starts automatically inside the Tauri plugin when the app runs. C
 
 No separate process, no Node.js, no install step. Just run your Tauri app.
 
+All five `workflow_*` tools are exposed here. Pass the matching host `authToken` in tool arguments for run/get/cancel/resume; placing it in the workflow `spec` is invalid. `workflow_capabilities` needs no token. Tool names and argument schemas are in the [MCP workflow reference](skill/references/mcp-tools.md#workflow-tools).
+
 ### Standalone (Alternative)
 
-A standalone Rust MCP binary is also available for cases where you can't modify the Tauri app:
+A standalone Rust MCP binary can connect over WebSocket to an app that already includes the plugin:
 
 ```bash
 cargo build -p connector-mcp-server --release
@@ -644,6 +773,8 @@ cargo build -p connector-mcp-server --release
 }
 ```
 
+For workflows, launch the standalone server with the same `TAURI_CONNECTOR_WORKFLOW_TOKEN` as the host. It reads the token from its environment unless an explicit `authToken` is supplied in the tool call. The standalone server forwards execution to the app's workflow service and does not run a separate copy of the steps.
+
 ## Plugin Configuration
 
 Wrap the builder in whichever cfg gate matches your setup pattern (`cfg(feature = "dev-connector")` for the recommended feature-gated layout, or `cfg(debug_assertions)` for the legacy alternative):
@@ -655,7 +786,7 @@ use tauri_plugin_connector::ConnectorBuilder;
 {
     builder = builder.plugin(
         ConnectorBuilder::new()
-            .bind_address("127.0.0.1")  // localhost only (default: 0.0.0.0)
+            .bind_address("127.0.0.1")  // localhost only (the default)
             .port_range(8000, 8100)     // WS port range (default: 9555-9655)
             .mcp_port_range(8100, 8200) // MCP port range (default: 9556-9656)
             .build()
@@ -711,11 +842,12 @@ tauri-connector/
 |       |-- mcp.rs              # Embedded MCP HTTP server (/mcp Streamable HTTP, /sse legacy)
 |       |-- mcp_tools.rs        # MCP tool definitions + dispatch
 |       |-- handlers.rs         # All command handlers
+|       |-- workflow/          # Application-owned executor, journal and resource leases
 |       |-- protocol.rs         # Message types
 |       '-- state.rs            # Shared state (DOM cache, logs, IPC)
 |-- crates/
 |   |-- client/                 # Shared Rust WebSocket client
-|   |   '-- src/lib.rs
+|   |   '-- src/                # Client, workflow specs and typed execution outcomes
 |   |-- mcp-server/             # Standalone MCP server (alternative)
 |   |   '-- src/
 |   |       |-- main.rs         # Stdio JSON-RPC loop
@@ -733,12 +865,15 @@ tauri-connector/
 |   |   |-- connector.ts        # Shared helper (auto-discovers ports via PID file)
 |   |   |-- state.ts, eval.ts, screenshot.ts, snapshot.ts
 |   |   |-- click.ts, drag.ts, fill.ts, find.ts, hover.ts, wait.ts
-|   |   '-- logs.ts, events.ts, windows.ts
+|   |   '-- logs.ts, events.ts, windows.ts, workflow.ts
 |   '-- references/             # Progressive disclosure reference files
 |       |-- mcp-tools.md        # MCP tool parameter tables
 |       |-- cli-commands.md     # Full CLI command reference
 |       |-- debug-playbook.md   # 10 debug recipes
 |       '-- code-review-playbook.md  # 9 code review workflows
+|-- docs/workflow-design.md     # Workflow contract and migration notes
+|-- examples/workflow/          # Declarative workflow specs
+|-- examples/workflow-fixture/  # Isolated native React/Wry/Rust validation app
 |-- LICENSE
 '-- README.md
 ```
@@ -749,9 +884,9 @@ tauri-connector/
 
 The bridge uses two execution paths for maximum reliability:
 
-1. **WS Bridge (primary, 2s timeout)**: Internal WebSocket on `127.0.0.1:9300-9400`. Bridge JS injected into the webview connects back, executes scripts via `AsyncFunction`, and returns results through the WebSocket. Uses `tokio::select!` for multiplexed read/write on a single stream.
+1. **WS Bridge (primary, shared deadline)**: Internal WebSocket on `127.0.0.1:9300-9400`. Bridge JS injected into the webview connects back, executes scripts via `AsyncFunction`, and returns results through the WebSocket. Uses `tokio::select!` for multiplexed read/write on a single stream.
 
-2. **Eval+Event fallback**: If the WS bridge times out, the plugin injects JS via Tauri's `window.eval()` and receives results through Tauri's event system (`plugin:event|emit`). Requires `withGlobalTauri: true`. Handles double-serialized event payloads automatically.
+2. **Eval+Event fallback**: If the WS path confirms no dispatch, the plugin may inject JS via Tauri's `window.eval()` within the remaining deadline and receives results through Tauri's event system (`plugin:event|emit`). Requires `withGlobalTauri: true`. Handles double-serialized event payloads automatically.
 
 The fallback is transparent -- `bridge.execute_js()` returns the same result regardless of which path succeeded.
 

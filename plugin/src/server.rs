@@ -139,7 +139,56 @@ async fn handle_command(
     app: Option<&tauri::AppHandle>,
     state: &PluginState,
 ) -> Response {
+    if let Command::Workflow { operation, args } = command {
+        return match crate::workflow::call(&operation, &args, bridge, app, state).await {
+            Ok(report) => Response::success(id, report),
+            Err(error) => Response::error(id, error.to_string()),
+        };
+    }
+    let args = match serde_json::to_value(&command) {
+        Ok(args) => args,
+        Err(error) => return Response::not_dispatched(id, "invalid_spec", error.to_string()),
+    };
+    let wire_name = args
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let tool = match wire_name {
+        "execute_js" => "webview_execute_js",
+        "screenshot" => "webview_screenshot",
+        "dom_snapshot" => "webview_dom_snapshot",
+        "find_element" => "webview_find_element",
+        "get_styles" => "webview_get_styles",
+        "interact" => "webview_interact",
+        "keyboard" => "webview_keyboard",
+        "wait_for" => "webview_wait_for",
+        "locator" => "webview_locator",
+        "act_and_verify" => "webview_act_and_verify",
+        "backend_state" => "ipc_get_backend_state",
+        other => other,
+    };
+    let lease = match crate::workflow::resources::acquire(state, tool, &args).await {
+        Ok(lease) => lease,
+        Err(error) => return Response::rejected(id, &error),
+    };
+    let response = handle_command_unleased(id, command, bridge, app, state).await;
+    let id = response.id.clone();
+    let response = Response::with_outcome(id, response.into_outcome(tool));
+    if response.requires_quarantine() {
+        lease.quarantine("outcome_unknown");
+    }
+    response
+}
+
+async fn handle_command_unleased(
+    id: String,
+    command: Command,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+    state: &PluginState,
+) -> Response {
     match command {
+        Command::Workflow { .. } => unreachable!("workflow is routed before legacy dispatch"),
         Command::Ping => Response::success(id, serde_json::json!("pong")),
 
         // JS Execution
@@ -407,7 +456,9 @@ async fn handle_command(
         Command::IpcExecuteCommand { command, args } => {
             handlers::ipc_execute_command(&id, &command, args.as_ref(), "main", bridge).await
         }
-        Command::IpcMonitor { action } => handlers::ipc_monitor(&id, &action, state, bridge).await,
+        Command::IpcMonitor { action, window_id } => {
+            handlers::ipc_monitor(&id, &action, &window_id, state, bridge).await
+        }
         Command::IpcGetCaptured {
             filter,
             pattern,
@@ -627,4 +678,99 @@ where
 
 fn find_available_port(addr: &str, start: u16, end: u16) -> Option<u16> {
     (start..end).find(|&port| TcpListener::bind((addr, port)).is_ok())
+}
+
+#[cfg(test)]
+mod workflow_adapter_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn embedded_and_websocket_share_capabilities_auth_and_resource_boundary() {
+        let directory =
+            std::env::temp_dir().join(format!("connector-adapters-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let state = PluginState::new(directory.clone()).unwrap();
+        state
+            .workflow
+            .set_token(Some("isolated-test-workflow-token-32-bytes".into()));
+        let bridge = Bridge::start().unwrap();
+
+        let response = handle_command(
+            "ws".into(),
+            Command::Workflow {
+                operation: "workflow_capabilities".into(),
+                args: json!({}),
+            },
+            &bridge,
+            None,
+            &state,
+        )
+        .await;
+        let crate::protocol::ResponsePayload::Success { result } = response.payload else {
+            panic!("capabilities failed");
+        };
+        let embedded =
+            crate::mcp_tools::call_tool("workflow_capabilities", &json!({}), &bridge, None, &state)
+                .await;
+        assert_eq!(embedded["structuredContent"], result);
+
+        let denied = handle_command(
+            "ws".into(),
+            Command::Workflow {
+                operation: "workflow_run".into(),
+                args: json!({"spec":{}}),
+            },
+            &bridge,
+            None,
+            &state,
+        )
+        .await;
+        let crate::protocol::ResponsePayload::Error { error } = denied.payload else {
+            panic!("unauthorized workflow accepted");
+        };
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&error).unwrap()["code"],
+            "unauthorized"
+        );
+        let embedded =
+            crate::mcp_tools::call_tool("workflow_run", &json!({"spec":{}}), &bridge, None, &state)
+                .await;
+        assert_eq!(embedded["isError"], true);
+        assert_eq!(embedded["structuredContent"]["code"], "unauthorized");
+
+        let lease = state
+            .workflow
+            .resources
+            .try_acquire(vec!["ui".into(), "backend".into()])
+            .unwrap();
+        let command: Command = serde_json::from_value(
+            json!({"type":"interact","action":"click","selector":"#isolated"}),
+        )
+        .unwrap();
+        let blocked = handle_command("ws".into(), command, &bridge, None, &state).await;
+        assert_eq!(
+            blocked.outcome.unwrap().error.unwrap().code,
+            "resource_busy"
+        );
+        let embedded = crate::mcp_tools::call_tool(
+            "webview_interact",
+            &json!({"action":"click","selector":"#isolated"}),
+            &bridge,
+            None,
+            &state,
+        )
+        .await;
+        assert_eq!(
+            embedded["structuredContent"]["outcome"]["execution"],
+            "not_dispatched"
+        );
+        assert_eq!(
+            embedded["structuredContent"]["outcome"]["error"]["code"],
+            "resource_busy"
+        );
+        drop(lease);
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

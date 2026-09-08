@@ -12,6 +12,7 @@ use std::future::Future;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::outcome::{legacy_outcome, EffectStatus, ExecutionOutcome, WorkflowError};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -200,21 +201,88 @@ impl BatchSpec {
     }
 }
 
-/// MCP tool handlers often report failures as a *successful* result carrying a
-/// top-level `error` string (e.g. `{"error": "Element not found", ...}` from a
-/// bad selector). Treat those as action failures so `stopOnError` and
-/// `dependsOn` fire on them.
-fn soft_error_to_err(value: Value) -> Result<Value, String> {
-    let Some(msg) = value.get("error").and_then(|e| e.as_str()) else {
-        return Ok(value);
-    };
-    let msg = msg.to_string();
-    match value.as_object() {
-        Some(obj) if obj.len() > 1 => {
-            let detail = serde_json::to_string(&value).unwrap_or_default();
-            Err(format!("{msg} — {detail}"))
+/// Legacy compatibility belongs only to tools whose published contract uses
+/// a top-level error string. Query/eval data is never interpreted as an error.
+fn adapt_legacy(tool: &str, result: Result<Value, String>) -> ExecutionOutcome {
+    match result {
+        Err(message) => ExecutionOutcome::unknown(WorkflowError::new(
+            "outcome_unknown",
+            "dispatching",
+            message,
+        )),
+        Ok(value) => {
+            if matches!(
+                tool,
+                "webview_interact"
+                    | "webview_keyboard"
+                    | "webview_wait_for"
+                    | "webview_act_and_verify"
+                    | "webview_locator"
+                    | "webview_select_option"
+                    | "webview_scroll"
+            ) {
+                if let Some(message) = value.get("error").and_then(Value::as_str) {
+                    let mut outcome = ExecutionOutcome::failed(
+                        WorkflowError::new(
+                            "execution_failed",
+                            "executing",
+                            format!("{message} — {value}"),
+                        ),
+                        EffectStatus::Possible,
+                    );
+                    outcome.data = value;
+                    return outcome;
+                }
+            }
+            legacy_outcome(tool, value)
         }
-        _ => Err(msg),
+    }
+}
+
+/// Batch screenshots use durable references by default. The legacy explicit
+/// `save:false` opt-out remains available to callers needing inline images.
+pub fn prepare_tool_args(tool: &str, mut args: Value) -> Value {
+    if tool == "webview_screenshot" {
+        if args.is_null() {
+            args = serde_json::json!({});
+        }
+        if let Some(object) = args.as_object_mut() {
+            object.entry("save").or_insert(Value::Bool(true));
+        }
+    }
+    args
+}
+
+/// Compact only a known screenshot result that provides a saved artifact.
+/// Never strip image-looking fields from arbitrary business query values.
+pub fn compact_tool_outcome(tool: &str, outcome: &mut ExecutionOutcome) {
+    if tool != "webview_screenshot" {
+        return;
+    }
+    let Some(artifact) = outcome.data.get("artifact") else {
+        return;
+    };
+    let Some(id) = artifact
+        .get("artifactId")
+        .or_else(|| artifact.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+    else {
+        return;
+    };
+    if !artifact
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| !path.trim().is_empty())
+    {
+        return;
+    }
+    let id = id.to_string();
+    if let Some(data) = outcome.data.as_object_mut() {
+        data.remove("base64");
+    }
+    if !outcome.evidence_refs.contains(&id) {
+        outcome.evidence_refs.push(id);
     }
 }
 
@@ -236,6 +304,8 @@ pub struct ActionLog {
     pub result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<ExecutionOutcome>,
 }
 
 /// Full batch run report returned to the caller (and optionally saved to disk).
@@ -253,6 +323,8 @@ pub struct BatchReport {
     pub duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub saved_to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persistence_warning: Option<String>,
     pub logs: Vec<ActionLog>,
 }
 
@@ -274,12 +346,34 @@ where
     Fut: Future<Output = Result<Value, String>>,
 {
     let spec = BatchSpec::parse(spec_value)?;
-    let mut report = run_batch(&spec, dispatch).await;
+    let report = run_batch(&spec, dispatch).await;
+    Ok(persist_report(&spec, report))
+}
+
+/// Typed entry point for internal dispatchers, without MCP envelope round trips.
+pub async fn run_from_value_outcomes<F, Fut>(
+    spec_value: &Value,
+    dispatch: F,
+) -> Result<BatchReport, String>
+where
+    F: Fn(String, Value) -> Fut,
+    Fut: Future<Output = ExecutionOutcome>,
+{
+    let spec = BatchSpec::parse(spec_value)?;
+    let report = run_batch_outcomes(&spec, dispatch).await;
+    Ok(persist_report(&spec, report))
+}
+
+fn persist_report(spec: &BatchSpec, mut report: BatchReport) -> BatchReport {
     if let Some(path) = &spec.save {
-        save_report(path, &report)?;
+        // Include the destination before serialization; clear it on failure.
         report.saved_to = Some(path.clone());
+        if let Err(error) = save_report(path, &report) {
+            report.saved_to = None;
+            report.persistence_warning = Some(error);
+        }
     }
-    Ok(report)
+    report
 }
 
 /// Run a parsed batch spec through `dispatch`, returning the report.
@@ -287,6 +381,20 @@ pub async fn run_batch<F, Fut>(spec: &BatchSpec, dispatch: F) -> BatchReport
 where
     F: Fn(String, Value) -> Fut,
     Fut: Future<Output = Result<Value, String>>,
+{
+    run_batch_outcomes(spec, |tool, args| {
+        let future = dispatch(tool.clone(), args);
+        async move { adapt_legacy(&tool, future.await) }
+    })
+    .await
+}
+
+/// Shared scheduler over typed outcomes. Failed verification and unknown
+/// execution block explicit dependencies exactly like execution errors.
+pub async fn run_batch_outcomes<F, Fut>(spec: &BatchSpec, dispatch: F) -> BatchReport
+where
+    F: Fn(String, Value) -> Fut,
+    Fut: Future<Output = ExecutionOutcome>,
 {
     let n = spec.actions.len();
     let started_at = unix_ms();
@@ -360,6 +468,7 @@ where
             duration_ms: None,
             result: None,
             error: Some(reason),
+            outcome: None,
         });
         for &d in &dependents[i] {
             remaining[d] -= 1;
@@ -426,6 +535,7 @@ where
                 other => other.clone(),
             };
             let timeout_ms = spec.actions[i].timeout_ms.or(spec.timeout_ms);
+            let args = prepare_tool_args(&tool, args);
             let fut = dispatch(tool, args);
             running.push(async move {
                 // Stamp the start at first poll, not at schedule time, so the
@@ -435,7 +545,11 @@ where
                 let result = match timeout_ms {
                     Some(ms) => match tokio::time::timeout(Duration::from_millis(ms), fut).await {
                         Ok(r) => r,
-                        Err(_) => Err(format!("action timed out after {ms}ms")),
+                        Err(_) => ExecutionOutcome::unknown(WorkflowError::new(
+                            "outcome_unknown",
+                            "dispatching",
+                            format!("action timed out after {ms}ms; remote execution may continue"),
+                        )),
                     },
                     None => fut.await,
                 };
@@ -456,24 +570,32 @@ where
         let Some((i, started_at_ms, duration_ms, result)) = running.next().await else {
             break;
         };
-        let (status, ok_result, error) = match result.and_then(soft_error_to_err) {
-            Ok(value) => {
-                state[i] = ActionState::Ok;
-                let kept = if spec.actions[i].omit_result {
-                    None
-                } else {
-                    Some(value)
-                };
-                ("ok", kept, None)
+        let mut outcome = result;
+        compact_tool_outcome(&spec.actions[i].tool, &mut outcome);
+        let (status, ok_result, error) = if outcome.is_success(false) {
+            state[i] = ActionState::Ok;
+            let kept = if spec.actions[i].omit_result {
+                None
+            } else {
+                Some(outcome.data.clone())
+            };
+            ("ok", kept, None)
+        } else {
+            state[i] = ActionState::Failed;
+            if spec.stop_on_error {
+                abort = true;
             }
-            Err(e) => {
-                state[i] = ActionState::Failed;
-                if spec.stop_on_error {
-                    abort = true;
-                }
-                ("error", None, Some(e))
-            }
+            let message = outcome
+                .error
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "Action execution or verification did not succeed".to_string());
+            ("error", None, Some(message))
         };
+        let mut visible_outcome = outcome;
+        if spec.actions[i].omit_result {
+            visible_outcome.data = Value::Null;
+        }
         logs[i] = Some(ActionLog {
             index: i,
             id: log_ids[i].clone(),
@@ -483,6 +605,7 @@ where
             duration_ms: Some(duration_ms),
             result: ok_result,
             error,
+            outcome: Some(visible_outcome),
         });
         for &d in &dependents[i] {
             remaining[d] -= 1;
@@ -504,6 +627,7 @@ where
                 duration_ms: None,
                 result: None,
                 error: Some("never became ready (dependency chain did not complete)".to_string()),
+                outcome: None,
             });
             state[i] = ActionState::Skipped;
         }
@@ -524,6 +648,7 @@ where
         started_at,
         duration_ms: start.elapsed().as_millis() as u64,
         saved_to: None,
+        persistence_warning: None,
         logs,
     }
 }

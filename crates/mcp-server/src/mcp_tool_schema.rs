@@ -8,10 +8,67 @@
 // `cargo fmt --all -- --check` fail forever.
 use serde_json::json;
 
+/// The same terminal-status contract is used by CLI and both MCP adapters.
+pub fn workflow_report_exit_code(report: &serde_json::Value) -> i32 {
+    match report.get("status").and_then(serde_json::Value::as_str) {
+        Some("completed") => {
+            let verdicts = ["goalStatus", "originalTestVerdict"]
+                .map(|field| report.get(field).and_then(serde_json::Value::as_str));
+            if verdicts.contains(&Some("failed")) {
+                1
+            } else if verdicts.contains(&Some("inconclusive")) {
+                2
+            } else {
+                0
+            }
+        }
+        Some("failed" | "cancelled" | "expired" | "rejected") => 1,
+        _ => 2,
+    }
+}
+
 /// Return the list of tool definitions for `tools/list`.
 pub fn tool_definitions() -> serde_json::Value {
     json!({
         "tools": [
+            tool_def("workflow_run",
+                "Submit a known strict sequential workflow to the app-owned executor. Reuse runKey after a lost response; do not replay writes. Requires host-configured authToken. waitMs only bounds response waiting; returned runId remains queryable after disconnect.",
+                workflow_run_schema()
+            ),
+            tool_def("workflow_get",
+                "Read an existing app-owned run and evidence without dispatching business actions. Use evidenceId and offset for bounded UTF-8 JSON text pages; continue with evidencePage.nextOffset. Requires host-configured authToken.",
+                json!({ "type": "object", "additionalProperties": false, "properties": {
+                    "runId": { "type": "string", "minLength": 1 },
+                    "cursor": { "type": "integer", "minimum": 0 },
+                    "evidenceId": { "type": "string", "minLength": 1, "description": "A retained evidence reference from this run" },
+                    "offset": { "type": "integer", "minimum": 0, "description": "UTF-8 byte offset; requires evidenceId. Use the returned nextOffset" },
+                    "include": { "type": "array", "items": { "type": "string", "enum": ["steps", "events", "evidence"] } },
+                    "authToken": { "type": "string" }
+                }, "required": ["runId"], "dependentRequired": { "offset": ["evidenceId"] } })
+            ),
+            tool_def("workflow_cancel",
+                "Request that a run stops future dispatch. Cancellation does not roll back effects or prove an in-flight write stopped. Requires host-configured authToken.",
+                json!({ "type": "object", "additionalProperties": false, "properties": {
+                    "runId": { "type": "string", "minLength": 1 },
+                    "authToken": { "type": "string" }
+                }, "required": ["runId"] })
+            ),
+            tool_def("workflow_resume",
+                "Continue at a safe app-owned checkpoint, or reconcile using read-only observations. Use the current revision/checkpoint from workflow_get. Never replays an uncertain write. Requires host-configured authToken.",
+                json!({ "type": "object", "additionalProperties": false, "properties": {
+                    "runId": { "type": "string", "minLength": 1 },
+                    "expectedRevision": { "type": "integer", "minimum": 0 },
+                    "checkpointId": { "type": "string", "minLength": 1 },
+                    "intent": { "type": "string", "enum": ["continue", "reconcile"] },
+                    "authToken": { "type": "string" }
+                }, "required": ["runId", "expectedRevision", "checkpointId", "intent"] })
+            ),
+            tool_def("workflow_capabilities",
+                "Inspect actual app workflow support, authorization availability, supported operations/conditions, and recovery guarantees before submission.",
+                json!({ "type": "object", "additionalProperties": false, "properties": {
+                    "windowId": { "type": "string" }
+                } })
+            ),
             tool_def("webview_execute_js",
                 "Execute JavaScript in the Tauri webview and return the JSON-serialized result. Use an IIFE for return values: \"(() => { return value; })()\"",
                 json!({ "type": "object", "properties": {
@@ -166,9 +223,10 @@ pub fn tool_definitions() -> serde_json::Value {
                 }, "required": ["command"] })
             ),
             tool_def("ipc_monitor",
-                "Start or stop IPC monitoring to capture invoke() calls",
+                "Start or stop IPC monitoring in a selected window; returns desired/applied installation status",
                 json!({ "type": "object", "properties": {
-                    "action": { "type": "string", "enum": ["start", "stop"] }
+                    "action": { "type": "string", "enum": ["start", "stop"] },
+                    "windowId": { "type": "string" }
                 }, "required": ["action"] })
             ),
             tool_def("ipc_get_captured",
@@ -356,6 +414,99 @@ pub fn tool_definitions() -> serde_json::Value {
     })
 }
 
+/// Strict public workflow schema; deeper semantic limits are enforced by the
+/// shared validator (reference order, condition depth and resolved value types).
+fn workflow_run_schema() -> serde_json::Value {
+    let expr = json!({"oneOf":[
+        {"type":["string","number","boolean"]},
+        {"type":"object","additionalProperties":false,"required":["literal"],"properties":{"literal":{}}},
+        {"type":"object","additionalProperties":false,"required":["fromInput"],"properties":{"fromInput":{"type":"object","additionalProperties":false,"required":["key"],"properties":{"key":{"type":"string"}}}}},
+        {"type":"object","additionalProperties":false,"required":["fromStep"],"properties":{"fromStep":{"type":"object","additionalProperties":false,"required":["stepId","pointer"],"properties":{"stepId":{"type":"string"},"pointer":{"type":"string"}}}}}
+    ]});
+    let locator = json!({"type":"object","additionalProperties":false,"required":["by","value"],"properties":{
+        "by":{"enum":["role","label","testId","css"]},"value":{"$ref":"#/$defs/expr"},"name":{"$ref":"#/$defs/expr"},"scope":{"$ref":"#/$defs/locator"},
+        "entity":{"type":"object","additionalProperties":false,"required":["attribute","value"],"properties":{"attribute":{"type":"string"},"value":{"$ref":"#/$defs/expr"}}}
+    }});
+    let evidence = json!({"type":"object","additionalProperties":false,"properties":{
+        "success":{"const":"summary"},"failure":{"const":"scoped"},"maxInlineBytes":{"type":"integer","minimum":1024,"maximum":65536,"default":16384}
+    }});
+    let condition_variants = vec![
+        schema_variant(
+            json!({"kind":{"const":"element"},"target":{"$ref":"#/$defs/locator"},"state":{"enum":["visible","hidden","attached","detached","enabled","editable"]}}),
+            &["kind", "target", "state"],
+        ),
+        schema_variant(
+            json!({"kind":{"enum":["valueEquals","textContains"]},"target":{"$ref":"#/$defs/locator"},"expected":{"$ref":"#/$defs/expr"}}),
+            &["kind", "target", "expected"],
+        ),
+        schema_variant(
+            json!({"kind":{"const":"attributeEquals"},"target":{"$ref":"#/$defs/locator"},"name":{"type":"string"},"expected":{"$ref":"#/$defs/expr"}}),
+            &["kind", "target", "name", "expected"],
+        ),
+        schema_variant(
+            json!({"kind":{"const":"result"},"stepId":{"type":"string"},"pointer":{"type":"string"},"operator":{"enum":["eq","exists","nonEmptyString"]},"expected":{"$ref":"#/$defs/expr"}}),
+            &["kind", "stepId", "pointer", "operator"],
+        ),
+        schema_variant(
+            json!({"kind":{"enum":["all","any"]},"conditions":{"type":"array","minItems":1,"maxItems":100,"items":{"$ref":"#/$defs/condition"}}}),
+            &["kind", "conditions"],
+        ),
+    ];
+    let common = json!({"id":{"type":"string","minLength":1},"windowId":{"type":"string","minLength":1},"timeoutMs":{"type":"integer","minimum":1,"maximum":300000},"expect":{"$ref":"#/$defs/condition"},"evidence":{"$ref":"#/$defs/evidence"}});
+    let operations = vec![
+        (
+            json!({"op":{"const":"click"},"target":{"$ref":"#/$defs/locator"}}),
+            vec!["target"],
+        ),
+        (
+            json!({"op":{"enum":["fill","type"]},"target":{"$ref":"#/$defs/locator"},"value":{"$ref":"#/$defs/expr"}}),
+            vec!["target", "value"],
+        ),
+        (
+            json!({"op":{"const":"press"},"target":{"$ref":"#/$defs/locator"},"key":{"$ref":"#/$defs/expr"}}),
+            vec!["key"],
+        ),
+        (
+            json!({"op":{"const":"wait"},"condition":{"$ref":"#/$defs/condition"}}),
+            vec!["condition"],
+        ),
+        (
+            json!({"op":{"const":"query"},"target":{"$ref":"#/$defs/locator"},"query":{"oneOf":[
+                {"type":"object","additionalProperties":false,"required":["kind"],"properties":{"kind":{"enum":["value","text"]}}},
+                {"type":"object","additionalProperties":false,"required":["kind","name"],"properties":{"kind":{"const":"attribute"},"name":{"type":"string"}}}
+            ]}}),
+            vec!["target", "query"],
+        ),
+        (
+            json!({"op":{"const":"tool"},"tool":{"enum":["bridge_status","ipc_get_backend_state"]},"args":{"type":"object"},"bindings":{"type":"object","additionalProperties":{"$ref":"#/$defs/expr"}}}),
+            vec!["tool", "args"],
+        ),
+    ];
+    let steps: Vec<_> = operations
+        .into_iter()
+        .map(|(fields, mut required)| {
+            let mut properties = common.as_object().unwrap().clone();
+            properties.extend(fields.as_object().unwrap().clone());
+            required.extend(["id", "op"]);
+            schema_variant(json!(properties), &required)
+        })
+        .collect();
+    json!({"type":"object","additionalProperties":false,"required":["spec"],"properties":{
+        "waitMs":{"type":"integer","minimum":0,"maximum":30000,"default":1000},
+        "authToken":{"type":"string","description":"Trusted host workflow token; never put credentials in spec"},
+        "spec":{"type":"object","additionalProperties":false,"required":["schemaVersion","runKey","steps"],"properties":{
+            "schemaVersion":{"const":1},"runKey":{"type":"string","minLength":1,"maxLength":1024},"mode":{"const":"strict","default":"strict"},"schedule":{"const":"sequential","default":"sequential"},
+            "windowId":{"type":"string","minLength":1,"default":"main"},"inputs":{"type":"object"},"deadlineMs":{"type":"integer","minimum":1,"maximum":300000,"default":60000},
+            "defaults":{"type":"object","additionalProperties":false,"properties":{"stepTimeoutMs":{"type":"integer","minimum":1,"maximum":300000,"default":10000},"locatorTimeoutMs":{"type":"integer","minimum":1,"maximum":300000,"default":3000},"pollIntervalMs":{"type":"integer","minimum":10,"maximum":1000,"default":100},"failureEvidenceGraceMs":{"type":"integer","minimum":0,"maximum":2000,"default":2000}}},
+            "evidence":{"$ref":"#/$defs/evidence"},"steps":{"type":"array","minItems":1,"maxItems":100,"items":{"oneOf":steps}},"goal":{"$ref":"#/$defs/condition"}
+        }}
+    },"$defs":{"expr":expr,"locator":locator,"condition":{"oneOf":condition_variants},"evidence":evidence}})
+}
+
+fn schema_variant(properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
+    json!({"type":"object","additionalProperties":false,"required":required,"properties":properties})
+}
+
 fn tool_def(name: &str, description: &str, input_schema: serde_json::Value) -> serde_json::Value {
     json!({ "name": name, "description": description, "inputSchema": input_schema })
 }
@@ -368,7 +519,7 @@ pub fn server_instructions() -> &'static str {
         "Big DOMs: snapshots over the token budget (default 4000) split into subtree files (meta.subtreeFiles[].path). webview_search_snapshot searches the full merged tree -- prefer it over raising maxTokens.\n",
         "Overlays: full-page snapshots list open modals/floating windows in a '# overlays:' header and meta.overlays[] (focused first, then z-order). Rescope with webview_dom_snapshot(selector: <meta.overlays[i].selector>) to capture one modal precisely. An expected modal absent from both may be a separate window -- manage_window(action: 'list') and pass windowId.\n",
         "Debugging shortcuts: debug_snapshot bundles state+DOM+logs+screenshot in one call; webview_act_and_verify performs an action, waits, and collects evidence.\n",
-        "Batching: batch_actions runs several tool calls from one JSON spec (mode sequential|parallel, dependsOn for DAG order across both), returns per-action run logs, and can save the report to a JSON file (save).\n",
+        "Known multi-step intent: prefer workflow_capabilities then workflow_run. Execution stays in the app; use workflow_get after timeout/disconnect and workflow_resume only at an allowed checkpoint. An uncertain write must not be replayed. Legacy batching: batch_actions runs tool calls from one JSON spec (mode sequential|parallel, dependsOn for DAG order), returns per-action logs, and can save a JSON report.\n",
         "Backend: ipc_monitor + ipc_get_captured trace invoke() calls; ipc_execute_command invokes app commands directly; ipc_listen + event_get_captured capture Tauri events; runtime_get_captured surfaces window errors, unhandled rejections, and network failures.\n",
         "Artifacts: screenshots saved with save:true register in a manifest -- artifact_list/artifact_read/artifact_compare (byte diff) use them, artifact_prune cleans up.\n",
         "Multi-window: most tools take windowId (default 'main'); list labels with manage_window(action: 'list').\n",

@@ -282,6 +282,25 @@ tauri-connector drag "[draggable]" ".trash" --strategy html5dnd
 
 ---
 
+## Application-owned workflows
+
+```bash
+tauri-connector workflow capabilities
+tauri-connector workflow run <JSON_FILE_OR_INLINE_OR_STDIN_DASH> --wait-ms 30000
+tauri-connector workflow get <runId> --cursor 0 --include evidence
+tauri-connector workflow get <runId> --evidence-id <evidenceRef> --offset 0
+tauri-connector workflow cancel <runId>
+tauri-connector workflow resume <runId> --expected-revision 7 --checkpoint-id <checkpointId> --intent reconcile
+```
+
+Set `TAURI_CONNECTOR_WORKFLOW_TOKEN` to the trusted host token (at least 32 bytes). Capability lookup does not require a token. `run` reads a v1 spec and forwards it unchanged to the application; it never runs workflow steps in the CLI. The spec's `windowId` controls execution. `--wait-ms` ranges from 0 to 30000 (default 1000); it limits response waiting while app execution continues under its original deadline.
+
+The JSON response includes `runId` and the current status. Exit code `0` means completed success or successful capability lookup; `1` means failure, cancellation, invalid input or transport error; `2` means queued, running, paused, interrupted or unknown. Never interpret a nonzero code as proof that no effect occurred. Query `get` or reuse the same `runKey` and identical spec after a lost submission response.
+
+`get --evidence-id` reads one retained reference as an `evidencePage` with JSON text `content`, byte `offset`, `nextOffset`, and `totalBytes`. Follow the returned UTF-8 byte `nextOffset` to read further chunks. `--offset` requires `--evidence-id`; omitted offset starts at zero. `nextOffset: null` marks the final chunk. Paging does not dispatch business actions.
+
+Resume requires all three flags and `--intent continue|reconcile`. Continue is allowed only for an undispatched paused step in the same app instance with remaining deadline. Reconcile only rechecks an available postcondition; it cannot replay an uncertain action or turn the original failure into a passing test. After app restart, retained runs are read-only history. See `references/mcp-tools.md` for spec/locator/expression/condition fields and limits.
+
 ## Batch Actions
 
 ```bash
@@ -323,12 +342,11 @@ echo '[ { "tool": "bridge_status" }, { "tool": "ipc_get_backend_state" } ]' \
 
 - The global `--window-id` becomes the default `windowId` for actions that
   don't set one in their own `args`.
-- A tool result carrying a top-level `error` string (e.g. `Element not found`
-  from a bad selector) counts as a failure -- it triggers `stopOnError` and
-  skips dependents.
+- Typed execution and verification failures fail the action. Arbitrary business JSON containing `error` remains data. Report-save failures preserve the business report with `persistenceWarning`.
 - Exits non-zero when any action fails or is skipped, after printing the
   report.
-- `batch_actions` and `driver_session` are rejected inside a batch.
+- `batch_actions`, `driver_session`, and `workflow_*` lifecycle tools are rejected inside a batch.
+- Batch screenshots default to saved artifacts with compact report references. Explicit `save: false` retains legacy inline base64.
 
 ---
 
@@ -454,7 +472,7 @@ tauri-connector wait [selector] [FLAGS]
 |---|---|---|
 | `--text` | | Text to wait for |
 | `--url` | | Glob pattern matched against `location.href` |
-| `--load-state` | | `domcontentloaded`, `load`, or `networkidle` |
+| `--load-state` | | `domcontentloaded` or `load`; `networkidle` returns `unsupported_condition` |
 | `--fn` | | JavaScript expression/function/body that returns truthy |
 | `--state` | `attached` | Selector state: `attached`, `detached`, `visible`, `hidden` |
 | `--timeout` | 5000 | Timeout in ms |

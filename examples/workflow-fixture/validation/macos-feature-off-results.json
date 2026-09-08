@@ -1,0 +1,18 @@
+{
+  "platform": "darwin",
+  "nativeAppRunning": true,
+  "connectorFeature": false,
+  "listeningPorts": [],
+  "checkedPorts": [
+    19555,
+    19556
+  ],
+  "passed": true,
+  "connectorAbsentFromDependencyTree": true,
+  "commands": [
+    "cargo check --manifest-path examples/workflow-fixture/Cargo.toml --no-default-features --target-dir target --offline",
+    "cargo build --manifest-path examples/workflow-fixture/Cargo.toml --no-default-features --target-dir target --offline",
+    "node examples/workflow-fixture/scripts/feature-off-test.mjs",
+    "cargo tree --manifest-path examples/workflow-fixture/Cargo.toml --no-default-features --prefix none --offline"
+  ]
+}

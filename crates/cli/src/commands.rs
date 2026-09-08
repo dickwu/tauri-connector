@@ -1311,7 +1311,7 @@ pub async fn ipc_exec(
 /// Start or stop IPC monitoring.
 pub async fn ipc_monitor(client: &ConnectorClient, action: &str) -> Result<(), String> {
     let result = client
-        .send(json!({ "type": "ipc_monitor", "action": action }))
+        .send(json!({ "type": "ipc_monitor", "action": action, "window_id": window_id() }))
         .await?;
     println!(
         "{}",
@@ -1654,6 +1654,70 @@ pub async fn act_and_verify(
     print_json_result(client.send_with_timeout(cmd, timeout + 60_000).await)
 }
 
+/// Forward workflow lifecycle requests to the application-owned service.
+pub async fn workflow(
+    client: &ConnectorClient,
+    host: &str,
+    port: u16,
+    command: crate::WorkflowCommand,
+    selected_window: &str,
+) -> Result<i32, String> {
+    let (operation, args) = match command {
+        crate::WorkflowCommand::Run { spec, wait_ms } => {
+            let text = read_batch_spec_input(&spec)?;
+            let spec: Value = serde_json::from_str(&text)
+                .map_err(|error| format!("Invalid workflow JSON: {error}"))?;
+            ("workflow_run", json!({ "spec": spec, "waitMs": wait_ms }))
+        }
+        crate::WorkflowCommand::Get {
+            run_id,
+            cursor,
+            include,
+            evidence_id,
+            offset,
+        } => {
+            let mut args = json!({ "runId": run_id });
+            if let Some(cursor) = cursor {
+                args["cursor"] = json!(cursor);
+            }
+            if !include.is_empty() {
+                args["include"] = json!(include);
+            }
+            if let Some(evidence_id) = evidence_id {
+                args["evidenceId"] = json!(evidence_id);
+            }
+            if let Some(offset) = offset {
+                args["offset"] = json!(offset);
+            }
+            ("workflow_get", args)
+        }
+        crate::WorkflowCommand::Cancel { run_id } => ("workflow_cancel", json!({"runId":run_id})),
+        crate::WorkflowCommand::Resume {
+            run_id,
+            expected_revision,
+            checkpoint_id,
+            intent,
+        } => (
+            "workflow_resume",
+            json!({"runId":run_id,"expectedRevision":expected_revision,"checkpointId":checkpoint_id,"intent":intent}),
+        ),
+        crate::WorkflowCommand::Capabilities => {
+            ("workflow_capabilities", json!({"windowId":selected_window}))
+        }
+    };
+    let report =
+        connector_mcp_server::tools::dispatch_tool(client, host, port, operation, &args).await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+    );
+    Ok(if operation == "workflow_capabilities" {
+        0
+    } else {
+        connector_mcp_server::tools::workflow_result_exit_code(&report)
+    })
+}
+
 /// Run a JSON batch of MCP tool actions through the shared batch executor,
 /// dispatching each action via the standalone MCP server's tool table so the
 /// CLI speaks the exact same vocabulary as both MCP servers.
@@ -1680,6 +1744,9 @@ pub async fn batch(
     )?;
 
     let report = connector_client::batch::run_from_value(&value, |tool, targs| async move {
+        if tool.starts_with("workflow_") {
+            return Err("workflow lifecycle operations cannot be nested in batch_actions".into());
+        }
         connector_mcp_server::tools::dispatch_tool(client, host, port, &tool, &targs).await
     })
     .await?;

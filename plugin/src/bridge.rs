@@ -7,16 +7,90 @@
 
 use std::collections::HashMap;
 use std::net::TcpListener;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::protocol::{BridgeCommand, BridgeResult};
 
-type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Result<serde_json::Value, String>>>>>;
+type PendingMap = Arc<StdMutex<HashMap<String, PendingRequest>>>;
+
+struct PendingRequest {
+    conn_id: String,
+    registration_id: uuid::Uuid,
+    tx: oneshot::Sender<Result<serde_json::Value, BridgeError>>,
+}
+
+/// Transport failure classification; only `NotDispatched` permits fallback.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum BridgeError {
+    #[error("not_dispatched: {reason} (requestId: {request_id})")]
+    NotDispatched { request_id: String, reason: String },
+    #[error("execution_failed: {error} (requestId: {request_id})")]
+    ExecutionFailed { request_id: String, error: String },
+    #[error("outcome_unknown: {reason} (requestId: {request_id}); remote execution may continue")]
+    DispatchedOutcomeUnknown { request_id: String, reason: String },
+}
+
+impl BridgeError {
+    pub fn request_id(&self) -> &str {
+        match self {
+            Self::NotDispatched { request_id, .. }
+            | Self::ExecutionFailed { request_id, .. }
+            | Self::DispatchedOutcomeUnknown { request_id, .. } => request_id,
+        }
+    }
+
+    pub fn is_dispatched(&self) -> bool {
+        !matches!(self, Self::NotDispatched { .. })
+    }
+}
+
+/// Synchronous cleanup also runs when a suspended future is dropped. The maps
+/// protected here contain only small bookkeeping operations, never awaited I/O.
+struct CleanupGuard<F: FnOnce()>(Option<F>);
+
+impl<F: FnOnce()> Drop for CleanupGuard<F> {
+    fn drop(&mut self) {
+        if let Some(cleanup) = self.0.take() {
+            cleanup();
+        }
+    }
+}
+
+struct DispatchRequest<'a> {
+    id: &'a str,
+    deadline: Instant,
+}
+
+impl DispatchRequest<'_> {
+    fn not_dispatched(&self, reason: impl Into<String>) -> BridgeError {
+        BridgeError::NotDispatched {
+            request_id: self.id.to_string(),
+            reason: reason.into(),
+        }
+    }
+
+    fn unknown(&self, reason: impl Into<String>) -> BridgeError {
+        BridgeError::DispatchedOutcomeUnknown {
+            request_id: self.id.to_string(),
+            reason: reason.into(),
+        }
+    }
+
+    fn ensure_budget(&self) -> Result<(), BridgeError> {
+        if Instant::now() >= self.deadline {
+            Err(self.not_dispatched("Execution deadline expired before dispatch"))
+        } else {
+            Ok(())
+        }
+    }
+}
 type ClientMap = Arc<Mutex<HashMap<String, BridgeClient>>>;
 
 #[derive(Clone)]
@@ -51,7 +125,7 @@ impl Bridge {
         let port = find_available_port(9300, 9400)
             .ok_or_else(|| "No available port in range 9300-9400".to_string())?;
 
-        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+        let pending: PendingMap = Arc::new(StdMutex::new(HashMap::new()));
         let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
 
         let bridge = Self {
@@ -81,7 +155,8 @@ impl Bridge {
         *self.app_handle.lock().await = Some(handle);
     }
 
-    /// Execute JavaScript in the webview. Tries WS bridge, falls back to eval+event.
+    /// Execute JavaScript; fallback is permitted only before dispatch.
+    #[allow(dead_code)] // Retained as the legacy default-window convenience API.
     pub async fn execute_js(
         &self,
         script: &str,
@@ -90,151 +165,192 @@ impl Bridge {
         self.execute_js_for_window(script, timeout_ms, "main").await
     }
 
-    /// Execute JavaScript in a specific webview window.
+    /// Legacy adapter. New workflow callers retain the typed transport error.
     pub async fn execute_js_for_window(
         &self,
         script: &str,
         timeout_ms: u64,
         window_id: &str,
     ) -> Result<serde_json::Value, String> {
-        // Try WS bridge with short timeout
-        match self
-            .execute_js_ws(script, timeout_ms.min(2000), window_id)
-            .await
-        {
-            Ok(v) => return Ok(v),
-            Err(_) => {
-                // WS bridge timed out, fall back to eval+event path
+        // Preserve the historical single-window default only at this legacy
+        // boundary. Typed workflow calls always require the requested label.
+        let legacy_window = {
+            let clients = self.clients.lock().await;
+            if window_id == "main" && !clients.contains_key(window_id) && clients.len() == 1 {
+                clients.keys().next().cloned()
+            } else {
+                None
             }
-        }
+        };
+        self.execute_js_for_window_typed(
+            script,
+            timeout_ms,
+            legacy_window.as_deref().unwrap_or(window_id),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    }
 
-        // Fallback: eval + Tauri event
-        self.execute_js_via_eval(script, timeout_ms, window_id)
+    pub async fn execute_js_for_window_typed(
+        &self,
+        script: &str,
+        timeout_ms: u64,
+        window_id: &str,
+    ) -> Result<serde_json::Value, BridgeError> {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.execute_js_for_window_with_request_id(script, timeout_ms, window_id, &id)
             .await
+    }
+
+    /// The workflow journal supplies the logical operation ID before dispatch.
+    /// Reusing an ID is not an idempotency guarantee across page/app restarts.
+    pub async fn execute_js_for_window_with_request_id(
+        &self,
+        script: &str,
+        timeout_ms: u64,
+        window_id: &str,
+        request_id: &str,
+    ) -> Result<serde_json::Value, BridgeError> {
+        let request = DispatchRequest {
+            id: request_id,
+            deadline: Instant::now() + Duration::from_millis(timeout_ms),
+        };
+        match self.execute_js_ws(script, window_id, &request).await {
+            Err(BridgeError::NotDispatched { .. }) => {
+                // The same ID and absolute deadline cover both transports.
+                request.ensure_budget()?;
+                self.execute_js_via_eval(script, window_id, &request).await
+            }
+            result => result,
+        }
     }
 
     async fn execute_js_ws(
         &self,
         script: &str,
-        timeout_ms: u64,
         window_id: &str,
-    ) -> Result<serde_json::Value, String> {
-        let id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = oneshot::channel();
-        let client_tx = {
-            let clients = self.clients.lock().await;
-            clients
-                .get(window_id)
-                .or_else(|| {
-                    if window_id == "main" && clients.len() == 1 {
-                        clients.values().next()
-                    } else {
-                        None
-                    }
-                })
-                .map(|client| client.tx.clone())
-        }
-        .ok_or_else(|| format!("Bridge client for window '{window_id}' is not connected"))?;
-
-        {
-            self.pending.lock().await.insert(id.clone(), tx);
-        }
-
-        let cmd = BridgeCommand {
-            id: id.clone(),
-            script: script.to_string(),
-        };
-        let msg = serde_json::to_string(&cmd).map_err(|e| e.to_string())?;
-        client_tx
-            .send(msg)
-            .map_err(|_| "Bridge client channel closed".to_string())?;
-
-        tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx)
+        request: &DispatchRequest<'_>,
+    ) -> Result<serde_json::Value, BridgeError> {
+        request.ensure_budget()?;
+        let clients = tokio::time::timeout_at(request.deadline, self.clients.lock())
             .await
             .map_err(|_| {
-                let pending = self.pending.clone();
-                let id = id.clone();
-                tokio::spawn(async move {
-                    pending.lock().await.remove(&id);
-                });
-                "WS bridge timeout".to_string()
-            })?
-            .map_err(|_| "Bridge channel closed".to_string())?
+                request.not_dispatched("Deadline expired while selecting bridge client")
+            })?;
+        let client = clients.get(window_id).cloned().ok_or_else(|| {
+            request.not_dispatched(format!(
+                "Bridge client for window '{window_id}' is not connected"
+            ))
+        })?;
+        // Keep the registry lock through enqueue: disconnect cleanup cannot miss
+        // a request inserted for a connection that it has already removed.
+        let cmd = BridgeCommand {
+            id: request.id.to_string(),
+            script: script.to_string(),
+        };
+        let msg = serde_json::to_string(&cmd)
+            .map_err(|error| request.not_dispatched(error.to_string()))?;
+        request.ensure_budget()?;
+        let (tx, rx) = oneshot::channel();
+        let registration_id = uuid::Uuid::new_v4();
+        {
+            let mut pending = self.pending.lock().unwrap();
+            if pending.contains_key(request.id) {
+                return Err(request.unknown("A request with this ID is already pending"));
+            }
+            pending.insert(
+                request.id.to_string(),
+                PendingRequest {
+                    conn_id: client.conn_id,
+                    registration_id,
+                    tx,
+                },
+            );
+        }
+        let _waiter = CleanupGuard(Some(|| {
+            let mut pending = self.pending.lock().unwrap();
+            if pending
+                .get(request.id)
+                .is_some_and(|entry| entry.registration_id == registration_id)
+            {
+                pending.remove(request.id);
+            }
+        }));
+        // A rejected enqueue proves this command never entered the transport.
+        client
+            .tx
+            .send(msg)
+            .map_err(|_| request.not_dispatched("Bridge client channel closed"))?;
+        drop(clients);
+        // Once queued, even a socket send failure cannot safely trigger replay.
+        match tokio::time::timeout_at(request.deadline, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(request.unknown("Bridge response channel closed")),
+            Err(_) => Err(request.unknown("WS bridge timeout")),
+        }
     }
 
     async fn execute_js_via_eval(
         &self,
         script: &str,
-        timeout_ms: u64,
         window_id: &str,
-    ) -> Result<serde_json::Value, String> {
+        request: &DispatchRequest<'_>,
+    ) -> Result<serde_json::Value, BridgeError> {
         use tauri::{Listener, Manager};
 
-        // Clone the handle out so the lock is not held across the eval await —
-        // concurrent commands (e.g. parallel batches) must not serialize on it.
-        let app = self.app_handle.lock().await.clone();
-        let app = app.ok_or("App handle not set for eval fallback")?;
+        request.ensure_budget()?;
+        let app = tokio::time::timeout_at(request.deadline, self.app_handle.lock())
+            .await
+            .map_err(|_| request.not_dispatched("Deadline expired while preparing eval fallback"))?
+            .clone()
+            .ok_or_else(|| request.not_dispatched("App handle not set for eval fallback"))?;
         let window = app
             .get_webview_window(window_id)
-            .ok_or_else(|| format!("Window '{window_id}' not found"))?;
-
-        let id = uuid::Uuid::new_v4().to_string();
-        let event_name = format!("connector-eval-{id}");
-        let (tx, rx) = oneshot::channel::<Result<serde_json::Value, String>>();
-        let tx = std::sync::Mutex::new(Some(tx));
-
+            .ok_or_else(|| request.not_dispatched(format!("Window '{window_id}' not found")))?;
+        let id = request.id.to_string();
+        // Keep the event name valid even when a caller uses a non-UUID ID.
+        let event_name = format!("connector-eval-{}", uuid::Uuid::new_v4());
+        let (tx, rx) = oneshot::channel::<Result<serde_json::Value, BridgeError>>();
+        let tx = StdMutex::new(Some(tx));
+        let expected_id = id.clone();
         let listener_id = app.listen(&event_name, move |event| {
-            if let Some(tx) = tx.lock().unwrap().take() {
-                let payload_str = event.payload();
-                // The payload may be double-quoted (string-wrapped JSON from Tauri event system)
-                let inner = serde_json::from_str::<String>(payload_str)
-                    .unwrap_or_else(|_| payload_str.to_string());
-                match serde_json::from_str::<BridgeResult>(&inner) {
-                    Ok(r) => {
-                        let v = if let Some(e) = r.error {
-                            Err(e)
-                        } else {
-                            Ok(r.result.unwrap_or(serde_json::Value::Null))
-                        };
-                        let _ = tx.send(v);
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(format!("Parse error: {e}")));
+            let payload_str = event.payload();
+            let inner = serde_json::from_str::<String>(payload_str)
+                .unwrap_or_else(|_| payload_str.to_string());
+            let result = match serde_json::from_str::<BridgeResult>(&inner) {
+                Ok(result) if result.id == expected_id => {
+                    if let Some(error) = result.error {
+                        Err(BridgeError::ExecutionFailed {
+                            request_id: expected_id.clone(),
+                            error,
+                        })
+                    } else {
+                        Ok(result.result.unwrap_or(serde_json::Value::Null))
                     }
                 }
+                Ok(_) => return,
+                Err(_) => Err(BridgeError::DispatchedOutcomeUnknown {
+                    request_id: expected_id.clone(),
+                    reason: "Invalid eval result payload".into(),
+                }),
+            };
+            if let Some(tx) = tx.lock().unwrap().take() {
+                let _ = tx.send(result);
             }
         });
-
-        let escaped = script.replace('\\', "\\\\").replace('`', "\\`");
-        let js = format!(
-            r#"(async function(){{
-                try{{
-                    const AF=Object.getPrototypeOf(async function(){{}}).constructor;
-                    const r=await new AF('return ('+`{escaped}`+')')();
-                    let p;try{{JSON.stringify(r);p=JSON.stringify({{id:'{id}',result:r}})}}catch(_){{p=JSON.stringify({{id:'{id}',result:String(r)}})}}
-                    if(window.__TAURI_INTERNALS__)window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{{event:'{event_name}',payload:p}});
-                }}catch(e){{
-                    const p=JSON.stringify({{id:'{id}',error:e.message||String(e)}});
-                    if(window.__TAURI_INTERNALS__)window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{{event:'{event_name}',payload:p}});
-                }}
-            }})()"#
-        );
-
+        let _listener = CleanupGuard(Some(|| app.unlisten(listener_id)));
+        let js = eval_script(script, &id, &event_name);
+        request.ensure_budget()?;
+        // The platform eval API may fail after handing work to the webview.
+        // Conservatively retain uncertainty; never replay after this boundary.
         window
             .eval(&js)
-            .map_err(|e| format!("eval inject failed: {e}"))?;
-
-        // No `?` before the unlisten below: the listener must be removed on
-        // the timeout and closed-channel paths too, or it leaks per eval.
-        let result: Result<serde_json::Value, String> =
-            match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await {
-                Ok(Ok(res)) => res,
-                Ok(Err(_)) => Err("Result channel closed".to_string()),
-                Err(_) => Err("Script execution timeout (eval path)".to_string()),
-            };
-
-        app.unlisten(listener_id);
-        result
+            .map_err(|error| request.unknown(format!("eval inject failed: {error}")))?;
+        match tokio::time::timeout_at(request.deadline, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(request.unknown("Eval result channel closed")),
+            Err(_) => Err(request.unknown("Script execution timeout (eval path)")),
+        }
     }
 
     pub async fn status(&self) -> serde_json::Value {
@@ -252,9 +368,10 @@ impl Bridge {
                 })
             })
             .collect();
-        let pending = self.pending.lock().await.len();
+        let pending = self.pending.lock().unwrap().len();
         serde_json::json!({
             "bridge_port": self.port,
+            "workflowProtocolVersion": 1,
             "clients": list,
             "pending": pending,
             "fallbackAvailable": self.app_handle.lock().await.is_some(),
@@ -292,6 +409,9 @@ async fn handle_bridge_client(
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let mut window_id: Option<String> = None;
     let conn_id = uuid::Uuid::new_v4().to_string();
+    let _connection = CleanupGuard(Some(|| {
+        reject_connection_pending(&pending, &conn_id);
+    }));
 
     loop {
         tokio::select! {
@@ -318,6 +438,7 @@ async fn handle_bridge_client(
                             window_id = Some(new_window_id);
                         }
                     }
+                    Some(Ok(Message::Close(_))) => break,
                     Some(Ok(_)) => {}
                     Some(Err(_)) | None => break,
                 }
@@ -390,14 +511,24 @@ async fn handle_bridge_message(
 
     match serde_json::from_value::<BridgeResult>(value) {
         Ok(result) => {
-            let mut pending = pending.lock().await;
-            if let Some(tx) = pending.remove(&result.id) {
+            let mut pending = pending.lock().unwrap();
+            // A stale socket must never resolve a newer connection's request.
+            if pending
+                .get(&result.id)
+                .is_some_and(|request| request.conn_id == conn_id)
+            {
+                let request = pending
+                    .remove(&result.id)
+                    .expect("request checked under same lock");
                 let value = if let Some(error) = result.error {
-                    Err(error)
+                    Err(BridgeError::ExecutionFailed {
+                        request_id: result.id,
+                        error,
+                    })
                 } else {
                     Ok(result.result.unwrap_or(serde_json::Value::Null))
                 };
-                let _ = tx.send(value);
+                let _ = request.tx.send(value);
             }
         }
         Err(e) => {
@@ -406,6 +537,45 @@ async fn handle_bridge_message(
     }
 
     None
+}
+
+fn reject_connection_pending(pending: &PendingMap, conn_id: &str) {
+    let mut requests = pending.lock().unwrap();
+    let ids: Vec<_> = requests
+        .iter()
+        .filter(|(_, request)| request.conn_id == conn_id)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in ids {
+        if let Some(request) = requests.remove(&id) {
+            let _ = request.tx.send(Err(BridgeError::DispatchedOutcomeUnknown {
+                request_id: id,
+                reason: "Bridge connection closed".into(),
+            }));
+        }
+    }
+}
+
+/// Pass code as JSON data. Template-literal interpolation would execute `${...}`
+/// from callers before the script itself and cannot be fixed by escaping ticks.
+fn eval_script(script: &str, id: &str, event_name: &str) -> String {
+    let script = serde_json::to_string(script).expect("strings serialize");
+    let id = serde_json::to_string(id).expect("strings serialize");
+    let event_name = serde_json::to_string(event_name).expect("strings serialize");
+    format!(
+        r#"(async function(){{
+        const id={id}, eventName={event_name};
+        function send(payload){{
+            if(window.__TAURI_INTERNALS__)window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{{event:eventName,payload:JSON.stringify(payload)}});
+        }}
+        try{{
+            const AF=Object.getPrototypeOf(async function(){{}}).constructor;
+            const r=await new AF('return ('+{script}+')')();
+            let value;try{{JSON.stringify(r);value=r}}catch(_){{value=String(r)}}
+            send({{id:id,result:value}});
+        }}catch(e){{send({{id:id,error:e.message||String(e)}});}}
+    }})()"#
+    )
 }
 
 fn now_ms() -> u64 {
@@ -1697,4 +1867,313 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
 
 fn find_available_port(start: u16, end: u16) -> Option<u16> {
     (start..end).find(|&port| TcpListener::bind(("127.0.0.1", port)).is_ok())
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<String>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let bridge = Bridge {
+            port: 0,
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            pending: Arc::new(StdMutex::new(HashMap::new())),
+            app_handle: Arc::new(Mutex::new(None)),
+        };
+        bridge.clients.lock().await.insert(
+            "main".into(),
+            BridgeClient {
+                window_id: "main".into(),
+                url: None,
+                title: None,
+                connected_at_ms: 0,
+                conn_id: "connection-a".into(),
+                tx,
+            },
+        );
+        (bridge, rx)
+    }
+
+    #[tokio::test]
+    async fn ws_exception_does_not_attempt_eval_replay() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window("writeThenThrow()", 1000, "main")
+                .await
+        });
+        let command: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        let client = bridge.clients.lock().await["main"].clone();
+        handle_bridge_message(
+            &json!({"id": command["id"], "error": "fixture exception"}).to_string(),
+            &client.tx,
+            &bridge.clients,
+            &bridge.pending,
+            &client.conn_id,
+        )
+        .await;
+        let error = task.await.unwrap().unwrap_err();
+        assert!(error.contains("fixture exception"), "{error}");
+        assert!(rx.try_recv().is_err());
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ws_timeout_does_not_attempt_eval_replay() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let error = bridge
+            .execute_js_for_window("slowWrite()", 1, "main")
+            .await
+            .unwrap_err();
+        let command: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert!(error.contains("outcome_unknown"), "{error}");
+        assert!(error.contains(command["id"].as_str().unwrap()), "{error}");
+        assert!(rx.try_recv().is_err());
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn typed_calls_require_the_exact_window_label() {
+        let (bridge, mut rx) = queued_bridge().await;
+        {
+            let mut clients = bridge.clients.lock().await;
+            let mut client = clients.remove("main").unwrap();
+            client.window_id = "secondary".into();
+            clients.insert("secondary".into(), client);
+        }
+        let error = bridge
+            .execute_js_for_window_typed("write()", 100, "main")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, BridgeError::NotDispatched { .. }));
+        assert!(
+            rx.try_recv().is_err(),
+            "strict targeting must not dispatch into the sole other window"
+        );
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ws_slow_completion_waits_beyond_the_old_two_second_limit() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let remote = bridge.clone();
+        let effects = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = effects.clone();
+        let responder = tokio::spawn(async move {
+            let command: serde_json::Value =
+                serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(2100)).await;
+            let client = remote.clients.lock().await["main"].clone();
+            handle_bridge_message(
+                &json!({"id": command["id"], "result": {"saved": true}}).to_string(),
+                &client.tx,
+                &remote.clients,
+                &remote.pending,
+                &client.conn_id,
+            )
+            .await;
+            assert!(rx.try_recv().is_err());
+        });
+        let result = bridge
+            .execute_js_for_window_typed("slowWrite()", 5000, "main")
+            .await
+            .unwrap();
+        assert_eq!(result, json!({"saved": true}));
+        responder.await.unwrap();
+        assert_eq!(effects.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejected_ws_enqueue_cleans_up_and_allows_eval_with_same_id() {
+        let (bridge, rx) = queued_bridge().await;
+        drop(rx);
+        let request = DispatchRequest {
+            id: "logical-id",
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+        let error = bridge
+            .execute_js_ws("write()", "main", &request)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, BridgeError::NotDispatched { .. }));
+        assert_eq!(error.request_id(), "logical-id");
+        assert!(!error.is_dispatched());
+        assert!(bridge.pending.lock().unwrap().is_empty());
+        let error = bridge
+            .execute_js_for_window_with_request_id("write()", 1000, "main", "logical-id")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, BridgeError::NotDispatched { ref reason, .. } if reason.contains("App handle not set"))
+        );
+        assert_eq!(error.request_id(), "logical-id");
+    }
+
+    #[tokio::test]
+    async fn fallback_does_not_reset_a_spent_deadline() {
+        let (bridge, rx) = queued_bridge().await;
+        drop(rx);
+        // Hold the fallback prerequisite so it must consume the remaining budget.
+        let _app_guard = bridge.app_handle.lock().await;
+        let error = bridge
+            .execute_js_for_window_with_request_id("write()", 2, "main", "same-id")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, BridgeError::NotDispatched { ref reason, .. } if reason.to_ascii_lowercase().contains("deadline expired"))
+        );
+        assert_eq!(error.request_id(), "same-id");
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropping_bridge_waiter_cleans_up_without_replaying_or_cancelling() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_typed("write()", 5000, "main")
+                .await
+        });
+        rx.recv().await.unwrap();
+        assert_eq!(bridge.pending.lock().unwrap().len(), 1);
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(bridge.pending.lock().unwrap().is_empty());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn disconnect_rejects_only_its_own_pending_requests_as_unknown() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_with_request_id("write()", 5000, "main", "write-id")
+                .await
+        });
+        rx.recv().await.unwrap();
+        let (other_tx, _other_rx) = oneshot::channel();
+        bridge.pending.lock().unwrap().insert(
+            "other-id".into(),
+            PendingRequest {
+                conn_id: "connection-b".into(),
+                registration_id: uuid::Uuid::new_v4(),
+                tx: other_tx,
+            },
+        );
+        reject_connection_pending(&bridge.pending, "connection-a");
+        let error = task.await.unwrap().unwrap_err();
+        assert!(matches!(
+            error,
+            BridgeError::DispatchedOutcomeUnknown { .. }
+        ));
+        assert_eq!(error.request_id(), "write-id");
+        assert!(error.is_dispatched());
+        assert!(bridge.pending.lock().unwrap().contains_key("other-id"));
+    }
+
+    #[tokio::test]
+    async fn stale_connection_cannot_resolve_another_connections_operation() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_with_request_id("write()", 1000, "main", "write-id")
+                .await
+        });
+        rx.recv().await.unwrap();
+        let client = bridge.clients.lock().await["main"].clone();
+        let result = json!({"id":"write-id", "result":"saved"}).to_string();
+        handle_bridge_message(
+            &result,
+            &client.tx,
+            &bridge.clients,
+            &bridge.pending,
+            "stale-connection",
+        )
+        .await;
+        assert_eq!(bridge.pending.lock().unwrap().len(), 1);
+        handle_bridge_message(
+            &result,
+            &client.tx,
+            &bridge.clients,
+            &bridge.pending,
+            &client.conn_id,
+        )
+        .await;
+        assert_eq!(task.await.unwrap().unwrap(), json!("saved"));
+    }
+
+    #[tokio::test]
+    async fn duplicate_inflight_id_does_not_replace_waiter_or_dispatch_twice() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_with_request_id("write()", 1000, "main", "write-id")
+                .await
+        });
+        rx.recv().await.unwrap();
+        let error = bridge
+            .execute_js_for_window_with_request_id("write()", 1000, "main", "write-id")
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            BridgeError::DispatchedOutcomeUnknown { .. }
+        ));
+        assert_eq!(bridge.pending.lock().unwrap().len(), 1);
+        assert!(rx.try_recv().is_err());
+        task.abort();
+        let _ = task.await;
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cleanup_guard_runs_on_error_and_future_drop() {
+        let active = Arc::new(std::sync::atomic::AtomicUsize::new(1));
+        let counter = active.clone();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _guard = CleanupGuard(Some(|| {
+                counter.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }));
+            ready_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        ready_rx.await.unwrap();
+        task.abort();
+        let _ = task.await;
+        assert_eq!(active.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let mut cleaned = false;
+        let mut fail = || -> Result<(), ()> {
+            let _guard = CleanupGuard(Some(|| {
+                cleaned = true;
+            }));
+            Err(())?;
+            Ok(())
+        };
+        assert!(fail().is_err());
+        assert!(cleaned);
+    }
+
+    #[test]
+    fn eval_embeds_script_and_identity_as_json_data() {
+        let script = "({value: '\\u4f60', text: \"${globalThis.unintended++} ` \\\\ \\\"\"})\n";
+        let id = "id'`\\\"\\n${unsafe}";
+        let event = "event-name";
+        let generated = eval_script(script, id, event);
+        assert!(generated.contains(&serde_json::to_string(script).unwrap()));
+        assert!(generated.contains(&format!("const id={}", serde_json::to_string(id).unwrap())));
+        assert!(
+            !generated.contains("+`"),
+            "script must not use interpolated template literals"
+        );
+    }
 }

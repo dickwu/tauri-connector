@@ -105,11 +105,23 @@ pub struct RuntimeEntry {
     pub data: serde_json::Value,
 }
 
+/// Last acknowledged monitoring installation for one page in one window.
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcMonitorStatus {
+    pub desired: bool,
+    pub applied: Option<bool>,
+    pub page_epoch: Option<String>,
+    pub acknowledged_at: Option<u64>,
+}
+
 /// Shared mutable state for the plugin.
 #[derive(Clone)]
 pub struct PluginState {
+    pub workflow: Arc<crate::workflow::WorkflowService>,
     pub dom_cache: Arc<Mutex<std::collections::HashMap<String, DomEntry>>>,
     pub ipc_monitor_active: Arc<Mutex<bool>>,
+    pub ipc_monitors: Arc<Mutex<HashMap<String, IpcMonitorStatus>>>,
     pub pointed_element: Arc<Mutex<Option<serde_json::Value>>>,
     pub log_dir: PathBuf,
     pub console_writer: Arc<Mutex<BufWriter<File>>>,
@@ -143,8 +155,12 @@ impl PluginState {
         let runtime_file = open_append("runtime.log")?;
 
         Ok(Self {
+            workflow: Arc::new(crate::workflow::WorkflowService::new(
+                log_dir.join("workflow"),
+            )),
             dom_cache: Arc::new(Mutex::new(HashMap::new())),
             ipc_monitor_active: Arc::new(Mutex::new(false)),
+            ipc_monitors: Arc::new(Mutex::new(HashMap::new())),
             pointed_element: Arc::new(Mutex::new(None)),
             log_dir,
             console_writer: Arc::new(Mutex::new(BufWriter::new(console_file))),

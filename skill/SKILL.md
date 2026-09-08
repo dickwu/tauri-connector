@@ -1,6 +1,6 @@
 ---
 name: tauri-connector
-version: 0.14.0
+version: 0.15.0
 description: "Deep inspection, interaction, debugging, and code review for Tauri v2 desktop apps. Use this skill whenever: working with a Tauri app's UI (clicking, filling forms, reading DOM, screenshots, dragging elements); debugging console logs, IPC calls, or Tauri events; reviewing component trees, accessibility, or visual regressions; testing user flows or validating IPC contracts; setting up tauri-connector in a new project. Also triggers on: DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, Tauri app testing, visual regression, admin/ front/ or tool/ desktop apps, @eN ref syntax, or any mention of tauri-connector CLI or MCP tools. This is Claude's bridge to any running Tauri v2 desktop app -- if a Tauri app is involved, use this skill."
 allowed-tools:
   - Bash
@@ -34,6 +34,25 @@ Port layout:
 | 9300--9400 | Internal bridge (plugin <-> webview JS) |
 | 9555--9655 | External WebSocket (CLI + bun scripts) |
 | 9556--9656 | Embedded MCP HTTP server: `/mcp` Streamable HTTP, `/sse` legacy HTTP+SSE |
+
+## Known multi-step intent: workflow first
+
+For a known short sequence, query `workflow_capabilities`, then submit a strict sequential v1 spec with `workflow_run`. The application performs target resolution, input, condition checks and prior-step bindings. Use `workflow_get` to inspect the returned `runId` after a timeout or disconnect. Read an individual retained evidence reference with `evidenceId` and follow `evidencePage.nextOffset` as the next byte `offset` when the report is truncated. Reuse the same `runKey` and spec when the submission response is lost; never restart an uncertain write with a new key.
+
+The host must configure a workflow token of at least 32 bytes. CLI/standalone MCP read `TAURI_CONNECTOR_WORKFLOW_TOKEN`; embedded MCP takes `authToken` outside the spec. Do not place tokens or other credentials in workflow inputs. Run fixture examples only against isolated test data.
+
+```bash
+tauri-connector workflow capabilities
+tauri-connector workflow run fixture.json --wait-ms 30000
+tauri-connector workflow get <runId> --include evidence
+tauri-connector workflow resume <runId> --expected-revision 7 --checkpoint-id <checkpointId> --intent reconcile
+```
+
+The Bun fallback uses the same app-owned service: `bun run $SCRIPTS/workflow.ts run @arguments.json`, where the file contains `{"spec": {...}}`. Use `get`, `cancel`, `resume` or `capabilities` with their JSON arguments. It reads `TAURI_CONNECTOR_WORKFLOW_TOKEN`, checks application support, and preserves incomplete/failure exit codes.
+
+`continue` is limited to an undispatched paused step within the same application instance and original deadline. `reconcile` only rechecks an available postcondition; it does not replay actions or erase the original failure. Cancellation prevents future dispatch and does not roll back prior effects. CLI codes are `0` completed, `1` failed/cancelled, `2` pending/paused/unknown. `goalStatus: not_requested` does not mean the business goal was verified. See `references/mcp-tools.md` and `references/cli-commands.md` for exact arguments and examples.
+
+Workflow v1 supports role/label/testId/CSS locators; it rejects legacy `@ref` fallback, arbitrary JS, unknown IPC, parallel scheduling and transition-event assertions. DOM conditions establish observed UI state, not business persistence. For an unknown UI issue, continue with the inspection loop below.
 
 ## Core Loop: Debug Snapshot -> Act And Verify
 
@@ -364,7 +383,7 @@ batch_actions(mode: "parallel", actions: [
 tauri-connector batch flow.json --mode parallel --save report.json
 ```
 
-Sequential is the default (`stopOnError: true` skips the rest after a failure; `--continue-on-error` / `stopOnError: false` keeps running the remaining actions in order -- only explicit `dependsOn` edges skip). A tool result carrying a top-level `error` string (bad selector, stale ref) counts as a failure. `parallel` plus `dependsOn` gives a DAG: independent actions overlap, dependent ones wait. The report (`{ok, total, succeeded, failed, skipped, durationMs, logs[]}`) is returned in the response and, with `save`, also written to a JSON file. Use `omitResult: true` on noisy actions to keep logs small; details in `references/mcp-tools.md`.
+Sequential is the default (`stopOnError: true` skips the rest after a failure; `--continue-on-error` / `stopOnError: false` keeps running the remaining actions in order -- only explicit `dependsOn` edges skip). Typed execution and verification decide status; arbitrary business JSON containing `error` is preserved. `parallel` plus `dependsOn` gives a DAG, but conflicting application resources return `resource_busy`. The report (`{ok, total, succeeded, failed, skipped, durationMs, logs[]}`) is returned in the response and, with `save`, also written to a JSON file. Report-save failures preserve execution results with `persistenceWarning`. Use `omitResult: true` on noisy actions to keep logs small; details in `references/mcp-tools.md`.
 
 ---
 
@@ -469,7 +488,7 @@ bun run $SCRIPTS/events.ts listen user:login  # Listen for events
 
 For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
 
-1. `tauri-plugin-connector = { version = "0.14", optional = true }` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = { version = "0.15", optional = true }` in `src-tauri/Cargo.toml`
 2. Declare the cargo feature: `[features] dev-connector = ["dep:tauri-plugin-connector"]`
 3. Register the plugin with `#[cfg(feature = "dev-connector")]` guard
 4. Drop the dev capability JSON at `src-tauri/capabilities-dev/dev-connector.json` (outside the default `capabilities/` glob), and register it at runtime via `app.add_capability(include_str!("../capabilities-dev/dev-connector.json"))` inside the same `cfg(feature = "dev-connector")`
@@ -478,7 +497,7 @@ For first-time setup in a Tauri v2 project, read `skill/SETUP.md`. The skill def
 7. Add `"tauri:dev": "tauri dev --features dev-connector"` to `package.json`
 8. Add `"url": "http://127.0.0.1:9556/mcp"` to `.mcp.json`
 
-For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.14"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
+For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.15"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 
@@ -539,7 +558,7 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | Port conflict | Use `ConnectorBuilder::new().port_range(9600, 9700)` or set `TAURI_CONNECTOR_PORT=9600` |
 | Refs not found | DOM changed since snapshot. Re-run snapshot for fresh refs |
 | Acting on the wrong window | Pass `windowId` (MCP) / `--window-id` (CLI). Default is `main`; each window has independent DOM and refs |
-| First call slow (~2s), then fine | WS bridge wasn't connected yet; the plugin falls back to eval+event transport. Persistent slowness: check `tauri-connector bridge` and `withGlobalTauri: true` |
+| Bridge not connected | Eval+event fallback is permitted only before dispatch, within the remaining deadline. Persistent slowness: check `tauri-connector bridge` and `withGlobalTauri: true` |
 | Disk filling with screenshots | `tauri-connector artifacts prune --keep 50` (MCP: `artifact_prune`) |
 | Drag not working | Try explicit `--strategy pointer` or `html5dnd`. Increase `--steps` (>5) and `--duration` |
 | Screenshot blank | Install `@zumer/snapdom` for DOM-based fallback capture |
