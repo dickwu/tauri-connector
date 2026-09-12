@@ -1,0 +1,187 @@
+{
+  "runId": 34721920844,
+  "commit": "e127d4d998ae752df6b569215d2d6c9685c5b373",
+  "url": "https://github.com/dickwu/tauri-connector/actions/runs/34721920844",
+  "status": "completed",
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "name": "core-contracts",
+      "id": 103629277338,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "page-runtime",
+      "id": 103629277423,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture macos-latest / connector off",
+      "id": 103629277433,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector on",
+      "id": 103629277437,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture macos-latest / connector on",
+      "id": 103629277440,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / xcap,native-screenshot",
+      "id": 103629277468,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "docs-and-skills",
+      "id": 103629277469,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture windows-latest / connector on",
+      "id": 103629277497,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin windows-latest / no features",
+      "id": 103629277503,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin windows-latest / native-screenshot",
+      "id": 103629277529,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap",
+      "id": 103629277532,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture windows-latest / connector off",
+      "id": 103629277542,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin macos-latest / no features",
+      "id": 103629277553,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector off",
+      "id": 103629277569,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / native-screenshot",
+      "id": 103629277575,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / no features",
+      "id": 103629277581,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / xcap,native-screenshot",
+      "id": 103629277588,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin windows-latest / xcap",
+      "id": 103629277590,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin ubuntu-latest / native-screenshot",
+      "id": 103629277601,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / xcap",
+      "id": 103629277630,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap,native-screenshot",
+      "id": 103629277670,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-apple-darwin",
+      "id": 103629447852,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-unknown-linux-gnu",
+      "id": 103629447854,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-pc-windows-msvc",
+      "id": 103629447863,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build aarch64-unknown-linux-gnu",
+      "id": 103629447872,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build aarch64-apple-darwin",
+      "id": 103629447901,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Native WebView ${{ matrix.os }}",
+      "id": 103629764405,
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "aggregate",
+      "id": 103630142344,
+      "status": "completed",
+      "conclusion": "failure"
+    }
+  ],
+  "findings": [
+    "Windows fixture on/off could not build because the required ICO resource was absent.",
+    "All four Windows plugin test executables linked, then exited before test startup with STATUS_ENTRYPOINT_NOT_FOUND. The test executable lacked Common Controls v6 activation; imported v6 functions and the fixed PE manifest were independently inspected.",
+    "Native jobs were not run after the fixture matrix failed. Aggregate correctly failed."
+  ],
+  "repairs": [
+    "Add the fixture ICO by wrapping its existing PNG bytes and declare both icons.",
+    "Embed the Common Controls v6 manifest in Windows/MSVC plugin link targets, following the locked Tauri build implementation."
+  ],
+  "verificationBoundary": "Cross-linking and resource compilation validate the repairs locally; Windows test execution must be rerun in CI. No test or security check was skipped or relaxed."
+}
