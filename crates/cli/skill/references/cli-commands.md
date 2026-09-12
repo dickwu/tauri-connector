@@ -12,7 +12,7 @@ Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-
 | `TAURI_CONNECTOR_PORT` | discovered | Plugin WebSocket port |
 | `TAURI_CONNECTOR_PID_FILE` | | Explicit `.connector.json` path |
 | `TAURI_CONNECTOR_APP_ID` | | Filter discovered instances by app identifier |
-| `TAURI_CONNECTOR_WORKFLOW_TOKEN` | | Host workflow token (>= 32 bytes) for `workflow run/get/cancel/resume`; `workflow capabilities` needs none |
+| `TAURI_CONNECTOR_WORKFLOW_TOKEN` | | Host token (>= 32 bytes) for workflows and rich inspection/picker/capture APIs; base capabilities need none |
 
 ---
 
@@ -28,6 +28,34 @@ tauri-connector bridge
 ```
 
 `status` lists live and stale candidates. `bridge` shows connected webviews, pending evals, whether eval fallback is available (`fallbackAvailable`), and `workflowProtocolVersion` (`1` on plugins >= 0.15; the CLI checks it before sending any `workflow` request). `--window-id` is global and scopes snapshots, refs, interactions, screenshots, logs, and window operations to a specific Tauri window label.
+
+---
+
+## Authenticated inspection and active picker
+
+New clients require `inspectionProtocolVersion:1`; an older plugin reports unsupported. Never bypass that response with arbitrary page JavaScript. Bind explicit `--app-id`, `--app-instance-id`, endpoint and workspace/discovery context before collecting rich evidence. A conflicting explicit identity fails instead of switching to another running application.
+
+```bash
+tauri-connector --app-instance-id <verified-instance> identity
+tauri-connector --window main runtime-health --depth runtime --timeout-ms 2000
+tauri-connector --window main picker start --request-key isolated-pick-1 --timeout-ms 60000
+tauri-connector picker get <picker-id> --wait-ms 10000
+tauri-connector picker cancel <picker-id>
+tauri-connector --window main select-element --request-key isolated-pick-2 --timeout-ms 60000
+```
+
+`--window` aliases global `--window-id`. `picker start` returns immediately by default; `select-element` starts a real picker and waits up to 10000 ms by default. `--wait-ms` changes only response waiting, and never extends the picker deadline. Start/select accept `--no-screenshot`; do not combine it with explicit `--screenshot-source`. Source values are `auto`, `webview_native`, `window_native`, and `dom_rendering`. Retained get/cancel derive their target from the stored context.
+
+Credentials come from `TAURI_CONNECTOR_WORKFLOW_TOKEN` and are never printed or passed in process arguments. Picker stdout is a JSON report; user guidance belongs on stderr. Selected and successful explicit cancellation exit 0; a still-pending selection exits 2; failed, expired, invalidated and unsuccessful operations exit 1. A screenshot warning can accompany a successful selected result. Poll the same handle; after an uncertain start response, reuse the same key/options instead of creating another request. Candidates require current-context and strict semantic revalidation before any later action.
+
+```bash
+tauri-connector ipc capture start --result-policy preview --argument-policy metadata --commands fixture_save
+tauri-connector ipc capture status <capture-session-id>
+tauri-connector ipc query <capture-session-id> --limit 100 --max-bytes 32768
+tauri-connector ipc capture stop <capture-session-id>
+```
+
+Preview requires the host command/path allowlists (`TAURI_CONNECTOR_CAPTURE_PREVIEW_COMMANDS` and `TAURI_CONNECTOR_CAPTURE_PREVIEW_PATHS`); the client cannot grant itself preview access. Capture start also accepts `--follow-pages`; query supports `--cursor <nextCursor>` (an opaque string from the previous query, never a numeric offset), `--invocation-id`, and `--phase started|succeeded|failed`. Separate sessions do not clear each other. Inspect readiness, drop counts, gaps, pending and coverage; invoke success does not prove business persistence or causal association with a workflow step. Picker/capture/health never rewrite immutable workflow specs, original verdicts or quarantine.
 
 ---
 

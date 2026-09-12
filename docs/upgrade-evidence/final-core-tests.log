@@ -1,0 +1,213 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.90s
+     Running unittests src/main.rs (target/debug/deps/tauri_connector-adb0254a47f6635a)
+
+running 63 tests
+test commands::tests::sha256_hex_matches_known_vector ... ok
+test commands::tests::batch_spec_rejects_bad_mode_and_non_object ... ok
+test commands::tests::batch_spec_wraps_bare_array_and_injects_window_id ... ok
+test commands::tests::batch_spec_inline_json_is_used_verbatim ... ok
+test doctor::tests::cargo_version_only_inside_dependencies_tables ... ok
+test commands::tests::batch_spec_overrides_apply ... ok
+test doctor::tests::cargo_version_hint_is_major_minor ... ok
+test doctor::tests::build_features_accepts_array_and_string_forms ... ok
+test doctor::tests::classify_none_for_empty_inputs ... ok
+test doctor::tests::cargo_version_plain_string ... ok
+test doctor::tests::cargo_version_absent ... ok
+test doctor::tests::cargo_version_dev_dependencies ... ok
+test doctor::tests::cargo_version_commented_out_is_absent ... ok
+test doctor::tests::classify_legacy_layout ... ok
+test doctor::tests::classify_mixed_both_gates_present ... ok
+test doctor::tests::classify_mixed_capability_moved_but_dep_not_optional ... ok
+test doctor::tests::extract_cargo_dep_absent ... ok
+test doctor::tests::extract_cargo_dep_plain_string_is_not_optional ... ok
+test doctor::tests::features_declares_bare_form ... ok
+test doctor::tests::features_declares_dep_form ... ok
+test doctor::tests::features_declaring_dep_returns_custom_feature_names ... ok
+test doctor::tests::features_different_dep_returns_false ... ok
+test doctor::tests::features_does_not_match_subtable_header ... ok
+test doctor::tests::features_missing_returns_false ... ok
+test doctor::tests::extract_cargo_dep_target_specific_table ... ok
+test doctor::tests::classify_none_when_plugin_not_referenced ... ok
+test doctor::tests::extract_cargo_dep_inline_table_without_optional_flag ... ok
+test doctor::tests::extract_cargo_dep_inline_table_optional_true ... ok
+test doctor::tests::features_only_inside_features_section ... ok
+test doctor::tests::classify_feature_gated_layout ... ok
+test doctor::tests::cargo_version_inline_table ... ok
+test doctor::tests::classify_mixed_optional_dep_but_no_features_block ... ok
+test doctor::tests::classify_feature_gated_layout_with_custom_feature_name ... ok
+test doctor::tests::features_section_tolerates_trailing_comment ... ok
+test doctor::tests::extract_bool_field_true_and_false ... ok
+test doctor::tests::indent_snippet_prefixes_two_spaces ... ok
+test doctor::tests::json_fix_suggestions_collects_warn_and_fail_fixes ... ok
+test doctor::tests::mcp_command_transport_gets_fix_suggestion ... ok
+test doctor::tests::mcp_url_must_target_streamable_mcp ... ok
+test doctor::tests::package_deps_found_across_sections ... ok
+test doctor::tests::package_scripts_accept_short_feature_flag ... ok
+test doctor::tests::package_scripts_detect_dev_connector_feature ... ok
+test doctor::tests::package_scripts_reject_missing_feature_flag ... ok
+test doctor::tests::permissions_object_form ... ok
+test doctor::tests::permissions_string_form ... ok
+test doctor::tests::settings_detects_connector_hook ... ok
+test doctor::tests::settings_ignores_unrelated_hooks ... ok
+test doctor::tests::setup_pattern_as_str_round_trip ... ok
+test doctor::tests::source_feature_gates_extracts_custom_feature_names ... ok
+test snapshot::tests::modern_refs_never_fall_back_to_selector_or_first_named_element ... ok
+test snapshot::tests::ref_cache_key_includes_app_id_or_pid ... ok
+test snapshot::tests::modern_ref_cache_is_bound_to_host_instance_and_window ... ok
+test snapshot::tests::ref_cache_key_includes_window_id ... ok
+test update::tests::test_is_newer ... ok
+test update::tests::test_parse_version ... ok
+test update::tests::test_platform_target ... ok
+test doctor::tests::read_pid_file_parses_new_runtime_metadata ... ok
+test skills::tests::resolves_aliases ... ok
+test skills::tests::embedded_mcp_reference_mentions_agent_oriented_schema ... ok
+test skills::tests::embedded_docs_match_workspace_skill_docs_when_available ... ok
+test inspection_cli_tests::capture_and_health_help_match_contract ... ok
+test inspection_cli_tests::picker_lifecycle_and_convenience_help_match_contract ... ok
+test workflow_cli_tests::workflow_commands_parse_without_starting_a_client_executor ... ok
+
+test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/connector_client-95810a34cbeb7286)
+
+running 33 tests
+test batch::tests::bare_array_is_actions_shorthand ... ok
+test batch::tests::parallel_actions_overlap ... ok
+test batch::tests::hand_built_cycle_never_deadlocks ... ok
+test batch::tests::omit_result_drops_payload ... ok
+test batch::tests::synthesized_log_id_avoids_explicit_collision ... ok
+test batch::tests::validation_rejects_bad_specs ... ok
+test discovery::tests::candidates_include_documented_locations ... ok
+test batch::tests::validation_rejects_dependency_cycles ... ok
+test discovery::tests::instance_snapshot_dir_prefers_log_dir ... ok
+test batch::tests::unknown_spec_fields_are_rejected ... ok
+test outcome::tests::business_json_does_not_decide_success ... ok
+test batch::tests::soft_error_result_counts_as_failure ... ok
+test outcome::tests::error_codes_are_stable_and_unique ... ok
+test outcome::tests::known_wait_and_verification_failures_propagate ... ok
+test outcome::tests::undispatched_verified_state_is_not_success ... ok
+test batch::tests::run_from_value_saves_report ... ok
+test transport_tests::dropped_send_future_removes_waiter_without_remote_cancellation ... ok
+test identity::tests::canonical_workspace_boundaries_and_symlinks ... ok
+test transport_tests::explicit_disconnect_releases_every_waiter ... ok
+test transport_tests::failed_enqueue_removes_waiter ... ok
+test transport_tests::invalid_command_does_not_register_a_waiter ... ok
+test transport_tests::dropping_client_closes_socket_without_detached_writer ... ok
+test transport_tests::closed_socket_cleans_pending_and_preserves_unknown_remote_state ... ok
+test transport_tests::timeout_retains_unknown_remote_outcome_and_request_id ... ok
+test transport_tests::business_error_fields_remain_successful_data ... ok
+test transport_tests::protocol_error_retains_the_explicit_outcome_envelope ... ok
+test batch::tests::no_stop_on_error_continues_independent_actions ... ok
+test batch::tests::stop_on_error_skips_rest_sequentially ... ok
+test batch::tests::depends_on_orders_dag ... ok
+test batch::tests::continue_on_error_sequential_still_runs_rest_in_order ... ok
+test batch::tests::sequential_runs_in_order ... ok
+test batch::tests::per_action_timeout_fails_action ... ok
+test batch::tests::max_parallel_limits_concurrency ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/batch_outcomes.rs (target/debug/deps/batch_outcomes-9305893990ffc464)
+
+running 6 tests
+test explicit_inline_screenshot_and_missing_artifact_keep_original_data ... ok
+test ordinary_query_error_text_is_business_data ... ok
+test failed_verification_blocks_the_dependent_dispatch ... ok
+test report_persistence_failure_preserves_execution ... ok
+test batch_screenshots_default_to_saved_artifact_and_compact_inline_bytes ... ok
+test saved_report_matches_the_returned_report ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/discovery_identity.rs (target/debug/deps/discovery_identity-8c61cf36019ca30c)
+
+running 3 tests
+test explicit_identity_and_stale_pid_are_rejected ... ok
+test ambiguous_candidates_never_choose_recent_or_first ... ok
+test explicit_missing_pid_file_cannot_search_nearby_files ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/inspection_contract.rs (target/debug/deps/inspection_contract-0d8043ca42027ab2)
+
+running 13 tests
+test picker_exit_status_does_not_claim_waiting_or_cancelled_selection ... ok
+test protected_artifact_aliases_cannot_silently_change_the_requested_identity ... ok
+test picker_fingerprint_excludes_wait_image_and_token ... ok
+test picker_mcp_preserves_metadata_and_only_redacted_images ... ok
+test native_dimension_metadata_survives_mcp_image_extraction ... ok
+test picker_defaults_and_bounded_action_specific_fields ... ok
+test mcp_only_emits_negotiated_structured_content_and_keeps_text_images ... ok
+test screenshot_targets_are_static_strict_and_bounded ... ok
+test accepted_cancel_of_prior_terminal_picker_is_success_without_rewriting_its_state ... ok
+test shipped_picker_examples_parse_as_the_actual_contract ... ok
+test sdk_generates_one_request_key_and_retains_it_after_a_lost_response ... ok
+test matching_handshake_forwards_exact_inspection_and_rejects_instance_switch ... ok
+test unsupported_plugin_never_receives_picker_or_execute_js ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/workflow_contract.rs (target/debug/deps/workflow_contract-0f38dba8818a3006)
+
+running 15 tests
+test literal_business_json_is_not_recursively_interpreted ... ok
+test missing_pointer_differs_from_legal_null ... ok
+test pointers_preserve_null_escape_and_success_dependency ... ok
+test array_pointer_indices_are_not_coerced ... ok
+test modes_and_limits_fail_before_dispatch ... ok
+test schema_errors_do_not_echo_rejected_input_strings ... ok
+test strict_union_rejects_unrecognized_and_inapplicable_fields ... ok
+test result_self_expect_is_allowed_but_bindings_cannot_read_self ... ok
+test canonical_identity_normalizes_defaults_but_keeps_inputs_and_assertions ... ok
+test tool_binding_only_evaluates_declared_existing_slots ... ok
+test binding_validation_rejects_forward_missing_and_wrong_typed_inputs ... ok
+test required_identity_cannot_resolve_to_null_or_empty ... ok
+test condition_bounds_and_unsupported_semantics_are_enforced ... ok
+test shipped_workflow_examples_match_the_strict_contract ... ok
+test spec_and_value_size_and_locator_depth_are_bounded ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/connector_mcp_server-132f480aa5968359)
+
+running 15 tests
+test tools::tests::vendored_schema_matches_plugin_source ... ok
+test tools::tests::workflow_exit_codes_keep_pending_and_unknown_distinct_from_success ... ok
+test tools::tests::workflow_requests_are_forwarded_even_without_a_local_executor ... ok
+test tools::tests::tool_transport_failure_sets_mcp_error_flag ... ok
+test tools::tests::batch_actions_rejects_nesting_and_driver_session ... ok
+test tools::tests::batch_actions_reports_per_action_logs_when_disconnected ... ok
+test tools::tests::runtime_schema_contains_since_mark_and_window ... ok
+test tools::tests::artifact_schema_contains_prune_tool ... ok
+test tools::tests::batch_actions_schema_describes_spec ... ok
+test tools::tests::interact_schema_contains_drag_args ... ok
+test tools::tests::screenshot_schema_contains_artifact_args ... ok
+test tools::tests::dom_snapshot_schema_contains_budget_args ... ok
+test tools::tests::standalone_tools_are_embedded_plus_driver_session ... ok
+test tools::tests::wait_and_locator_schema_expose_agent_oriented_args ... ok
+test tools::tests::workflow_schemas_define_app_owned_lifecycle ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src/main.rs (target/debug/deps/tauri_connector_mcp-0ad3bfa45020f6ce)
+
+running 1 test
+test tests::standalone_uses_initialized_protocol_to_shape_tool_results ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests connector_client
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests connector_mcp_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

@@ -17,6 +17,12 @@ pub struct RefEntry {
     pub name: String,
     pub selector: String,
     pub nth: Option<usize>,
+    #[serde(default)]
+    pub identity: Option<String>,
+    #[serde(default, rename = "semanticVersion")]
+    pub semantic_version: Option<String>,
+    #[serde(default, rename = "pageEpoch")]
+    pub page_epoch: Option<String>,
 }
 
 pub type RefMap = HashMap<String, RefEntry>;
@@ -25,6 +31,10 @@ pub type RefMap = HashMap<String, RefEntry>;
 #[serde(rename_all = "camelCase")]
 pub struct RefCache {
     pub schema_version: u8,
+    #[serde(default)]
+    pub app_instance_id: Option<String>,
+    #[serde(default)]
+    pub host: Option<String>,
     pub app_id: Option<String>,
     pub app_name: Option<String>,
     pub pid: Option<u32>,
@@ -44,6 +54,19 @@ pub struct SnapshotRefs {
 }
 
 pub fn ref_cache_path(resolved: &ResolvedConnection, window_id: &str) -> PathBuf {
+    if let Some(identity) = &resolved.identity {
+        let key = serde_json::json!([
+            resolved.host,
+            resolved.port,
+            identity.app_instance_id,
+            window_id
+        ])
+        .to_string();
+        return cache_root().join(format!(
+            "{}.json",
+            crate::commands::sha256_hex(key.as_bytes())
+        ));
+    }
     let app = resolved
         .instance
         .as_ref()
@@ -77,6 +100,9 @@ pub fn load_ref_cache_full(
         return Ok(Some(cache));
     }
 
+    if resolved.identity.is_some() {
+        return Ok(None);
+    }
     let legacy = legacy_ref_cache_path();
     if let Ok(data) = std::fs::read_to_string(&legacy) {
         if let Ok(refs) = serde_json::from_str::<RefMap>(&data) {
@@ -86,6 +112,8 @@ pub fn load_ref_cache_full(
             );
             return Ok(Some(RefCache {
                 schema_version: 0,
+                app_instance_id: None,
+                host: None,
                 app_id: None,
                 app_name: None,
                 pid: None,
@@ -115,6 +143,11 @@ pub fn save_ref_cache(
     let instance = resolved.instance.as_ref();
     let cache = RefCache {
         schema_version: 1,
+        app_instance_id: resolved
+            .identity
+            .as_ref()
+            .map(|v| v.app_instance_id.clone()),
+        host: Some(resolved.host.clone()),
         app_id: instance.and_then(|i| i.app_id.clone()),
         app_name: instance.and_then(|i| i.app_name.clone()),
         pid: instance.map(|i| i.pid),
@@ -137,7 +170,14 @@ fn validate_ref_cache(
 ) -> Result<(), String> {
     let current = resolved.instance.as_ref();
     let current_app = current.and_then(|i| i.app_id.as_deref());
-    if cache.ws_port != resolved.port
+    if cache
+        .host
+        .as_deref()
+        .is_some_and(|host| host != resolved.host)
+        || resolved.identity.as_ref().is_some_and(|identity| {
+            cache.app_instance_id.as_deref() != Some(&identity.app_instance_id)
+        })
+        || cache.ws_port != resolved.port
         || cache.window_id != window_id
         || (cache.app_id.as_deref().is_some()
             && current_app.is_some()
@@ -235,13 +275,23 @@ pub fn build_resolve_and_act_script(
                 );
             };
 
+            if entry.identity.is_some()
+                || entry.semantic_version.is_some()
+                || entry.page_epoch.is_some()
+            {
+                let identity = serde_json::to_string(&entry.identity).unwrap();
+                let context=serde_json::json!({"semanticVersion":entry.semantic_version,"pageEpoch":entry.page_epoch}).to_string();
+                return format!(
+                    r#"(() => {{
+                    const el=window.__CONNECTOR_SEMANTIC__?.resolveRef({identity},{context}) || null;
+                    if (!el) return {{error:'target_changed: modern ref is stale; take a new snapshot'}};
+                    {action_js}
+                }})()"#
+                );
+            }
             let escaped_selector = entry.selector.replace('"', "\\\"");
             let escaped_name = entry.name.replace('"', "\\\"");
-            let escaped_name = if escaped_name.len() > 50 {
-                &escaped_name[..50]
-            } else {
-                &escaped_name
-            };
+            let escaped_name: String = escaped_name.chars().take(50).collect();
             let tag = &entry.tag;
             let role = entry.role.as_deref().unwrap_or("");
 
@@ -293,6 +343,7 @@ mod tests {
         ResolvedConnection {
             host: "127.0.0.1".to_string(),
             port,
+            identity: None,
             source: ConnectionSource::PidFile,
             instance: Some(ConnectorInstance {
                 pid,
@@ -301,6 +352,7 @@ mod tests {
                 bridge_port: Some(port - 1),
                 app_name: Some("Example App".to_string()),
                 app_id: app_id.map(str::to_string),
+                app_instance_id: None,
                 log_dir: None,
                 exe: None,
                 started_at: None,
@@ -330,5 +382,46 @@ mod tests {
         assert!(ref_cache_path(&pid_only, "main")
             .to_string_lossy()
             .contains("pid456"));
+    }
+    #[test]
+    fn modern_ref_cache_is_bound_to_host_instance_and_window() {
+        let mut first = resolved(Some("fixture"), 42, 9555);
+        first.identity = Some(connector_client::identity::AppIdentity {
+            app_instance_id: "instance-a".into(),
+            app_id: "fixture".into(),
+            pid: 42,
+            started_at: 1,
+            workspace_id: None,
+            workspace_path: None,
+            inspection_protocol_version: 1,
+            workflow_protocol_version: Some(1),
+        });
+        let mut second = first.clone();
+        second.host = "127-0-0-1".into();
+        assert_ne!(
+            ref_cache_path(&first, "main"),
+            ref_cache_path(&second, "main")
+        );
+        second = first.clone();
+        second.identity.as_mut().unwrap().app_instance_id = "instance-b".into();
+        assert_ne!(
+            ref_cache_path(&first, "main"),
+            ref_cache_path(&second, "main")
+        );
+        assert_ne!(
+            ref_cache_path(&first, "main"),
+            ref_cache_path(&first, "settings")
+        );
+    }
+
+    #[test]
+    fn modern_refs_never_fall_back_to_selector_or_first_named_element() {
+        let entry:RefEntry=serde_json::from_value(serde_json::json!({"tag":"button","role":"button","name":"save","selector":"#save","identity":"opaque","semanticVersion":"1","pageEpoch":"page"})).unwrap();
+        let refs = HashMap::from([("e1".into(), entry)]);
+        let script = build_resolve_and_act_script("@e1", &refs, "el.click();");
+        assert!(script.contains("resolveRef"));
+        assert!(script.contains("target_changed"));
+        assert!(!script.contains("querySelector"));
+        assert!(!script.contains("includes("));
     }
 }

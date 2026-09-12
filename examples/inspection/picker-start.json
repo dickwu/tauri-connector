@@ -1,0 +1,9 @@
+{
+  "action": "start",
+  "windowId": "main",
+  "requestKey": "fixture-pick-save-001",
+  "timeoutMs": 60000,
+  "waitMs": 0,
+  "captureScreenshot": true,
+  "screenshotSource": "auto"
+}

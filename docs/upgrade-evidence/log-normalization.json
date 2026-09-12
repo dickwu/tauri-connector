@@ -1,0 +1,110 @@
+{
+  "policy": "Only redundant terminal blank lines are removed from repository logs; command output and assertion content are unchanged. Historical raw-output digests can be reconstructed by appending the recorded number of newlines.",
+  "files": {
+    "docs/upgrade-evidence/runtime-rust-tests.txt": {
+      "rawSha256": "bc971a28e29b6b6dc401c01f95fe911f88ae0f3a6cc81af805d1d3b2411349db",
+      "repositorySha256": "9d3033a8875cf525b8d5e9e9334f96cf8b673b38510f038872e9d594ef5c52ea",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/capture-rust-tests.log": {
+      "rawSha256": "ca188a2784f02297a74943c35c78dd357ff73cdbd5c88e983c0d505421965e3a",
+      "repositorySha256": "82112f99e023bc77263e3ef6751f3931b52e9aabe47b0c119a201e9a3bd90a7d",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/picker-final-state-tests.log": {
+      "rawSha256": "05d6e4a47dde581ab22da89125e5dd2ec5cdd66e3aa2f49c70c67c47c0f83c55",
+      "repositorySha256": "a0abb8f25af6e43449abe217ae87a6bb5797c405367b4603c34d17b6bcae4a43",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/screenshot-reaper.log": {
+      "rawSha256": "af34c56fbc3e52b1c879cd2dbdc754059d8a5a6cf131a2e7bb4d61224fec179a",
+      "repositorySha256": "544caffde8fbb941429619a359b6962b7c26a47d979bb1dede173644e9a5a0c8",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/capture-expiry-rust.log": {
+      "rawSha256": "5e6da324ae7af70d475c9b288ed15f8b7047e282ec1565b2d3060faa0b5200b3",
+      "repositorySha256": "eb3fe977e132f076eb60015e371f34290c26538e2b9ad28f88d070387542b9eb",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/runtime-bound-context-tests.txt": {
+      "rawSha256": "0271904eca4d9ae957b066f9f476b1e708840f8c5c5ac000676b9121ea2676c6",
+      "repositorySha256": "207a2db8210ed6dde1877f3c43aee49859cebf17371278bd4790a0ba243ad451",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/adapters-core.log": {
+      "rawSha256": "1b666e00e7749c42981eecb2ab26baafc21d3099dbd137a2ebd03e16297199f1",
+      "repositorySha256": "a05a4fae19853c43f42cee526cbd58fbb2ff6b5f679b88ac9328992f28092a87",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/adapters-screenshot-schema.log": {
+      "rawSha256": "030ac6bfdaa31b766edba04dc8e02ab98b5a9ba39dc4dfaf1048e0d85d5c504e",
+      "repositorySha256": "35c05aaede7ca58cc8bf563264c91af65224643cb31389eb8e0292b1283cbe91",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/final-core-tests.log": {
+      "rawSha256": "9a59d6944be44f3c93aa49a62317a672701639dbb271abeb4b17d4a407696558",
+      "repositorySha256": "e7fb158213fa75a1de5547e211700cd6793cc89bce299c9c2322e1db606b8123",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/picker-rust-tests.log": {
+      "rawSha256": "34be08442193c41ad124e5e18becc89de56924748886216d95fbad1b9a018e7c",
+      "repositorySha256": "34825d82a23142297aac1a488d1f4cc0e2938a57af1025ae3c3fa1a05fb2b27c",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/v016-final-rust.log": {
+      "rawSha256": "b6a88a8af072bbeba1eb46413b13797e6ec709b8616ba90d671c0067ef09fe63",
+      "repositorySha256": "509267ab5f98879ecc3c985917740102ddcd6ca5d29726bdc7de32be966cbfe6",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/v016-workspace-tests.log": {
+      "rawSha256": "354d92bab6a1b8afb4f6eaff969eb95408fa1fef9aa7ef1240c213670f007d11",
+      "repositorySha256": "3fb26dd492c8e90af11e8b1e2af3c797b16be3fe4f8acde3f7cd47410d587ae5",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/navigation-race-green.log": {
+      "rawSha256": "07ad64640c490f27f4f08471991bffe42d02eab2399e9194e83a495382063921",
+      "repositorySha256": "ce5bead01a443db6b0fc84cf731a8003bd8cd36382e39e16133ff2884de1cd92",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/capabilities-base-tests.txt": {
+      "rawSha256": "a2ed35c32c6537cc34abc5b5f0d35458830c9dfa396111bec7b525486078aa76",
+      "repositorySha256": "ae41325a751323563ff80cbcc890bb8fa3197d4f26d31e70870ac734627dc7a6",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/adapters-plugin.log": {
+      "rawSha256": "08d3db33becdbba8c613026aa1a1ebd9861c81797362f0f47a287b7f0fdbf2d7",
+      "repositorySha256": "44148acb8274b9f2b102e960b736f5976be5edb9241af64e3a7b3727cb4d9658",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/final-plugin-tests.log": {
+      "rawSha256": "fb5bee050890089b0a0e3d7a92b46408e8a2bb8e1730258d13b4b35a2acecfe7",
+      "repositorySha256": "948d7552bbe7bfd1d31171b844cb0027d4f77f77e516d89f0a7cbea4909effb8",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/capabilities-all-feature-tests.txt": {
+      "rawSha256": "bdf9c2fd73deed53f6160f65cfc1424b8c4a67b1980c3cd56c772daa9894a546",
+      "repositorySha256": "8bcf216450ab5403af8fd487bd315a4aff53018f37504d160fc4adafbb48afe9",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/semantic-rust.log": {
+      "rawSha256": "850f4fe5791b2e1ba5274b3c6cee8aa5186e0ad8257a4645d96bf4b7ab5732f0",
+      "repositorySha256": "ed3ef39de9788361c5b4e9fa5dcfb577a6397b27e93cb525ed37a5d5dd06096c",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/picker-navigation-idempotence.log": {
+      "rawSha256": "c76e0eb9d16f62ab719dafc97b5aa4e143b52fab2b58c7927b3a0721ffdda3d9",
+      "repositorySha256": "1107042ada9d3c3a62f6dba9d9906597281efaaf5629656ebdb118ecb082aa16",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/adapters-host.log": {
+      "rawSha256": "106b5703913364c8671a74b9b1fc2d9b050c64978d334caee320d8158e9e1ab4",
+      "repositorySha256": "ba5b6b0dc6ce669e0198e28ab82dcd4025d2cf52a807fbcc7a09562a8b183244",
+      "trailingNewlinesRemoved": 1
+    },
+    "docs/upgrade-evidence/runtime-identity-tests.txt": {
+      "rawSha256": "58c7ea964a01ec5852b96db4a9c92038fd2228a91a314ebf2be0ef98c9bd254f",
+      "repositorySha256": "3ed5e680b36f3a6c1fe5685a8132cfd303326669f7b4b4abe83c5c059f38e72f",
+      "trailingNewlinesRemoved": 1
+    }
+  }
+}

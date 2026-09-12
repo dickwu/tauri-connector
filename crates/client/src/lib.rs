@@ -16,6 +16,8 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 pub mod batch;
 pub mod discovery;
+pub mod identity;
+pub mod inspection;
 pub mod outcome;
 pub mod workflow;
 
@@ -54,6 +56,7 @@ pub struct ConnectorClient {
     write_tx: Option<mpsc::UnboundedSender<String>>,
     pending: PendingMap,
     _reader_handle: Option<tokio::task::JoinHandle<()>>,
+    expected_instance: Mutex<Option<String>>,
 }
 
 impl ConnectorClient {
@@ -62,6 +65,7 @@ impl ConnectorClient {
             write_tx: None,
             pending: Arc::new(Mutex::new(HashMap::new())),
             _reader_handle: None,
+            expected_instance: Mutex::new(None),
         }
     }
 
@@ -129,8 +133,134 @@ impl ConnectorClient {
 
         self.write_tx = Some(write_tx);
         self._reader_handle = Some(reader_handle);
-
+        let pinned = self.expected_instance.lock().unwrap().is_some();
+        if pinned {
+            let token = std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN").ok();
+            if let Err(error) = self.verify_app_identity(token.as_deref()).await {
+                self.disconnect().await;
+                return Err(error);
+            }
+        }
         Ok(())
+    }
+
+    /// Pin the application expected by discovery or a previously returned handle.
+    /// Reconnecting does not clear this binding and cannot silently switch applications.
+    pub fn bind_instance(&self, instance: &str) -> Result<(), String> {
+        let mut expected = self.expected_instance.lock().unwrap();
+        if expected.as_deref().is_some_and(|old| old != instance) {
+            return Err("app_identity_mismatch: client is bound to another app instance".into());
+        }
+        *expected = Some(instance.to_owned());
+        Ok(())
+    }
+
+    pub async fn verify_app_identity(
+        &self,
+        auth_token: Option<&str>,
+    ) -> Result<identity::AppIdentity, String> {
+        let mut args = serde_json::json!({});
+        if let Some(token) = auth_token {
+            args["authToken"] = serde_json::json!(token);
+        }
+        let identity = identity::AppIdentity::parse(
+            self.send_with_timeout(
+                serde_json::json!({"type":"inspection","operation":"app_identity","args":args}),
+                2000,
+            )
+            .await?,
+        )?;
+        self.bind_instance(&identity.app_instance_id)?;
+        Ok(identity)
+    }
+
+    /// Forward to the application-owned inspection service after capability and identity checks.
+    /// A failed response is never retried and no arbitrary JS fallback exists.
+    pub async fn inspect(&self, operation: &str, arguments: &Value) -> Result<Value, String> {
+        let mut args = arguments.clone();
+        if !args.is_object() {
+            return Err("invalid_arguments: arguments must be an object".into());
+        }
+        if args.get("authToken").is_none() {
+            if let Ok(token) = std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN") {
+                args["authToken"] = serde_json::json!(token);
+            }
+        }
+        for field in [
+            "pickerId",
+            "captureSessionId",
+            "artifactId",
+            "artifact",
+            "before",
+            "after",
+            "baselineId",
+            "currentId",
+        ] {
+            if let Some(instance) = args
+                .get(field)
+                .and_then(Value::as_str)
+                .and_then(identity::instance_from_handle)
+            {
+                self.bind_instance(instance)?;
+            }
+        }
+        if operation == "webview_select_element" {
+            let request = inspection::PickerRequest::parse(&args).map_err(|e| e.to_string())?;
+            if request.action == "start" && request.request_key.is_none() {
+                args["requestKey"] = serde_json::json!(inspection::new_request_key());
+            }
+        }
+        let capabilities = self
+            .send_with_timeout(serde_json::json!({"type":"bridge_status"}), 2000)
+            .await?;
+        if capabilities
+            .get("inspectionProtocolVersion")
+            .and_then(Value::as_u64)
+            != Some(inspection::INSPECTION_PROTOCOL_VERSION)
+        {
+            return Err("capability_unavailable: connected app does not support inspection protocol v1; upgrade the plugin".into());
+        }
+        let identity = self
+            .verify_app_identity(args.get("authToken").and_then(Value::as_str))
+            .await?;
+        if operation == "app_identity" {
+            return Ok(serde_json::json!(identity));
+        }
+        let wait_ms = args
+            .get("waitMs")
+            .and_then(Value::as_u64)
+            .unwrap_or(10000)
+            .min(10000);
+        let transport_timeout = if operation == "webview_screenshot" {
+            args.get("timeoutMs")
+                .and_then(Value::as_u64)
+                .unwrap_or(10000)
+                .min(30000)
+                + 5000
+        } else {
+            wait_ms + 15000
+        };
+        let recovery_key = args.get("requestKey").cloned();
+        self.send_with_timeout(
+            serde_json::json!({"type":"inspection","operation":operation,"args":args}),
+            transport_timeout,
+        )
+        .await
+        .map_err(|error| {
+            if operation != "webview_select_element" {
+                return error;
+            }
+            if let Some(key) = recovery_key {
+                let mut report = serde_json::from_str::<Value>(&error)
+                    .ok()
+                    .filter(Value::is_object)
+                    .unwrap_or_else(|| serde_json::json!({"error":error}));
+                report["requestKey"] = key;
+                report.to_string()
+            } else {
+                error
+            }
+        })
     }
 
     /// Disconnect from the WebSocket server.

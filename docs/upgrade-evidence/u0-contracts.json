@@ -1,0 +1,25 @@
+{
+  "layer": "node-infrastructure-contract",
+  "command": "node --test scripts/upgrade-contracts.test.mjs",
+  "exitCode": 0,
+  "passed": 4,
+  "failed": 0,
+  "logSha256": "c818b1046b154cbc7f0f31ed8d512c44f1cb94e1583500a945cbf0cff61d7c30",
+  "tests": [
+    "UP-T002 a behavioral mutation of the shipped input helper fails real regression assertions",
+    "UP-T003 test dependencies are exact, locked and developer-path independent",
+    "UP-T004 UP-T055 plugin checks declare all desktop platforms and feature combinations",
+    "UP-T008 aggregate rejects failed, skipped, cancelled and absent required jobs"
+  ],
+  "limits": [
+    "These are local contract assertions, not a remote CI run or per-platform compilation."
+  ],
+  "dependencyLicenses": {
+    "playwright@1.63.0": "Apache-2.0",
+    "playwright-core@1.63.0": "Apache-2.0",
+    "react@19.3.0": "MIT",
+    "react-dom@19.3.0": "MIT",
+    "scheduler@0.28.0": "MIT"
+  },
+  "licenseEvidence": "Installed package.json license fields read locally after npm ci; no upstream code was transplanted."
+}

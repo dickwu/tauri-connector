@@ -8,7 +8,7 @@ publish = false
 
 [features]
 default = ["dev-connector"]
-dev-connector = ["dep:tauri-plugin-connector"]
+dev-connector = ["dep:tauri-plugin-connector", "tauri-plugin-connector/native-screenshot"]
 
 [build-dependencies]
 tauri-build = "2"

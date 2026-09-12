@@ -1,0 +1,63 @@
+{
+  "platform": "darwin",
+  "layer": "native_webview",
+  "input": "none",
+  "tests": [
+    {
+      "id": "UP-T036",
+      "name": "anonymous rich health rejected",
+      "passed": true
+    },
+    {
+      "id": "UP-T033",
+      "name": "native read-only probe does not install missing runtime",
+      "passed": true
+    },
+    {
+      "id": "UP-T009",
+      "name": "native cold runtime handshake confirms complete context",
+      "passed": true
+    },
+    {
+      "id": "UP-PK029",
+      "name": "native explicit cancel confirms guard cleanup",
+      "passed": true
+    },
+    {
+      "id": "UP-PK029",
+      "name": "100 native WebView start/cancel cycles release DOM, guard, leases and bridge waiters",
+      "passed": true,
+      "cycles": 100
+    }
+  ],
+  "passed": true,
+  "preparation": "Explicit activation of the owned native fixture PID; no OS input events posted",
+  "context": {
+    "appId": "dev.connector.workflow-fixture.runtime.7a618237-f4a1-4813-9dba-d00466e0f609",
+    "appInstanceId": "8fb64ddd-8085-435b-ad14-a3501d64cdda",
+    "bundleHash": "fnv1a64:0ca54740d91d0491",
+    "origin": "tauri://localhost",
+    "pageEpoch": "08e2e259-d631-4535-8db0-9f91cfcfe8e8",
+    "runtimeId": "c1c7efba-c29f-4b11-9057-a895b548d4bd",
+    "runtimeVersion": "1",
+    "semanticVersion": "1",
+    "windowId": "main",
+    "windowInstanceId": "404fd9ce-f106-4f81-844d-f6f8129eb503"
+  },
+  "diagnostics": {
+    "activeObservers": 1,
+    "bundleBytesSent": 100883,
+    "commandBytesSent": 6042,
+    "inputGuard": {
+      "active": true,
+      "draining": false,
+      "early": true,
+      "heldInputs": 0
+    },
+    "installAttempts": 1,
+    "installSuccesses": 1,
+    "runtimeReuses": 2,
+    "staleContextRejects": 0
+  },
+  "cycle": 99
+}

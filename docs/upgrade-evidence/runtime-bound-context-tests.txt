@@ -1,0 +1,29 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running unittests src/lib.rs (target/debug/deps/tauri_plugin_connector-7506f1c7f230c652)
+
+running 23 tests
+test bridge::transport_tests::eval_embeds_script_and_identity_as_json_data ... ok
+test bridge::transport_tests::cleanup_guard_runs_on_error_and_future_drop ... ok
+test bridge::transport_tests::bridge_hello_requires_host_window_binding ... ok
+test bridge::transport_tests::fallback_does_not_reset_a_spent_deadline ... ok
+test bridge::transport_tests::rejected_ws_enqueue_cleans_up_and_allows_eval_with_same_id ... ok
+test bridge::transport_tests::disconnect_rejects_only_its_own_pending_requests_as_unknown ... ok
+test bridge::transport_tests::dropping_bridge_waiter_cleans_up_without_replaying_or_cancelling ... ok
+test bridge::transport_tests::duplicate_inflight_id_does_not_replace_waiter_or_dispatch_twice ... ok
+test bridge::transport_tests::typed_calls_require_the_exact_window_label ... ok
+test bridge::transport_tests::ws_exception_does_not_attempt_eval_replay ... ok
+test bridge::transport_tests::stale_connection_cannot_resolve_another_connections_operation ... ok
+test bridge::transport_tests::health_separates_transport_from_unavailable_runtime_without_repair ... ok
+test bridge::transport_tests::ws_timeout_does_not_attempt_eval_replay ... ok
+test bridge::transport_tests::stale_fully_bound_cleanup_never_installs_a_new_runtime ... ok
+test bridge::transport_tests::anonymous_capability_views_match_without_installation_or_private_state ... ok
+test bridge::transport_tests::revocation_during_install_prevents_final_business_dispatch ... ok
+test bridge::transport_tests::runtime_business_error_is_never_reprepared_or_replayed ... ok
+test bridge::transport_tests::stale_operation_context_never_enters_business_transport ... ok
+test bridge::transport_tests::matching_fully_bound_operation_reuses_existing_runtime_without_install ... ok
+test bridge::transport_tests::failed_installation_is_shared_and_not_repeated_in_same_document ... ok
+test bridge::transport_tests::concurrent_runtime_preparation_is_single_flight ... ok
+test bridge::transport_tests::warm_runtime_transports_one_bundle_for_twenty_operations ... ok
+test bridge::transport_tests::ws_slow_completion_waits_beyond_the_old_two_second_limit ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 131 filtered out; finished in 2.12s

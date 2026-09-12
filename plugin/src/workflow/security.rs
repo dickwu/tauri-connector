@@ -6,6 +6,18 @@
 
 use serde_json::{Map, Value, json};
 
+const CONTEXT_METADATA: &[&str] = &[
+    "appId",
+    "appInstanceId",
+    "windowId",
+    "windowInstanceId",
+    "pageEpoch",
+    "runtimeId",
+    "runtimeVersion",
+    "semanticVersion",
+    "bundleHash",
+];
+
 const REPORT_METADATA: &[&str] = &[
     "runId",
     "appInstanceId",
@@ -68,6 +80,7 @@ pub(super) fn public_report(report: &Value, secrets: &[String]) -> Value {
                             .collect(),
                     ),
                     "blockedOutcome" => public_outcome(value, secrets),
+                    "dispatchContext" => dispatch_metadata(value),
                     "events" => Value::Array(
                         value
                             .as_array()
@@ -159,11 +172,18 @@ pub(super) fn journal_report(report: &Value, _secrets: &[String]) -> Value {
     projected
 }
 
-fn dispatch_metadata(value: &Value) -> Value {
+pub(super) fn dispatch_metadata(value: &Value) -> Value {
     pick(
         value,
         &[
             "requestId",
+            "appId",
+            "appInstanceId",
+            "windowInstanceId",
+            "runtimeId",
+            "runtimeVersion",
+            "semanticVersion",
+            "bundleHash",
             "windowId",
             "pageEpoch",
             "attempt",
@@ -194,7 +214,7 @@ fn coverage_metadata(value: &Value) -> Value {
 fn evidence_metadata(value: &Value) -> Value {
     let mut projected = pick(value, &["captureKind", "available", "scope", "truncated"]);
     if let Some(context) = value.get("context") {
-        projected["context"] = pick(context, &["appInstanceId", "windowId", "pageEpoch"]);
+        projected["context"] = pick(context, CONTEXT_METADATA);
     }
     if let Some(elements) = value.get("elements").and_then(Value::as_array) {
         projected["elements"] = Value::Array(
@@ -443,5 +463,27 @@ mod tests {
             "[redacted]"
         );
         assert_eq!(redact_string("safe", &[]), "safe");
+    }
+}
+
+#[cfg(test)]
+mod inspection_context_tests {
+    use super::*;
+    #[test]
+    fn up_t012_context_keeps_lifecycle_identity_without_private_page_fields() {
+        let context = json!({"appId":"fixture","appInstanceId":"app","windowId":"main","windowInstanceId":"window","pageEpoch":"page","runtimeId":"runtime","runtimeVersion":"1","semanticVersion":"1","bundleHash":"hash","url":"private-query","authToken":"private"});
+        let report = json!({"dispatchContext":context,"evidence":{"e":{"context":context}}});
+        let public = public_report(&report, &[]);
+        assert_eq!(public["evidence"]["e"]["context"]["runtimeId"], "runtime");
+        assert_eq!(
+            public["evidence"]["e"]["context"]["windowInstanceId"],
+            "window"
+        );
+        assert!(public["evidence"]["e"]["context"].get("url").is_none());
+        let journal = journal_report(&report, &[]);
+        assert_eq!(journal["dispatchContext"]["runtimeId"], "runtime");
+        assert_eq!(journal["dispatchContext"]["windowInstanceId"], "window");
+        assert!(journal["dispatchContext"].get("url").is_none());
+        assert!(journal.get("evidence").is_none());
     }
 }

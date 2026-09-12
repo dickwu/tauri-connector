@@ -6,52 +6,11 @@
                 const b = normalize(expected);
                 return query.exact ? a === b : a.toLowerCase().includes(b.toLowerCase());
             };
-            const implicitRole = (el) => {
-                const tag = (el.tagName || '').toLowerCase();
-                const type = (el.getAttribute('type') || '').toLowerCase();
-                if (el.getAttribute('role')) return el.getAttribute('role');
-                if (tag === 'button') return 'button';
-                if (tag === 'a' && el.hasAttribute('href')) return 'link';
-                if (tag === 'select') return 'combobox';
-                if (tag === 'textarea') return 'textbox';
-                if (tag === 'img') return 'img';
-                if (/^h[1-6]$/.test(tag)) return 'heading';
-                if (tag === 'input') {
-                    if (['button', 'submit', 'reset'].includes(type)) return 'button';
-                    if (type === 'checkbox') return 'checkbox';
-                    if (type === 'radio') return 'radio';
-                    if (type === 'range') return 'slider';
-                    return 'textbox';
-                }
-                return '';
-            };
-            const labelText = (el) => {
-                const id = el.id;
-                const labels = [];
-                if (el.labels) for (const label of el.labels) labels.push(label.textContent || '');
-                if (id) {
-                    for (const label of document.querySelectorAll('label[for="' + CSS.escape(id) + '"]')) {
-                        labels.push(label.textContent || '');
-                    }
-                }
-                const wrapping = el.closest && el.closest('label');
-                if (wrapping) labels.push(wrapping.textContent || '');
-                return normalize(labels.join(' '));
-            };
-            const accessibleName = (el) => {
-                const labelledBy = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
-                    .map((id) => document.getElementById(id)?.textContent || '').join(' ');
-                return normalize(
-                    el.getAttribute('aria-label') ||
-                    labelledBy ||
-                    labelText(el) ||
-                    el.getAttribute('alt') ||
-                    el.getAttribute('title') ||
-                    el.getAttribute('placeholder') ||
-                    el.textContent ||
-                    ''
-                );
-            };
+            const semantic = window.__CONNECTOR_SEMANTIC__;
+            if (!semantic) return {code:'runtime_missing', error:'Trusted semantic runtime is missing'};
+            const implicitRole = semantic.getRole;
+            const accessibleName = semantic.getAccessibleName;
+            const labelText = el => semantic.getLabelTexts(el).join(' ');
             const cssPath = (el) => {
                 if (!el || el.nodeType !== 1) return '';
                 if (el.id) return '#' + CSS.escape(el.id);
@@ -69,9 +28,11 @@
                 }
                 return parts.join(' > ');
             };
-            const all = Array.from(document.querySelectorAll('*'));
+
             const textOnly = ['role', 'label', 'placeholder', 'alt', 'title', 'testId', 'name'].every(key => query[key] == null);
-            const filtered = all.filter((el) => {
+            const findMatches = () => Array.from(document.querySelectorAll('*')).filter((el) => {
+                if (el.isConnected === false || semantic.isConnectorOwned(el)) return false;
+                if ((query.role != null || query.label != null) && !semantic.isAccessibilityExposed(el)) return false;
                 if (query.role != null && !matchText(implicitRole(el), query.role)) return false;
                 if (query.text != null) {
                     if (!matchText(el.textContent || '', query.text)) return false;
@@ -87,6 +48,7 @@
                 }
                 return query.name == null || matchText(accessibleName(el), query.name);
             });
+            const filtered = findMatches();
             const count = filtered.length;
             let index = query.last ? count - 1 : 0;
             if (query.nth !== null && query.nth !== undefined) index = Number(query.nth);
@@ -95,6 +57,12 @@
             if (!el) return { count, index, code: 'target_not_found', error: 'No element matched locator' };
             const action = query.action || null;
             const value = query.value || '';
+            if (action && action !== 'text' && count > 1 && !query.first && !query.last && query.nth == null) return {count, code:'ambiguous_target', error:'Locator matched multiple elements; provide a unique locator or explicit index'};
+            if (action && action !== 'text') {
+                if (!semantic.checkActionability(el,action).actionable) return {count,index,code:'not_actionable',error:'Target is not actionable'};
+                const current = findMatches();
+                if (current.length !== count || current[index] !== el) return {count,index,code:'target_changed',error:'Target changed before dispatch'};
+            }
             if (action) {
                 if (action === 'click') el.click();
                 else if (action === 'hover') {
@@ -118,12 +86,15 @@
                 index,
                 action,
                 interactionMode: action && action !== 'text' ? 'synthetic' : undefined,
-                value: action === 'text' ? normalize(el.textContent || '') : undefined,
+                value: action === 'text' ? (semantic.isSensitive(el) ? '[redacted]' : normalize(el.textContent || '')) : undefined,
                 matched: {
                     tag: el.tagName.toLowerCase(),
                     role: implicitRole(el) || null,
-                    name: accessibleName(el),
-                    text: normalize(el.textContent || '').slice(0, 300),
+                    name: semantic.isSensitive(el) ? '[redacted]' : accessibleName(el),
+                    description: semantic.isSensitive(el) ? '[redacted]' : semantic.getAccessibleDescription(el),
+                    states: semantic.getAriaStates(el),
+                    semanticVersion: semantic.version,
+                    text: semantic.isSensitive(el) ? '[redacted]' : normalize(el.textContent || '').slice(0, 300),
                     selector: cssPath(el),
                     rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
                     visible: !!(rect.width || rect.height || el.getClientRects().length)

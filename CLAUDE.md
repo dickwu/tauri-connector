@@ -30,7 +30,7 @@ cargo test -p connector-cli -p connector-mcp-server -p connector-client   # what
 If `plugin/` changed, also:
 
 ```bash
-cargo test -p tauri-plugin-connector                        # works on macOS; CI can't run it
+cargo test -p tauri-plugin-connector                        # desktop CI matrix; non-Unix journal tests assert fail-closed
 cargo check -p tauri-plugin-connector --no-default-features # docs.rs builds this way
 ```
 
@@ -38,7 +38,7 @@ then verify against a running app (`/verify-plugin-live`).
 
 ## Gotchas
 
-- **CI never compiles `plugin/`** — the Ubuntu runner lacks WebKit/GTK, so ci.yml only checks/tests the other 3 crates. Plugin changes must be verified locally.
+- **CI checks `plugin/` on all three desktop platforms**, installs Linux WebKit/GTK dependencies, verifies screenshot feature combinations and runs isolated native fixture smoke. Windows workflow journal tests assert the existing fail-closed boundary; protected memory inspection is tested separately. Browser helper tests use the locked root npm dependencies.
 - **MCP tool schemas live in `plugin/src/mcp_tool_schema.rs`** (canonical), with a byte-for-byte vendored copy at `crates/mcp-server/src/mcp_tool_schema.rs` so the standalone crate packages self-contained for crates.io (a `#[path]` include of the plugin file breaks `cargo publish` — the file falls outside the tarball). After editing the canonical file, re-copy it over the vendored one. Keep the module serde_json-only (no Tauri imports) or the mcp-server build breaks on CI, and keep it to a single `use` line — each crate formats its copy, and editions 2021/2024 sort multi-item imports differently, making `cargo fmt --all -- --check` fail forever. After changing tool definitions, run `cargo test -p connector-mcp-server` — parity tests enforce that the copies are identical and that embedded and standalone schemas match.
 - **`skill/` is shipped product**, not local config: it's the Claude Code skill users install via `npx skills add dickwu/tauri-connector`. Behavior changes to CLI/MCP tools need matching updates in `skill/SKILL.md` and `skill/references/`, then a re-copy into `crates/cli/skill/` (a connector-cli test byte-compares them). `skill/SKILL.md` frontmatter `version:` must match the workspace crate version.
 - **`.claude/` is gitignored** — skills and settings there are local-only, not part of the repo.

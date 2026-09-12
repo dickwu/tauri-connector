@@ -1,0 +1,6 @@
+[Error: ENOENT: no such file or directory, open '<workspace>/plugin/src/semantic/core.js'] {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '<workspace>/plugin/src/semantic/core.js'
+}

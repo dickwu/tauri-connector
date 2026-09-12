@@ -1,0 +1,137 @@
+{
+  "platform": "darwin",
+  "layer": "native_webview",
+  "input": "none",
+  "tests": [
+    {
+      "id": "UP-T036",
+      "name": "anonymous rich health rejected",
+      "passed": true
+    },
+    {
+      "id": "UP-T033",
+      "name": "native read-only probe does not install missing runtime",
+      "passed": true
+    },
+    {
+      "id": "UP-T009",
+      "name": "native cold runtime handshake confirms complete context",
+      "passed": true
+    },
+    {
+      "id": "UP-PK029",
+      "name": "native explicit cancel confirms guard cleanup",
+      "passed": true
+    }
+  ],
+  "passed": false,
+  "context": {
+    "appId": "dev.connector.workflow-fixture.runtime.593a2ce0-2f32-4476-8a34-e8aaf3673670",
+    "appInstanceId": "bf3740ea-f0a2-4231-82d2-ba429312899b",
+    "bundleHash": "fnv1a64:a8900766a426704c",
+    "origin": "tauri://localhost",
+    "pageEpoch": "3eb2d0e7-0989-485a-8cee-e7284605205d",
+    "runtimeId": "2068a5c7-1afd-45b3-8b2e-c20cfb8d3d1d",
+    "runtimeVersion": "1",
+    "semanticVersion": "1",
+    "windowId": "main",
+    "windowInstanceId": "0eb13b47-dde3-41e5-b262-fdad461b7010"
+  },
+  "diagnostics": {
+    "activeObservers": 1,
+    "bundleBytesSent": 100883,
+    "commandBytesSent": 6042,
+    "inputGuard": {
+      "active": true,
+      "draining": false,
+      "early": true,
+      "heldInputs": 0
+    },
+    "installAttempts": 1,
+    "installSuccesses": 1,
+    "runtimeReuses": 2,
+    "staleContextRejects": 0
+  },
+  "cycle": 3,
+  "cleanupFailure": {
+    "cycle": 3,
+    "picker": {
+      "businessActionDispatched": false,
+      "cleanup": {
+        "leaseReleased": false,
+        "status": "unconfirmed"
+      },
+      "context": {
+        "appId": "dev.connector.workflow-fixture.runtime.593a2ce0-2f32-4476-8a34-e8aaf3673670",
+        "appInstanceId": "bf3740ea-f0a2-4231-82d2-ba429312899b",
+        "bundleHash": "fnv1a64:a8900766a426704c",
+        "origin": "tauri://localhost",
+        "pageEpoch": "3eb2d0e7-0989-485a-8cee-e7284605205d",
+        "runtimeId": "2068a5c7-1afd-45b3-8b2e-c20cfb8d3d1d",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "0eb13b47-dde3-41e5-b262-fdad461b7010"
+      },
+      "deadlineAtMs": 1789245758166,
+      "error": null,
+      "limitations": [
+        "No isolation guarantee against earlier page-global listeners",
+        "Light DOM element boundaries only",
+        "Selection does not authorize workflow spec mutation",
+        "Screenshot and selection are separate observations"
+      ],
+      "pickerId": "bf3740ea-f0a2-4231-82d2-ba429312899b:picker:90b4a4a2-1f55-41f1-af35-d9666f3c4371",
+      "requestKey": "69eca217-02ba-4b8a-ad5e-55b25cb92d53",
+      "resultComplete": true,
+      "retainedUntil": 1789245998173,
+      "revision": 6,
+      "screenshot": {
+        "status": "not_requested"
+      },
+      "selection": null,
+      "sideEffects": [],
+      "status": "cancelled",
+      "warnings": [
+        "cleanup_unconfirmed"
+      ]
+    },
+    "health": {
+      "checks": {
+        "bridge": {
+          "connected": true,
+          "durationMs": 2000,
+          "status": "unresponsive"
+        },
+        "runtime": {
+          "durationMs": 0,
+          "status": "unresponsive"
+        },
+        "transport": {
+          "durationMs": 0,
+          "status": "responsive"
+        }
+      },
+      "conclusion": "runtime_probe_not_completed",
+      "context": {
+        "appInstanceId": "bf3740ea-f0a2-4231-82d2-ba429312899b",
+        "windowId": "main"
+      },
+      "diagnostics": {
+        "activeObservers": null,
+        "bundleBytesSent": 100883,
+        "commandBytesSent": 115665,
+        "inputGuard": null,
+        "installAttempts": 1,
+        "installSuccesses": 1,
+        "runtimeReuses": 53,
+        "staleContextRejects": 0
+      },
+      "executionReplayed": false,
+      "limitations": [
+        "Probe success or timeout does not establish the original operation outcome or a deadlock"
+      ]
+    }
+  },
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'unconfirmed'\n- 'confirmed'\n\n    at file://<workspace>/examples/workflow-fixture/scripts/runtime-native-smoke.mjs:68:14\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)"
+}

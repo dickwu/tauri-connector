@@ -1,0 +1,90 @@
+{
+  "recordedAt": "2026-09-12T17:47:28.050178+00:00",
+  "scope": "Platform-specific private workflow journal verification; no production workflow logic changed.",
+  "runs": [
+    {
+      "command": "cargo test --locked -p tauri-plugin-connector workflow::service",
+      "layer": "macos_rust_tests",
+      "exitCode": 0,
+      "logSha256": "3a1b74f50d1e4be6385b2397f4ec8d1ecfc891c2e48e5342f2cb90c827666bc9",
+      "logPath": "/tmp/tauri-upgrade-baseline/platform-workflow-tests.log",
+      "summary": [
+        "Finished `test` profile [unoptimized + debuginfo] target(s) in 10.11s",
+        "test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 112 filtered out; finished in 0.83s"
+      ]
+    },
+    {
+      "command": "cargo xwin check --locked --offline -p tauri-plugin-connector --tests --target x86_64-pc-windows-msvc --no-default-features --features native-screenshot",
+      "layer": "windows_cross_compile_check",
+      "exitCode": 0,
+      "logSha256": "eba53184775e180b4411cba9a76fcc772d4702c8a7e53a4e5fa074bd5dd87e7d",
+      "logPath": "/tmp/tauri-upgrade-baseline/windows-platform-tests-check.log",
+      "summary": [
+        "warning: field `fault` is never read",
+        "Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 18s"
+      ]
+    },
+    {
+      "command": "cargo test --locked -p tauri-plugin-connector workflow::",
+      "layer": "macos_rust_tests",
+      "exitCode": 0,
+      "logSha256": "a2d43545d337611f31ee7ab58f36ca232e161f9e0a828be98ee7a53b0bc6cb48",
+      "logPath": "/tmp/tauri-upgrade-baseline/platform-workflow-final.log",
+      "summary": [
+        "test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 78 filtered out; finished in 0.95s"
+      ]
+    },
+    {
+      "command": "cargo xwin clippy --locked --offline -p tauri-plugin-connector --all-targets --target x86_64-pc-windows-msvc --no-default-features --features native-screenshot -- -D warnings",
+      "layer": "windows_cross_clippy",
+      "exitCode": 101,
+      "logSha256": "d95ec6edc2dcc4601c0521118a9e57f74fadd6f7edb78dd8f40fc339d8b928e2",
+      "logPath": "/tmp/tauri-upgrade-baseline/windows-platform-tests-clippy-final.log",
+      "summary": [
+        "Blocked by collapsible_if in parallel capture/store.rs110, mcp_tools.rs632, server.rs144 and lib.rs419; owners notified.",
+        "No journal test-only dead-code warning remains."
+      ]
+    }
+  ],
+  "windowsRuntime": "not_run; no Windows VM, wine, or physical runner used",
+  "linuxRuntime": "not_run; real Debian Linux GTK/WebKit sysroot is now available and plugin/test/fixture cross-checks passed, but no Linux GUI session executed",
+  "tooling": {
+    "host": "aarch64-apple-darwin",
+    "cargoXwin": "0.19.2",
+    "windowsRustTarget": "x86_64-pc-windows-msvc",
+    "sdkCache": "<cargo-xwin-sdk-cache>",
+    "containerOrVmCommandsFound": []
+  },
+  "newNonUnixTests": [
+    "authenticated_duplicate_submissions_fail_before_registration_or_backend_dispatch",
+    "public_workflow_endpoints_cannot_resume_replay_or_cancel_through_missing_storage",
+    "unsupported_private_journal_capability_is_explicit_and_authentication_remains_required",
+    "inspection_authority_and_memory_leases_remain_independent_without_releasing_quarantine"
+  ],
+  "sharedTest": "inspection_authorization_generation_revokes_and_never_exposes_credentials",
+  "remaining": [
+    "Windows and Linux GUI/runtime assertions have not executed on those platforms.",
+    "Cross-checks prove type/cfg correctness, not native runtime behavior.",
+    "Remote CI has not run at this checkpoint."
+  ],
+  "testOnlyChanges": [
+    "Keep existing successful durable workflow suite on Unix.",
+    "Run four explicit storage-unavailable and inspection isolation contracts on non-Unix.",
+    "Keep authorization-generation test on all platforms.",
+    "Limit unused journal test-injection access field to Unix; runtime journal behavior unchanged."
+  ],
+  "ciReview": {
+    "yamlParse": "passed",
+    "requiredJobMatrices": "passed",
+    "aggregateAlwaysRuns": "passed",
+    "linuxXdotool": "added to native-smoke dependencies",
+    "remoteCi": "not_run"
+  },
+  "supersededBy": [
+    "docs/upgrade-evidence/final-verification-summary.json",
+    "docs/upgrade-evidence/linux-final-check.log",
+    "docs/upgrade-evidence/linux-fixture-check.log",
+    "docs/upgrade-evidence/windows-final-check.log"
+  ],
+  "currentStatusNote": "Historical runs and failures below are preserved; current cross-check status is defined by supersededBy final evidence."
+}

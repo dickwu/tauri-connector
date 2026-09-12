@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 
@@ -16,7 +16,6 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, Notify, OnceCell, Semaphore};
 
 use super::{
-    dom,
     journal::{Journal, JournalRecord},
     resources::ResourceArbiter,
 };
@@ -135,12 +134,25 @@ impl Backend for AppBackend {
                     ));
                 }
             }
+            // Poll cadence belongs to the host condition loop. It is not a
+            // page identity field and must not enter the runtime handshake.
+            let mut request = request;
+            if let Some(context) = request.get_mut("context").and_then(Value::as_object_mut) {
+                context.remove("pollIntervalMs");
+            }
             self.bridge
-                .execute_js_for_window_with_request_id(
-                    &dom::script(&request),
-                    timeout_ms,
+                .execute_runtime_authorized(
                     window,
+                    "workflow",
+                    request,
+                    timeout_ms,
                     &request_id,
+                    &|| {
+                        self.state
+                            .workflow
+                            .authorize(&json!({"authToken":self.principal}))
+                            .is_ok()
+                    },
                 )
                 .await
                 .map_err(|error| match error {
@@ -197,6 +209,7 @@ pub struct WorkflowService {
     pub resources: ResourceArbiter,
     directory: PathBuf,
     token: std::sync::Mutex<Option<String>>,
+    authorization_generation: AtomicU64,
     app_instance_id: String,
     journal: OnceCell<Result<Journal, String>>,
     registry: Mutex<Registry>,
@@ -215,7 +228,8 @@ impl WorkflowService {
                     .ok()
                     .filter(|s| s.len() >= 32),
             ),
-            app_instance_id: uuid::Uuid::new_v4().to_string(),
+            authorization_generation: AtomicU64::new(1),
+            app_instance_id: crate::identity::app_instance_id().to_owned(),
             journal: OnceCell::new(),
             registry: Mutex::new(Registry::default()),
             slots: Arc::new(Semaphore::new(4)),
@@ -225,7 +239,51 @@ impl WorkflowService {
     }
 
     pub fn set_token(&self, token: Option<String>) {
-        *self.token.lock().unwrap_or_else(|p| p.into_inner()) = token.filter(|s| s.len() >= 32);
+        let mut current = self.token.lock().unwrap_or_else(|p| p.into_inner());
+        let next = token.filter(|s| s.len() >= 32);
+        if *current != next {
+            self.authorization_generation.fetch_add(1, Ordering::SeqCst);
+            *current = next;
+        }
+    }
+
+    /// Inspection objects are scoped to the host credential generation, never
+    /// to a transport connection or a copy of the credential in page state.
+    pub(crate) fn inspection_authorize(&self, args: &Value) -> Result<u64, Value> {
+        let generation = self.authorization_generation.load(Ordering::SeqCst);
+        self.authorize(args)?;
+        if !self.inspection_authorized(generation) {
+            return Err(error(
+                "unauthorized",
+                "Inspection authorization was revoked",
+            ));
+        }
+        Ok(generation)
+    }
+
+    pub(crate) fn inspection_authorized(&self, generation: u64) -> bool {
+        let token = self.token.lock().unwrap_or_else(|p| p.into_inner());
+        token.is_some() && self.authorization_generation.load(Ordering::SeqCst) == generation
+    }
+
+    /// Hydrate persisted unknown effects before changing the UI. Fresh Windows
+    /// hosts can inspect in memory; an existing durable-history directory still
+    /// fails closed under the journal's platform storage rules.
+    pub(crate) async fn recover_before_inspection(&self) -> Result<(), Value> {
+        if cfg!(unix) || self.directory.exists() {
+            self.recover_before_write().await
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn reserve_inspection_memory(
+        &self,
+        bytes: usize,
+    ) -> Result<super::budget::Reservation, Value> {
+        self.memory
+            .try_reserve(bytes)
+            .map_err(|_| error("resource_busy", "Shared retention memory budget exhausted"))
     }
 
     pub fn disable_storage(&self) {
@@ -251,7 +309,7 @@ impl WorkflowService {
         Ok(())
     }
 
-    fn authorize(&self, args: &Value) -> Result<String, Value> {
+    pub(crate) fn authorize(&self, args: &Value) -> Result<String, Value> {
         let token = self.token.lock().unwrap_or_else(|p| p.into_inner());
         let expected = token.as_deref().ok_or_else(|| {
             error(
@@ -856,7 +914,10 @@ impl WorkflowService {
                 entry.contexts.insert(window.clone(), context.clone());
                 entry.report["coverage"]["sources"]["dom"] = json!("available");
                 entry.report["blockedStep"] = json!(step.id);
-                entry.report["dispatchContext"] = json!({"requestId":request_id,"windowId":window,"pageEpoch":context["pageEpoch"],"attempt":1});
+                entry.report["dispatchContext"] = super::security::dispatch_metadata(&context);
+                entry.report["dispatchContext"]["requestId"] = json!(request_id);
+                entry.report["dispatchContext"]["windowId"] = json!(window);
+                entry.report["dispatchContext"]["attempt"] = json!(1);
                 if self.checkpoint(&mut entry, "step_prepared").await.is_err() {
                     drop(entry);
                     cleanup(&*backend, &window, &observation_id, &context).await;
@@ -1073,7 +1134,11 @@ impl WorkflowService {
                     outcome.coverage = json!({"truncated":true});
                 }
             }
-            outcome.dispatch = json!({"requestId":request_id,"windowId":window,"pageEpoch":context["pageEpoch"],"dispatched":writing && outcome.execution!=ExecutionStatus::NotDispatched});
+            outcome.dispatch = super::security::dispatch_metadata(&context);
+            outcome.dispatch["requestId"] = json!(request_id);
+            outcome.dispatch["windowId"] = json!(window);
+            outcome.dispatch["dispatched"] =
+                json!(writing && outcome.execution != ExecutionStatus::NotDispatched);
             outcome.coverage["correlation"] = json!("state_only");
             outcome.coverage["businessPersistence"] = json!("unobserved");
             // Preserve the completion result before verification or optional evidence work.
@@ -1174,7 +1239,7 @@ impl WorkflowService {
                     let mut entry = run.lock().await;
                     let id = uuid::Uuid::new_v4().to_string();
                     // Only structural details are retained; raw DOM values/text are not evidence-safe.
-                    entry.evidence.insert(id.clone(),json!({"captureKind":"scoped_snapshot","context":{"windowId":window,"pageEpoch":context["pageEpoch"]},"available":value["ok"]==true,"details":{"elements":value["elements"],"scope":value["scope"],"truncated":value["truncated"]}}));
+                    entry.evidence.insert(id.clone(),json!({"captureKind":"scoped_snapshot","context":super::security::dispatch_metadata(&context),"available":value["ok"]==true,"details":{"elements":value["elements"],"scope":value["scope"],"truncated":value["truncated"]}}));
                     entry.report["evidenceRefs"]
                         .as_array_mut()
                         .unwrap()
@@ -1478,9 +1543,9 @@ pub async fn call(
                 "Capabilities accepts only an optional nonempty windowId",
             ));
         }
-        return Ok(
-            json!({"schemaVersions":[1],"modes":["strict"],"schedules":["sequential"],"ops":["click","fill","type","press","wait","query","tool"],"conditions":["element","valueEquals","textContains","attributeEquals","result","all","any"],"tools":["bridge_status","ipc_get_backend_state"],"authentication":{"required":true,"configured":manager.token.lock().unwrap_or_else(|p|p.into_inner()).is_some(),"minimumTokenBytes":32},"recovery":{"clientReconnect":true,"sameProcessContinue":"undispatched_only","restartHistory":cfg!(unix),"automaticRestartReplay":false,"unknownWriteReplay":false},"journal":{"durability":"sync_data","privateStorage":cfg!(unix),"dedupRetention":"no_eviction_until_host_archive","maxRuns":MAX_RUNS},"unsupported":["ref","parallel","arbitraryJavaScript","unknownIpc","transitionConditions","businessPersistence","automaticRollback","stabilityMs"],"coverage":{"correlation":"state_only","businessPersistence":"unobserved","dom":"light_dom","nativeInput":false},"limits":{"activeRuns":4,"queuedRuns":16,"quarantinedScopes":manager.resources.quarantined(),"maxSteps":100,"maxSpecBytes":262144,"maxDeadlineMs":300000,"retentionBudgetBytes":manager.memory.limit_bytes(),"retentionChargedBytes":manager.memory.used_bytes()}}),
-        );
+        let mut capabilities = json!({"schemaVersions":[1],"modes":["strict"],"schedules":["sequential"],"ops":["click","fill","type","press","wait","query","tool"],"conditions":["element","valueEquals","textContains","attributeEquals","result","all","any"],"tools":["bridge_status","ipc_get_backend_state"],"authentication":{"required":true,"configured":manager.token.lock().unwrap_or_else(|p|p.into_inner()).is_some(),"minimumTokenBytes":32},"recovery":{"clientReconnect":true,"sameProcessContinue":"undispatched_only","restartHistory":cfg!(unix),"automaticRestartReplay":false,"unknownWriteReplay":false},"journal":{"durability":"sync_data","privateStorage":cfg!(unix),"dedupRetention":"no_eviction_until_host_archive","maxRuns":MAX_RUNS},"unsupported":["ref","parallel","arbitraryJavaScript","unknownIpc","transitionConditions","businessPersistence","automaticRollback","stabilityMs"],"coverage":{"correlation":"state_only","businessPersistence":"unobserved","dom":"light_dom","nativeInput":false},"limits":{"activeRuns":4,"queuedRuns":16,"quarantinedScopes":manager.resources.quarantined(),"maxSteps":100,"maxSpecBytes":262144,"maxDeadlineMs":300000,"retentionBudgetBytes":manager.memory.limit_bytes(),"retentionChargedBytes":manager.memory.used_bytes()}});
+        capabilities["inspection"] = crate::capabilities::inspection();
+        return Ok(capabilities);
     }
     let principal = manager.authorize(args)?;
     let journal = manager.store().await?;
@@ -1849,13 +1914,43 @@ async fn reconcile(
     Ok(())
 }
 
-#[cfg(test)]
+// Successful durable workflow scenarios require the supported private-journal
+// implementation. Non-Unix targets test the actual fail-closed contract below.
+#[cfg(all(test, unix))]
 #[path = "service_tests.rs"]
 mod integration_tests;
+
+#[cfg(all(test, not(unix)))]
+#[path = "service_tests_no_private_journal.rs"]
+mod unavailable_journal_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inspection_authorization_generation_revokes_and_never_exposes_credentials() {
+        const PRINCIPAL: &str = "fixture-service-token-32-bytes-long-12345";
+        let service = WorkflowService::new(
+            std::env::temp_dir().join(format!("inspection-auth-{}", uuid::Uuid::new_v4())),
+        );
+        service.set_token(Some(PRINCIPAL.into()));
+        let generation = service
+            .inspection_authorize(&json!({"authToken":PRINCIPAL}))
+            .unwrap();
+        assert!(service.inspection_authorized(generation));
+        service.set_token(Some(PRINCIPAL.into()));
+        assert!(service.inspection_authorized(generation));
+        service.set_token(None);
+        assert!(!service.inspection_authorized(generation));
+        assert!(
+            service
+                .inspection_authorize(&json!({"authToken":PRINCIPAL}))
+                .is_err()
+        );
+        service.set_token(Some(PRINCIPAL.into()));
+        assert!(!service.inspection_authorized(generation));
+    }
 
     #[test]
     fn cancelling_never_means_rollback() {

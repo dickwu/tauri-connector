@@ -12,8 +12,6 @@ use serde_json::{json, Value};
 use connector_mcp_server::protocol::{self, JsonRpcRequest, JsonRpcResponse};
 use connector_mcp_server::tools;
 
-const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_PORT: u16 = 9555;
 const PROTOCOL_LATEST: &str = "2025-11-25";
 const PROTOCOL_SUPPORTED: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
 
@@ -23,23 +21,20 @@ async fn main() {
         .await
         .unwrap_or_else(|e| {
             eprintln!("[tauri-connector-mcp] Discovery failed: {e}");
-            let host =
-                std::env::var("TAURI_CONNECTOR_HOST").unwrap_or_else(|_| DEFAULT_HOST.to_string());
-            let port = std::env::var("TAURI_CONNECTOR_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(DEFAULT_PORT);
-            discovery::ResolvedConnection {
-                host,
-                port,
-                source: discovery::ConnectionSource::Env,
-                instance: None,
-            }
+            std::process::exit(1);
         });
     let host = resolved.host;
     let port = resolved.port;
 
     let mut client = ConnectorClient::new();
+    if let Some(identity) = &resolved.identity {
+        if let Err(error) = client.bind_instance(&identity.app_instance_id) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
+
+    let mut negotiated_protocol: Option<String> = None;
 
     eprintln!("[tauri-connector-mcp] Server started on stdio (target: {host}:{port})");
 
@@ -73,7 +68,15 @@ async fn main() {
             continue;
         };
 
-        let response = handle_request(&mut client, &host, port, id, &request).await;
+        let response = handle_request(
+            &mut client,
+            &host,
+            port,
+            id,
+            &request,
+            &mut negotiated_protocol,
+        )
+        .await;
         write_response(&stdout, &response);
     }
 }
@@ -98,6 +101,7 @@ async fn handle_request(
     port: u16,
     id: Value,
     request: &JsonRpcRequest,
+    negotiated_protocol: &mut Option<String>,
 ) -> JsonRpcResponse {
     match request.method.as_str() {
         "initialize" => {
@@ -114,6 +118,7 @@ async fn handle_request(
                     format!("Unsupported protocol version: {requested}"),
                 );
             }
+            *negotiated_protocol = Some(requested.to_owned());
             let result = json!({
                 "protocolVersion": requested,
                 "capabilities": {
@@ -144,17 +149,22 @@ async fn handle_request(
             // Auto-connect if not connected (except for driver_session)
             if tool_name != "driver_session" && !client.is_connected() {
                 if let Err(e) = client.connect(host, port).await {
-                    return JsonRpcResponse::success(
-                        id,
-                        protocol::text_content(&json!({
-                            "error": format!("Auto-connect failed: {e}. Use driver_session to connect manually.")
-                        })),
+                    let mut content = protocol::text_content(
+                        &json!({"error":format!("Auto-connect failed: {e}. Use driver_session to connect manually.")}),
                     );
+                    content["isError"] = json!(true);
+                    return JsonRpcResponse::success(id, content);
                 }
             }
 
             let result = tools::call_tool(client, host, port, tool_name, &arguments).await;
-            JsonRpcResponse::success(id, result)
+            JsonRpcResponse::success(
+                id,
+                connector_client::inspection::shape_mcp_result(
+                    result,
+                    negotiated_protocol.as_deref(),
+                ),
+            )
         }
 
         "ping" => JsonRpcResponse::success(id, json!({})),
@@ -168,4 +178,45 @@ fn write_response(stdout: &io::Stdout, response: &JsonRpcResponse) {
     let mut out = stdout.lock();
     let _ = writeln!(out, "{json}");
     let _ = out.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn standalone_uses_initialized_protocol_to_shape_tool_results() {
+        for version in ["2025-03-26", "2025-06-18", "2025-11-25"] {
+            let mut client = ConnectorClient::new();
+            let mut negotiated = None;
+            let init:JsonRpcRequest=serde_json::from_value(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":version}})).unwrap();
+            let response = handle_request(
+                &mut client,
+                "127.0.0.1",
+                9555,
+                json!(1),
+                &init,
+                &mut negotiated,
+            )
+            .await;
+            assert_eq!(response.result.unwrap()["protocolVersion"], version);
+            let call:JsonRpcRequest=serde_json::from_value(json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"driver_session","arguments":{"action":"start","port":-1}}})).unwrap();
+            let result = handle_request(
+                &mut client,
+                "127.0.0.1",
+                9555,
+                json!(2),
+                &call,
+                &mut negotiated,
+            )
+            .await
+            .result
+            .unwrap();
+            assert_eq!(result["isError"], true);
+            assert_eq!(result["content"][0]["type"], "text");
+            assert_eq!(
+                result.get("structuredContent").is_some(),
+                version != "2025-03-26"
+            );
+        }
+    }
 }

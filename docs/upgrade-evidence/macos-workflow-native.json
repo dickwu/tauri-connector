@@ -1,0 +1,133 @@
+{
+  "platform": "darwin",
+  "layer": "native-webview",
+  "runtime": "actual Tauri Wry native WebView",
+  "display": "desktop-session",
+  "instance": "dev.connector.workflow-fixture.b99c4972-5191-4fe9-9d7b-20828abbffa4",
+  "isolatedInstances": [
+    "dev.connector.workflow-fixture.b99c4972-5191-4fe9-9d7b-20828abbffa4",
+    "dev.connector.workflow-fixture.c13e0ed7-588d-43d8-a439-d340eb9f66ff"
+  ],
+  "tests": [
+    {
+      "name": "native React controlled input reaches Rust save exactly once",
+      "passed": true,
+      "durationMs": 269,
+      "runId": "a30e2e56-7de6-4852-aa94-10a6ade81d8a",
+      "saveEffects": 1,
+      "workflowClientRequests": 1,
+      "elapsedMs": 269,
+      "reportBytes": 4975
+    },
+    {
+      "name": "same UI path via one caller request per step",
+      "passed": true,
+      "durationMs": 240,
+      "saveEffects": 1,
+      "workflowClientRequests": 4
+    },
+    {
+      "name": "two clients share one runKey and cannot change its inputs",
+      "passed": true,
+      "durationMs": 240,
+      "runId": "65de5f0f-5730-42c7-b1fc-f7a0529d7f55",
+      "saveEffects": 1
+    },
+    {
+      "name": "disconnect and resubmit retain the existing logical run",
+      "passed": true,
+      "durationMs": 1408,
+      "runId": "720329cd-5e0d-4653-a927-536f6a47ace3",
+      "saveEffects": 1
+    },
+    {
+      "name": "cancel stops an outstanding wait and releases bridge waiters/resources",
+      "passed": true,
+      "durationMs": 144,
+      "runId": "e0059d92-4493-4b9a-bed3-34785cd9de5b",
+      "status": "cancelled",
+      "bridgePending": 0,
+      "saveEffects": 0
+    },
+    {
+      "name": "WS operation beyond two seconds produces one native write",
+      "passed": true,
+      "durationMs": 2209,
+      "saveEffects": 1
+    },
+    {
+      "name": "JS exception after native write does not replay through eval",
+      "passed": true,
+      "durationMs": 4,
+      "saveEffects": 1,
+      "outcome": {
+        "execution": "failed",
+        "verification": "not_requested",
+        "effect": "possible",
+        "data": null,
+        "error": {
+          "code": "execution_failed",
+          "stage": "executing",
+          "message": "fixture exception after write",
+          "retryableBeforeDispatch": false
+        },
+        "timing": {},
+        "dispatch": {
+          "dispatched": true,
+          "requestId": "86dad813-8168-408e-820a-2da3f2e4140c"
+        },
+        "evidenceRefs": [],
+        "coverage": {
+          "businessPersistence": "unobserved"
+        },
+        "warnings": []
+      },
+      "conflictingWriteBlocked": true
+    },
+    {
+      "name": "unknown write response quarantines resource without replay",
+      "passed": true,
+      "durationMs": 30004,
+      "saveEffects": 1,
+      "outcome": {
+        "execution": "outcome_unknown",
+        "verification": "not_requested",
+        "effect": "possible",
+        "data": null,
+        "error": {
+          "code": "outcome_unknown",
+          "stage": "dispatching",
+          "message": "WS bridge timeout",
+          "retryableBeforeDispatch": false
+        },
+        "timing": {},
+        "dispatch": {
+          "dispatched": true,
+          "requestId": "8824017b-83b0-4086-8ee8-a8a4aec976bc"
+        },
+        "evidenceRefs": [],
+        "coverage": {
+          "businessPersistence": "unobserved"
+        },
+        "warnings": []
+      },
+      "conflictingWriteBlocked": true,
+      "bridgePending": 0,
+      "isolatedInstance": "dev.connector.workflow-fixture.c13e0ed7-588d-43d8-a439-d340eb9f66ff"
+    }
+  ],
+  "metrics": {
+    "clientRequests": 83,
+    "sentBytes": 31821,
+    "receivedBytes": 270714
+  },
+  "passed": true,
+  "untestedPlatforms": [
+    "win32",
+    "linux"
+  ],
+  "caveats": [
+    "UI state and isolated native fixture store only; no production service or business persistence provider",
+    "Synthetic DOM input and event dispatch"
+  ]
+}

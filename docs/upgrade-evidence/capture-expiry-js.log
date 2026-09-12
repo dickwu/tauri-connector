@@ -1,0 +1,35 @@
+✔ UP-T081/082/084 one pair preserves this, all arguments and resolved object (5.174583ms)
+✔ UP-T083 synchronous throw stays synchronous and preserves exception (0.525708ms)
+✔ UP-T084 rejection reason identity survives telemetry (0.464792ms)
+✔ UP-T085 ignored rejection remains unhandled (27.593584ms)
+✔ UP-T086 serialization never calls getters/toJSON or fails business (0.532417ms)
+✔ UP-T087 binary and streams summarized without consuming data (0.869125ms)
+✔ UP-T088/089 sensitive keys removed before transport and UTF8 bounded (0.496916ms)
+✔ UP-T090 saturated telemetry queue leaves calls successful and counts drops (9.027666ms)
+✔ UP-T096 cleanup never overwrites a later wrapper (0.570542ms)
+✔ UP-T081 exact connector namespace excluded, similarly named business retained (0.516875ms)
+✔ UP-T097 controlled readiness self-test uses only connector namespace (0.40525ms)
+✔ UP-T096 stopped owned hook restores invoke and legacy can reactivate it (0.257917ms)
+✔ UP-T081 module and global forwarding paths produce one pair each (0.325459ms)
+✔ UP-T087 typed array overridden getter is never touched (0.306625ms)
+✔ UP-T093 stop never cancels the business promise or reports a terminal event (0.324875ms)
+✔ UP-T091/093 stop barrier delivers already queued evidence before acknowledgement (0.331375ms)
+✔ UP-T102/107 host revocation acknowledgement releases owned hook and queue (0.276833ms)
+✔ UP-T081/082/084 readonly native invoke observed through transport and exact callbacks (8.642625ms)
+✔ UP-T084 native rejected callback preserves exact reason (0.52625ms)
+✔ UP-T081/092 native fetch to postMessage fallback deduplicates callback pair (0.446042ms)
+✔ UP-T096 later callback wrappers survive capture cleanup (0.349833ms)
+✔ UP-T085 readonly native callback path preserves unhandled rejection (38.197291ms)
+✔ UP-T093/107 page watchdog expires only its lease without polling or cancelling invoke (0.618583ms)
+✔ UP-T091/107 shared watchdog leaves later lease active and configure cannot refresh deadline (0.312417ms)
+✔ UP-T081/093/107 immutable transport watchdog restores callbacks and original business promise (0.702708ms)
+✔ T14 monitor refuses wrong window before altering flags (1.33925ms)
+✔ T14 monitor acknowledges actual window, page epoch and applied state (0.266083ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 141.186042

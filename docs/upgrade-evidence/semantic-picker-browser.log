@@ -1,0 +1,18 @@
+▶ shipped picker input, lifecycle and privacy
+  ✔ UP-PK001 active UI and UP-PK014 click isolation (531.111166ms)
+  ✔ UP-PK018 double-click tail is swallowed (295.5045ms)
+  ✔ UP-PK019 Escape and keyup consumed; no focus restoration (25.346292ms)
+  ✔ UP-PK017 drag gesture does not select (112.969709ms)
+  ✔ UP-PK023 virtual node identity change rejects confirmation (44.567333ms)
+  ✔ UP-PK016 modal top layer and UP-PK021 actual span target (499.618458ms)
+  ✔ UP-PK025 sensitive element has no value or executable candidate (32.149792ms)
+  ✔ UP-PK028 get freezes observation and UP-PK032 cancel preserves selected (33.601084ms)
+✔ shipped picker input, lifecycle and privacy (1721.1775ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1898.709833

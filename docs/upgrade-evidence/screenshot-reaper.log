@@ -1,0 +1,8 @@
+   Compiling tauri-plugin-connector v0.15.0 (<workspace>/plugin)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.76s
+     Running unittests src/lib.rs (target/debug/deps/tauri_plugin_connector-fe5c33d81ce622be)
+
+running 1 test
+test screenshot::service::tests::synchronous_host_setup_still_reaps_expired_images_without_api_reads ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 158 filtered out; finished in 0.01s

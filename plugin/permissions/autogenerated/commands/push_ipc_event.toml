@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-push-ipc-event"
+description = "Enables the push_ipc_event command without any pre-configured scope."
+commands.allow = ["push_ipc_event"]
+
+[[permission]]
+identifier = "deny-push-ipc-event"
+description = "Denies the push_ipc_event command without any pre-configured scope."
+commands.deny = ["push_ipc_event"]

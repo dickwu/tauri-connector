@@ -1,0 +1,12 @@
+    Blocking waiting for file lock on build directory
+   Compiling connector-client v0.15.0 (<repository>/crates/client)
+   Compiling tauri-plugin-connector v0.15.0 (<repository>/plugin)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.60s
+     Running unittests src/lib.rs (target/debug/deps/tauri_plugin_connector-7506f1c7f230c652)
+
+running 3 tests
+test identity::tests::process_identity_is_shared_and_stable ... ok
+test identity::tests::label_reuse_changes_host_identity ... ok
+test identity::tests::navigation_rotates_transport_binding_without_reusing_window_lifetime ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 139 filtered out; finished in 0.00s

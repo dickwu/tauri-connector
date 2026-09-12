@@ -1,0 +1,395 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling tauri-plugin-connector v0.16.0 (<workspace>/plugin)
+   Compiling connector-cli v0.16.0 (<workspace>/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.73s
+     Running unittests src/main.rs (target/debug/deps/tauri_connector-cf3da1851974647c)
+
+running 64 tests
+test commands::tests::batch_spec_wraps_bare_array_and_injects_window_id ... ok
+test commands::tests::sha256_hex_matches_known_vector ... ok
+test doctor::tests::cargo_version_only_inside_dependencies_tables ... ok
+test commands::tests::batch_spec_rejects_bad_mode_and_non_object ... ok
+test doctor::tests::build_features_accepts_array_and_string_forms ... ok
+test commands::tests::batch_spec_overrides_apply ... ok
+test commands::tests::batch_spec_inline_json_is_used_verbatim ... ok
+test doctor::tests::cargo_version_hint_is_major_minor ... ok
+test doctor::tests::cargo_version_commented_out_is_absent ... ok
+test doctor::tests::cargo_version_dev_dependencies ... ok
+test doctor::tests::cargo_version_absent ... ok
+test doctor::tests::cargo_version_inline_table ... ok
+test doctor::tests::cargo_version_plain_string ... ok
+test doctor::tests::classify_feature_gated_layout ... ok
+test doctor::tests::classify_feature_gated_layout_with_custom_feature_name ... ok
+test doctor::tests::classify_legacy_layout ... ok
+test doctor::tests::classify_mixed_both_gates_present ... ok
+test doctor::tests::classify_mixed_capability_moved_but_dep_not_optional ... ok
+test doctor::tests::classify_mixed_optional_dep_but_no_features_block ... ok
+test doctor::tests::classify_none_for_empty_inputs ... ok
+test doctor::tests::classify_none_when_plugin_not_referenced ... ok
+test doctor::tests::extract_bool_field_true_and_false ... ok
+test doctor::tests::extract_cargo_dep_absent ... ok
+test doctor::tests::extract_cargo_dep_inline_table_optional_true ... ok
+test doctor::tests::extract_cargo_dep_inline_table_without_optional_flag ... ok
+test doctor::tests::extract_cargo_dep_plain_string_is_not_optional ... ok
+test doctor::tests::extract_cargo_dep_target_specific_table ... ok
+test doctor::tests::features_declares_bare_form ... ok
+test doctor::tests::features_declares_dep_form ... ok
+test doctor::tests::features_declaring_dep_returns_custom_feature_names ... ok
+test doctor::tests::features_different_dep_returns_false ... ok
+test doctor::tests::features_does_not_match_subtable_header ... ok
+test doctor::tests::features_missing_returns_false ... ok
+test doctor::tests::features_only_inside_features_section ... ok
+test doctor::tests::features_section_tolerates_trailing_comment ... ok
+test doctor::tests::indent_snippet_prefixes_two_spaces ... ok
+test doctor::tests::json_fix_suggestions_collects_warn_and_fail_fixes ... ok
+test doctor::tests::mcp_command_transport_gets_fix_suggestion ... ok
+test doctor::tests::mcp_url_must_target_streamable_mcp ... ok
+test doctor::tests::package_deps_found_across_sections ... ok
+test doctor::tests::package_scripts_accept_short_feature_flag ... ok
+test doctor::tests::package_scripts_detect_dev_connector_feature ... ok
+test doctor::tests::package_scripts_reject_missing_feature_flag ... ok
+test doctor::tests::permissions_object_form ... ok
+test doctor::tests::permissions_string_form ... ok
+test doctor::tests::setup_pattern_as_str_round_trip ... ok
+test doctor::tests::settings_detects_connector_hook ... ok
+test doctor::tests::settings_ignores_unrelated_hooks ... ok
+test doctor::tests::source_feature_gates_extracts_custom_feature_names ... ok
+test skills::tests::resolves_aliases ... ok
+test skills::tests::embedded_mcp_reference_mentions_agent_oriented_schema ... ok
+test snapshot::tests::modern_ref_cache_is_bound_to_host_instance_and_window ... ok
+test snapshot::tests::modern_refs_never_fall_back_to_selector_or_first_named_element ... ok
+test inspection::cursor_contract_tests::ipc_query_cli_accepts_opaque_next_cursor_without_numeric_coercion ... ok
+test snapshot::tests::ref_cache_key_includes_app_id_or_pid ... ok
+test snapshot::tests::ref_cache_key_includes_window_id ... ok
+test update::tests::test_is_newer ... ok
+test update::tests::test_parse_version ... ok
+test doctor::tests::read_pid_file_parses_new_runtime_metadata ... ok
+test update::tests::test_platform_target ... ok
+test skills::tests::embedded_docs_match_workspace_skill_docs_when_available ... ok
+test inspection_cli_tests::capture_and_health_help_match_contract ... ok
+test inspection_cli_tests::picker_lifecycle_and_convenience_help_match_contract ... ok
+test workflow_cli_tests::workflow_commands_parse_without_starting_a_client_executor ... ok
+
+test result: ok. 64 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/connector_client-eb38cec7a58d2fe8)
+
+running 33 tests
+test batch::tests::hand_built_cycle_never_deadlocks ... ok
+test batch::tests::omit_result_drops_payload ... ok
+test batch::tests::parallel_actions_overlap ... ok
+test batch::tests::soft_error_result_counts_as_failure ... ok
+test batch::tests::bare_array_is_actions_shorthand ... ok
+test batch::tests::synthesized_log_id_avoids_explicit_collision ... ok
+test batch::tests::validation_rejects_bad_specs ... ok
+test batch::tests::validation_rejects_dependency_cycles ... ok
+test batch::tests::unknown_spec_fields_are_rejected ... ok
+test discovery::tests::candidates_include_documented_locations ... ok
+test discovery::tests::instance_snapshot_dir_prefers_log_dir ... ok
+test outcome::tests::error_codes_are_stable_and_unique ... ok
+test outcome::tests::known_wait_and_verification_failures_propagate ... ok
+test outcome::tests::business_json_does_not_decide_success ... ok
+test outcome::tests::undispatched_verified_state_is_not_success ... ok
+test batch::tests::run_from_value_saves_report ... ok
+test transport_tests::dropped_send_future_removes_waiter_without_remote_cancellation ... ok
+test transport_tests::explicit_disconnect_releases_every_waiter ... ok
+test transport_tests::failed_enqueue_removes_waiter ... ok
+test transport_tests::invalid_command_does_not_register_a_waiter ... ok
+test identity::tests::canonical_workspace_boundaries_and_symlinks ... ok
+test transport_tests::dropping_client_closes_socket_without_detached_writer ... ok
+test transport_tests::protocol_error_retains_the_explicit_outcome_envelope ... ok
+test transport_tests::business_error_fields_remain_successful_data ... ok
+test transport_tests::closed_socket_cleans_pending_and_preserves_unknown_remote_state ... ok
+test transport_tests::timeout_retains_unknown_remote_outcome_and_request_id ... ok
+test batch::tests::no_stop_on_error_continues_independent_actions ... ok
+test batch::tests::stop_on_error_skips_rest_sequentially ... ok
+test batch::tests::sequential_runs_in_order ... ok
+test batch::tests::depends_on_orders_dag ... ok
+test batch::tests::continue_on_error_sequential_still_runs_rest_in_order ... ok
+test batch::tests::per_action_timeout_fails_action ... ok
+test batch::tests::max_parallel_limits_concurrency ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/batch_outcomes.rs (target/debug/deps/batch_outcomes-b8bc031f8092639d)
+
+running 6 tests
+test explicit_inline_screenshot_and_missing_artifact_keep_original_data ... ok
+test ordinary_query_error_text_is_business_data ... ok
+test failed_verification_blocks_the_dependent_dispatch ... ok
+test report_persistence_failure_preserves_execution ... ok
+test batch_screenshots_default_to_saved_artifact_and_compact_inline_bytes ... ok
+test saved_report_matches_the_returned_report ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/discovery_identity.rs (target/debug/deps/discovery_identity-212b9f05b7436548)
+
+running 3 tests
+test explicit_identity_and_stale_pid_are_rejected ... ok
+test ambiguous_candidates_never_choose_recent_or_first ... ok
+test explicit_missing_pid_file_cannot_search_nearby_files ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/inspection_contract.rs (target/debug/deps/inspection_contract-12d3a831ce90a5d1)
+
+running 13 tests
+test picker_exit_status_does_not_claim_waiting_or_cancelled_selection ... ok
+test protected_artifact_aliases_cannot_silently_change_the_requested_identity ... ok
+test mcp_only_emits_negotiated_structured_content_and_keeps_text_images ... ok
+test accepted_cancel_of_prior_terminal_picker_is_success_without_rewriting_its_state ... ok
+test native_dimension_metadata_survives_mcp_image_extraction ... ok
+test picker_mcp_preserves_metadata_and_only_redacted_images ... ok
+test screenshot_targets_are_static_strict_and_bounded ... ok
+test picker_fingerprint_excludes_wait_image_and_token ... ok
+test picker_defaults_and_bounded_action_specific_fields ... ok
+test shipped_picker_examples_parse_as_the_actual_contract ... ok
+test sdk_generates_one_request_key_and_retains_it_after_a_lost_response ... ok
+test matching_handshake_forwards_exact_inspection_and_rejects_instance_switch ... ok
+test unsupported_plugin_never_receives_picker_or_execute_js ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/workflow_contract.rs (target/debug/deps/workflow_contract-c314290a1356cca8)
+
+running 15 tests
+test literal_business_json_is_not_recursively_interpreted ... ok
+test missing_pointer_differs_from_legal_null ... ok
+test array_pointer_indices_are_not_coerced ... ok
+test pointers_preserve_null_escape_and_success_dependency ... ok
+test modes_and_limits_fail_before_dispatch ... ok
+test result_self_expect_is_allowed_but_bindings_cannot_read_self ... ok
+test schema_errors_do_not_echo_rejected_input_strings ... ok
+test binding_validation_rejects_forward_missing_and_wrong_typed_inputs ... ok
+test canonical_identity_normalizes_defaults_but_keeps_inputs_and_assertions ... ok
+test strict_union_rejects_unrecognized_and_inapplicable_fields ... ok
+test tool_binding_only_evaluates_declared_existing_slots ... ok
+test required_identity_cannot_resolve_to_null_or_empty ... ok
+test condition_bounds_and_unsupported_semantics_are_enforced ... ok
+test shipped_workflow_examples_match_the_strict_contract ... ok
+test spec_and_value_size_and_locator_depth_are_bounded ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/connector_mcp_server-14582cf5fda667da)
+
+running 15 tests
+test tools::tests::vendored_schema_matches_plugin_source ... ok
+test tools::tests::workflow_exit_codes_keep_pending_and_unknown_distinct_from_success ... ok
+test tools::tests::workflow_requests_are_forwarded_even_without_a_local_executor ... ok
+test tools::tests::tool_transport_failure_sets_mcp_error_flag ... ok
+test tools::tests::batch_actions_reports_per_action_logs_when_disconnected ... ok
+test tools::tests::batch_actions_rejects_nesting_and_driver_session ... ok
+test tools::tests::dom_snapshot_schema_contains_budget_args ... ok
+test tools::tests::batch_actions_schema_describes_spec ... ok
+test tools::tests::interact_schema_contains_drag_args ... ok
+test tools::tests::runtime_schema_contains_since_mark_and_window ... ok
+test tools::tests::artifact_schema_contains_prune_tool ... ok
+test tools::tests::screenshot_schema_contains_artifact_args ... ok
+test tools::tests::wait_and_locator_schema_expose_agent_oriented_args ... ok
+test tools::tests::standalone_tools_are_embedded_plus_driver_session ... ok
+test tools::tests::workflow_schemas_define_app_owned_lifecycle ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src/main.rs (target/debug/deps/tauri_connector_mcp-df7d91aca33f8f61)
+
+running 1 test
+test tests::standalone_uses_initialized_protocol_to_shape_tool_results ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/tauri_plugin_connector-fa26d9f5f77a925e)
+
+running 169 tests
+test bridge::transport_tests::eval_embeds_script_and_identity_as_json_data ... ok
+test bridge::transport_tests::cleanup_guard_runs_on_error_and_future_drop ... ok
+test bridge::transport_tests::bridge_hello_requires_host_window_binding ... ok
+test bridge::transport_tests::dropping_bridge_waiter_cleans_up_without_replaying_or_cancelling ... ok
+test bridge::transport_tests::rejected_ws_enqueue_cleans_up_and_allows_eval_with_same_id ... ok
+test bridge::transport_tests::duplicate_inflight_id_does_not_replace_waiter_or_dispatch_twice ... ok
+test bridge::transport_tests::disconnect_rejects_only_its_own_pending_requests_as_unknown ... ok
+test bridge::transport_tests::typed_calls_require_the_exact_window_label ... ok
+test bridge::transport_tests::stale_connection_cannot_resolve_another_connections_operation ... ok
+test bridge::transport_tests::ws_exception_does_not_attempt_eval_replay ... ok
+test bridge::transport_tests::health_separates_transport_from_unavailable_runtime_without_repair ... ok
+test bridge::transport_tests::fallback_does_not_reset_a_spent_deadline ... ok
+test capabilities::tests::anonymous_capability_never_contains_handles_paths_or_observations ... ok
+test bridge::transport_tests::stale_fully_bound_cleanup_never_installs_a_new_runtime ... ok
+test capabilities::tests::exported_capability_uses_actual_compilation_and_contract_limits ... ok
+test bridge::transport_tests::ws_timeout_does_not_attempt_eval_replay ... ok
+test bridge::transport_tests::anonymous_capability_views_match_without_installation_or_private_state ... ok
+test bridge::transport_tests::runtime_business_error_is_never_reprepared_or_replayed ... ok
+test bridge::transport_tests::matching_fully_bound_operation_reuses_existing_runtime_without_install ... ok
+test capture::service_tests::capture_retention_shares_workflow_budget_and_releases_on_revocation ... ok
+test capture::service_tests::capture_anonymous_rejected_before_dispatch_and_legacy_clear_isolated ... ok
+test bridge::transport_tests::revocation_during_install_prevents_final_business_dispatch ... ok
+test capture::store::tests::capture_duplicate_after_eviction_cannot_resurrect_completion ... ok
+test bridge::transport_tests::stale_operation_context_never_enters_business_transport ... ok
+test capture::store::tests::capture_cursor_expired_and_namespace_bound ... ok
+test capture::store::tests::capture_preparation_cannot_restart_expired_lifetime_and_retention_releases_data ... ok
+test capture::store::tests::capture_monotonic_deadline_survives_follow_and_expires_pending ... ok
+test capture::store::tests::capture_preview_is_metadata_default_and_host_redacted_before_storage ... ok
+test capture::store::tests::capture_out_of_order_duplicate_and_interrupted_pending ... ok
+test capture::store::tests::capture_query_strict_utf8_byte_budget_and_preview_authority ... ok
+test bridge::transport_tests::failed_installation_is_shared_and_not_repeated_in_same_document ... ok
+test bridge::transport_tests::concurrent_runtime_preparation_is_single_flight ... ok
+test capture::store::tests::capture_reload_interrupts_old_source_and_follows_only_opt_in ... ok
+test capture::store::tests::capture_source_window_validation_and_resource_caps ... ok
+test capture::store::tests::capture_sessions_do_not_clear_each_other_and_require_domain ... ok
+test capture::store::tests::capture_stopped_session_does_not_observe_other_sessions_late_completion ... ok
+test handlers::tests::transport_error_mapping_preserves_dispatch_certainty ... ok
+test handlers::tests::artifact_compare_same_path_guard_detects_identical_paths ... ok
+test capture::service_tests::opaque_next_cursor_roundtrips_through_public_schema_and_host_query ... ok
+test handlers::tests::monitor_ack_requires_matching_window_state_and_epoch ... ok
+test handlers::tests::sha256_hex_matches_known_vector ... ok
+test handlers::tests::modern_ref_resolver_never_falls_back_to_css_or_fuzzy_name ... ok
+test handlers::tests::wait_timeout_preserves_diagnostics_in_a_typed_failure ... ok
+test identity::tests::navigation_rotates_transport_binding_without_reusing_window_lifetime ... ok
+test identity::tests::process_identity_is_shared_and_stable ... ok
+test identity::tests::label_reuse_changes_host_identity ... ok
+test capture::service_tests::capture_diagnostics_never_release_quarantine_or_trust_correlation ... ok
+test capabilities::tests::screenshot_availability_tracks_backend_codec_and_platform_flags ... ok
+test handlers::tests::wait_network_idle_is_explicitly_unsupported ... ok
+test handlers::tests::wait_script_supports_selector_state ... ok
+test handlers::tests::wait_script_contains_success_and_timeout_paths ... ok
+test mcp::tests::invalid_origin_is_forbidden ... ok
+test mcp_tools::tests::raw_results_preserve_json_like_strings_business_errors_and_images ... ok
+test mcp::tests::get_mcp_does_not_emit_legacy_endpoint_event ... ok
+test mcp::tests::unsupported_protocol_header_is_bad_request ... ok
+test mcp::tests::post_mcp_initialize_negotiates_latest_and_sets_session_headers ... ok
+test mcp::tests::deleted_session_cannot_be_reused ... ok
+test picker::tests::up_pk007_dedup_keeps_handle_deadline_and_lease ... ok
+test mcp::tests::post_mcp_notification_returns_accepted_empty_body ... ok
+test picker::tests::up_pk009_quota_and_quarantine_do_not_displace_active_pickers ... ok
+test picker::tests::up_pk011_stale_and_duplicate_page_reports_are_rejected ... ok
+test picker::tests::up_pk013_only_a_never_dispatched_start_proves_no_guard_needs_cleanup ... ok
+test picker::tests::up_pk029_transient_cleanup_failure_retains_lease_until_original_page_confirms ... ok
+test picker::tests::up_pk029_cleanup_budget_starts_at_first_terminal_and_never_refreshes ... ok
+test picker::tests::up_pk013_revocation_discards_capture_and_cannot_accept_late_selection ... ok
+test picker::tests::up_pk031_late_bridge_failure_cannot_downgrade_confirmed_page_destruction ... ok
+test picker::tests::up_pk031_navigation_cancels_image_after_input_lease_released ... ok
+test picker::tests::up_pk031_late_page_report_cannot_downgrade_confirmed_page_destruction ... ok
+test picker::tests::up_pk032_first_terminal_wins_revision_monotonic ... ok
+test picker::tests::up_pk033_late_capture_never_registers_after_monotonic_deadline ... ok
+test picker::tests::up_pk035_unreadable_prior_history_fails_before_picker_admission ... ok
+test protocol::workflow_protocol_tests::ipc_monitor_accepts_legacy_default_and_explicit_window ... ok
+test mcp_tools::tests::artifact_schema_exposes_prune ... ok
+test mcp_tools::tests::runtime_schema_supports_mark_and_window_filters ... ok
+test picker::tests::up_pk034_retained_results_not_evicted_to_make_room ... ok
+test protocol::workflow_protocol_tests::rejected_requests_preserve_machine_code_and_quarantine_tracks_possible_effects ... ok
+test protocol::workflow_protocol_tests::response_failure_preserves_typed_outcome_and_legacy_error ... ok
+test protocol::workflow_protocol_tests::workflow_preserves_camel_case_service_arguments ... ok
+test screenshot::service::tests::cache_reports_measured_store_and_read_cost_without_changing_capture_timings ... ok
+test screenshot::service::tests::expired_artifacts_are_gone_and_capacity_can_be_reused ... ok
+test mcp::tests::negotiated_tool_content_keeps_legacy_text_without_unnegotiated_structured_fields ... ok
+test runtime::manifest::tests::embedded_manifest_is_topologically_sorted ... ok
+test screenshot::tests::callbacks_are_single_use_and_late_completion_is_dropped ... ok
+test screenshot::tests::crop_clips_negative_origin_and_composes_resize ... ok
+test screenshot::tests::invalid_or_unproven_geometry_fails_closed ... ok
+test screenshot::tests::cancelled_native_callback_keeps_its_slot_until_completion ... ok
+test screenshot::tests::measured_scale_is_used_for_one_two_and_fractional_dpr ... ok
+test screenshot::tests::native_bgra_premultiplication_and_stride_are_normalized ... ok
+test screenshot::tests::oversized_native_dimensions_are_rejected_before_allocating ... ok
+test handlers::tests::legacy_boundaries_preserve_failure_and_dispatch_counts ... ok
+test screenshot::tests::pixel_budget_uses_the_specified_sixteen_million_pixel_boundary ... ok
+test runtime::manifest::tests::cycles_duplicates_and_remote_sources_are_rejected ... ok
+test screenshot::tests::stage_timings_use_elapsed_monotonic_time_and_do_not_invent_skipped_durations ... ok
+test screenshot::tests::required_mask_refuses_unknown_coverage_and_malformed_frames ... ok
+test screenshot::tests::masks_are_applied_to_pixels_before_crop_resize_and_encoding ... ok
+test screenshot::service::tests::protected_store_rejects_other_generation_and_never_evicts_live_results ... ok
+test picker::tests::up_pk035_persisted_unknown_write_is_recovered_before_picker_reservation ... ok
+test server::rich_screenshot_envelope_tests::rich_privacy_or_source_fields_cannot_be_discarded_by_legacy_ws_parsing ... ok
+test screenshot::tests::pixel_stages_measure_actual_work_before_safe_output_transcoding ... ok
+test workflow::budget::tests::default_has_a_fixed_host_limit ... ok
+test workflow::budget::tests::failed_grow_does_not_change_any_charge ... ok
+test workflow::budget::tests::reservation_releases_exact_charge_on_drop ... ok
+test bridge::transport_tests::warm_runtime_transports_one_bundle_for_twenty_operations ... ok
+test workflow::budget::tests::zero_and_overflow_do_not_wrap_accounting ... ok
+test mcp_tools::tests::screenshot_wait_and_locator_schema_expose_agent_oriented_args ... ok
+test mcp_tools::tests::screenshot_rich_schema_constraints_match_parser_vectors_and_preserve_legacy_defaults ... ok
+test workflow::dom::tests::command_arguments_round_trip_without_source_interpolation ... ok
+test workflow::budget::tests::clones_share_one_atomic_limit_under_contention ... ok
+test workflow::journal::tests::hmac_matches_rfc_4231_vectors ... ok
+test screenshot::service::tests::synchronous_host_setup_still_reaps_expired_images_without_api_reads ... ok
+test server::workflow_adapter_tests::picker_inspection_alias_and_embedded_mcp_share_validation_and_authorization ... ok
+test workflow::journal::tests::a_namespace_has_one_owner_until_all_handles_close ... ok
+test capture::service_tests::capture_background_expiry_releases_budget_without_another_request ... ok
+test workflow::journal::tests::acknowledged_intents_survive_reopen_without_becoming_success ... ok
+test workflow::journal::tests::abandoning_an_acknowledgement_does_not_cancel_the_durable_record ... ok
+test server::workflow_adapter_tests::embedded_and_websocket_share_capabilities_auth_and_resource_boundary ... ok
+test workflow::output::tests::byte_budget_accounts_for_unicode_and_json_escaping ... ok
+test workflow::journal::tests::missing_key_never_resets_existing_deduplication_identity ... ok
+test workflow::output::tests::long_reference_lists_keep_a_bounded_prefix_and_an_omission_count ... ok
+test workflow::output::tests::blocked_values_evidence_and_error_bodies_cannot_escape_the_budget ... ok
+test workflow::journal::tests::public_directories_and_symlink_files_are_rejected ... ok
+test workflow::resources::tests::atomic_multi_resource_failure_does_not_leak_partial_lease ... ok
+test workflow::output::tests::small_reports_are_returned_exactly ... ok
+test workflow::output::tests::unknown_diagnostics_and_many_steps_fall_back_to_metadata ... ok
+test workflow::journal::tests::oversized_records_are_rejected_before_entering_the_writer ... ok
+test workflow::resources::tests::leases_release_on_drop_and_cannot_reenter_with_caller_owner ... ok
+test workflow::resources::tests::parent_scope_conflicts_with_children_but_not_similar_prefixes ... ok
+test workflow::resources::tests::quarantine_survives_drop_without_blocking_diagnostics ... ok
+test workflow::resources::tests::unknown_tools_and_screenshots_take_exclusive_scopes ... ok
+test workflow::journal::tests::fingerprint_is_canonical_private_and_stable_across_reopen ... ok
+test workflow::security::inspection_context_tests::up_t012_context_keeps_lifecycle_identity_without_private_page_fields ... ok
+test workflow::security::tests::overlapping_unicode_secrets_are_masked_without_rescanning_markers ... ok
+test workflow::security::tests::sensitive_payloads_error_echoes_and_numeric_inputs_are_redacted ... ok
+test workflow::security::tests::journal_never_persists_unknown_output_payloads_or_error_text ... ok
+test workflow::security::tests::short_and_status_matching_secrets_cannot_corrupt_machine_metadata ... ok
+test workflow::security::tests::useful_query_entity_ids_remain_available ... ok
+test workflow::security::tests::structural_evidence_remains_useful_without_raw_dom_content ... ok
+test workflow::journal::tests::stale_revisions_and_changed_identity_are_rejected ... ok
+test workflow::journal::tests::valid_json_without_a_final_newline_is_an_incomplete_commit ... ok
+test workflow::journal::tests::retention_limits_refuse_work_without_evicting_history ... ok
+test workflow::journal::tests::corrupt_and_partial_tails_are_never_repaired_silently ... ok
+test workflow::journal::tests::faulted_writes_fail_closed_for_the_lifetime_of_the_writer ... ok
+test workflow::service::integration_tests::cancelling_wait_cleans_observation_and_blocks_later_dispatch ... ok
+test workflow::service::integration_tests::concurrent_duplicate_submissions_dispatch_only_once ... ok
+test workflow::service::integration_tests::deadline_failure_never_dispatches_later_write ... ok
+test workflow::service::integration_tests::cancel_during_dispatched_write_waits_for_outcome_without_replaying ... ok
+test workflow::service::integration_tests::duplicate_key_with_changed_inputs_cannot_create_new_effects ... ok
+test workflow::service::integration_tests::concurrent_continue_uses_one_checkpoint_and_dispatches_once ... ok
+test workflow::service::integration_tests::evidence_paging_roundtrips_utf8_with_bounded_responses ... ok
+test workflow::service::integration_tests::exhausted_host_memory_rejects_run_before_registration_or_dispatch ... ok
+test workflow::service::integration_tests::invalid_run_wait_budget_rejects_before_registering_a_run ... ok
+test workflow::service::integration_tests::continuing_partial_run_revalidates_without_replaying_completed_step ... ok
+test workflow::service::integration_tests::journal_intent_failure_stops_before_any_business_dispatch ... ok
+test workflow::service::integration_tests::journal_restart_preserves_dedup_and_never_replays_unknown_writes ... ok
+test workflow::service::tests::budget_trims_data_without_erasing_unknown_outcomes ... ok
+test workflow::service::tests::cancelling_never_means_rollback ... ok
+test workflow::service::integration_tests::retention_failure_preserves_completed_effect_and_blocks_later_dispatch ... ok
+test workflow::service::integration_tests::resume_rejects_stale_checkpoint_and_unknown_dispatch ... ok
+test workflow::service::integration_tests::literal_input_secrets_are_redacted_without_corrupting_status_fields ... ok
+test workflow::service::tests::inspection_authorization_generation_revokes_and_never_exposes_credentials ... ok
+test workflow::service::tests::redaction_removes_values_keys_and_error_echoes ... ok
+test workflow::service::integration_tests::stalled_condition_is_bounded_by_the_run_deadline ... ok
+test workflow::service::integration_tests::success_without_dispatch_metadata_is_unknown_and_never_replayed ... ok
+test workflow::service::integration_tests::full_example_resolves_entity_bindings_and_goal_locally ... ok
+test workflow::service::integration_tests::unknown_write_is_not_replayed_by_resubmission_or_reconciliation ... ok
+test workflow::service::integration_tests::unknown_write_quarantines_conflicting_new_run ... ok
+test workflow::service::integration_tests::verification_failure_keeps_effect_and_blocks_successor ... ok
+test workflow::service::integration_tests::changed_prior_expectation_blocks_resumed_write ... ok
+test bridge::transport_tests::ws_slow_completion_waits_beyond_the_old_two_second_limit ... ok
+
+test result: ok. 169 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.11s
+
+   Doc-tests connector_client
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests connector_mcp_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests tauri_plugin_connector
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

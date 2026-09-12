@@ -1,0 +1,6 @@
+{
+  "action": "get",
+  "pickerId": "picker-returned-by-start",
+  "waitMs": 10000,
+  "includeImage": true
+}

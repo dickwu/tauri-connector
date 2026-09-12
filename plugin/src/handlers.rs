@@ -70,6 +70,13 @@ fn ref_resolver_block(var_name: &str, ref_id: &str, entry: &RefEntry) -> String 
     let name_js = js_string(&entry.name);
     let tag_js = js_string(&entry.tag);
     let role_js = js_string(entry.role.as_deref().unwrap_or(""));
+    if entry.semantic_version.is_some() || entry.identity.is_some() || entry.page_epoch.is_some() {
+        let identity = serde_json::to_string(&entry.identity).unwrap_or_else(|_| "null".into());
+        let context = serde_json::json!({"semanticVersion":entry.semantic_version,"pageEpoch":entry.page_epoch});
+        return format!(
+            "let {var_name} = window.__CONNECTOR_SEMANTIC__?.resolveRef({identity}, {context}) || null;"
+        );
+    }
     format!(
         r#"
         let {var_name} = null;
@@ -105,6 +112,7 @@ fn ref_resolver_block(var_name: &str, ref_id: &str, entry: &RefEntry) -> String 
             }}
         }}
         }}
+        if ({var_name} && !{var_name}.isConnected) {var_name} = null;
         "#
     )
 }
@@ -304,6 +312,7 @@ pub async fn dom_snapshot(
 
     let refs: RefMap = result
         .get("allRefs")
+        .filter(|value| !value.is_null())
         .or_else(|| result.get("refs"))
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
@@ -1305,12 +1314,12 @@ async fn build_wait_script(
                 if (target === 'attached') return !!el;
                 if (target === 'detached') return !el;
                 if (!el) return target === 'hidden';
-                const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
-                const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : {{ width: 0, height: 0 }};
-                const visible = !!(rect.width || rect.height || el.getClientRects().length)
-                    && (!style || (style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity || 1) !== 0));
-                if (target === 'visible') return visible;
-                if (target === 'hidden') return !visible;
+                const semantic = window.__CONNECTOR_SEMANTIC__;
+                if (!semantic) throw new Error('Trusted semantic runtime is missing');
+                if (target === 'visible') return semantic.isVisible(el);
+                if (target === 'hidden') return !semantic.isVisible(el);
+                if (target === 'enabled') return semantic.isEnabled(el);
+                if (target === 'editable') return semantic.isEditable(el);
                 return !!el;
             }};
             const __connectorGlobMatch = (value, pattern) => {{
@@ -1949,8 +1958,14 @@ async fn xcap_screenshot(
     .await
     .map_err(|e| format!("Screenshot task panicked: {e}"))??;
 
-    let width = captured.width();
-    let height = captured.height();
+    let original_width = captured.width();
+    let original_height = captured.height();
+    let width = max_width
+        .filter(|max| *max > 0 && *max < original_width)
+        .unwrap_or(original_width);
+    let height = ((f64::from(original_height) * f64::from(width) / f64::from(original_width))
+        .round() as u32)
+        .max(1);
 
     let encoded = encode_image(captured, format, quality, max_width)?;
 
@@ -1968,6 +1983,7 @@ async fn xcap_screenshot(
         "width": width,
         "height": height,
         "method": "xcap",
+        "captureSource": "window_native",
     }))
 }
 
@@ -2026,6 +2042,7 @@ async fn snapdom_screenshot(
                 width: finalCanvas.width,
                 height: finalCanvas.height,
                 method: 'snapdom',
+                captureSource: 'dom_rendering',
             }};
         }})()"#
     );
@@ -2095,6 +2112,7 @@ async fn snapdom_element_screenshot(
                 width: finalCanvas.width,
                 height: finalCanvas.height,
                 method: 'snapdom',
+                captureSource: 'dom_rendering',
                 captureKind: 'element',
                 selector: {selector_js},
                 rectCssPx: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }},
@@ -2136,7 +2154,14 @@ async fn finish_screenshot_response(
                     obj.insert("artifact".to_string(), artifact);
                 }
             }
-            Err(e) => return Response::error(id.to_string(), e),
+            Err(e) => {
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert(
+                        "saveWarning".to_string(),
+                        serde_json::json!({"code":"artifact_save_failed","message":e}),
+                    );
+                }
+            }
         }
     }
     Response::success(id.to_string(), result)
@@ -2848,6 +2873,9 @@ pub async fn artifact_compare(
         id.to_string(),
         serde_json::json!({
             "pixelsDifferent": pixels_different,
+            "bytesDifferent": pixels_different,
+            "pixelComparison": false,
+            "legacyFieldAliases": {"pixelsDifferent": "bytesDifferent"},
             "percentDifferent": percent,
             "threshold": threshold,
             "passed": percent <= threshold,
@@ -3888,9 +3916,32 @@ pub async fn search_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_wait_script, same_path, sha256_hex};
-    use crate::state::PluginState;
+    use super::{build_wait_script, ref_resolver_block, same_path, sha256_hex};
+    use crate::state::{PluginState, RefEntry};
     use std::path::Path;
+
+    #[test]
+    fn modern_ref_resolver_never_falls_back_to_css_or_fuzzy_name() {
+        let entry: RefEntry = serde_json::from_value(serde_json::json!({
+            "tag":"button", "role":"button", "name":"Save", "selector":"#save", "nth":null,
+            "identity":"opaque-ref", "semanticVersion":"1", "pageEpoch":"document-one"
+        }))
+        .unwrap();
+        let script = ref_resolver_block("target", "e1", &entry);
+        assert!(script.contains("resolveRef"));
+        assert!(script.contains("document-one"));
+        assert!(!script.contains("querySelector"));
+        assert!(!script.contains("includes"));
+        let serialized = serde_json::to_value(&entry).unwrap();
+        assert_eq!(serialized["semanticVersion"], "1");
+        assert_eq!(serialized["pageEpoch"], "document-one");
+        let legacy: RefEntry = serde_json::from_value(serde_json::json!({
+            "tag":"button", "role":null, "name":"Save", "selector":"#save", "nth":null
+        }))
+        .unwrap();
+        assert!(legacy.identity.is_none());
+        assert!(legacy.semantic_version.is_none());
+    }
 
     #[test]
     fn wait_timeout_preserves_diagnostics_in_a_typed_failure() {
@@ -3982,7 +4033,7 @@ mod tests {
         .unwrap();
         socket
             .send(Message::Text(
-                json!({"type":"hello","windowId":"main"}).to_string().into(),
+                json!({"type":"hello","windowId":"main","bridgeKey":crate::identity::bridge_key("main")}).to_string().into(),
             ))
             .await
             .unwrap();

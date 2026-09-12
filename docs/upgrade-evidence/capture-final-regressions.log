@@ -1,0 +1,43 @@
+✔ UP-T081/082/084 one pair preserves this, all arguments and resolved object (11.663375ms)
+✔ UP-T083 synchronous throw stays synchronous and preserves exception (1.123833ms)
+✔ UP-T084 rejection reason identity survives telemetry (0.949875ms)
+✔ UP-T085 ignored rejection remains unhandled (50.140167ms)
+✔ UP-T086 serialization never calls getters/toJSON or fails business (1.365791ms)
+✔ UP-T087 binary and streams summarized without consuming data (2.085541ms)
+✔ UP-T088/089 sensitive keys removed before transport and UTF8 bounded (0.920875ms)
+✔ UP-T090 saturated telemetry queue leaves calls successful and counts drops (15.292542ms)
+✔ UP-T096 cleanup never overwrites a later wrapper (0.742167ms)
+✔ UP-T081 exact connector namespace excluded, similarly named business retained (1.098709ms)
+✔ UP-T097 controlled readiness self-test uses only connector namespace (1.275458ms)
+✔ UP-T096 stopped owned hook restores invoke and legacy can reactivate it (0.44125ms)
+✔ UP-T081 module and global forwarding paths produce one pair each (0.637709ms)
+✔ UP-T087 typed array overridden getter is never touched (0.513583ms)
+✔ UP-T093 stop never cancels the business promise or reports a terminal event (0.69025ms)
+✔ UP-T091/093 stop barrier delivers already queued evidence before acknowledgement (0.8815ms)
+✔ UP-T102/107 host revocation acknowledgement releases owned hook and queue (1.402209ms)
+✔ UP-T081/082/084 readonly native invoke observed through transport and exact callbacks (20.544416ms)
+✔ UP-T084 native rejected callback preserves exact reason (2.815625ms)
+✔ UP-T081/092 native fetch to postMessage fallback deduplicates callback pair (1.253791ms)
+✔ UP-T096 later callback wrappers survive capture cleanup (0.729042ms)
+✔ UP-T085 readonly native callback path preserves unhandled rejection (60.558875ms)
+✔ UP-T093/107 page watchdog expires only its lease without polling or cancelling invoke (0.982541ms)
+✔ UP-T091/107 shared watchdog leaves later lease active and configure cannot refresh deadline (0.58975ms)
+✔ UP-T081/093/107 immutable transport watchdog restores callbacks and original business promise (0.872708ms)
+✔ UP-T091/107 late rejected batch cannot stop a newer session (new source) (0.46075ms)
+✔ UP-T091/107 late rejected batch cannot stop a newer session (same source) (0.354584ms)
+✔ UP-T096/097 readiness observes current writable invoke path (peer bypasses connector hook) (0.383333ms)
+✔ UP-T096/097 readiness observes current writable invoke path (peer delegates connector hook) (0.365625ms)
+✔ UP-T096/097 readiness observes immutable invoke current fetch path (peer bypasses connector hook) (0.550791ms)
+✔ UP-T096/097 readiness observes immutable invoke current fetch path (peer delegates connector hook) (0.625375ms)
+✔ UP-T091/107 queued-before-reconfigure batches retain their old generation (new source) (0.613375ms)
+✔ UP-T091/107 queued-before-reconfigure batches retain their old generation (same source) (0.365583ms)
+✔ T14 monitor refuses wrong window before altering flags (3.204583ms)
+✔ T14 monitor acknowledges actual window, page epoch and applied state (0.40275ms)
+ℹ tests 35
+ℹ suites 0
+ℹ pass 35
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 263.8945

@@ -1,0 +1,22 @@
+{
+  "name": "tauri-connector-verification",
+  "private": true,
+  "version": "0.0.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "npm run test:helpers && npm run test:browser && npm run test:contracts",
+    "test:helpers": "node --test plugin/tests/*.test.cjs",
+    "test:browser": "node plugin/tests/workflow/page.test.cjs && node plugin/tests/semantic/core.test.cjs && node plugin/src/screenshot/geometry.test.cjs",
+    "test:contracts": "node --test scripts/upgrade-contracts.test.mjs scripts/feature-off-harness.test.mjs",
+    "fixture:prepare": "node examples/workflow-fixture/scripts/prepare.mjs",
+    "acceptance:check": "node scripts/upgrade-acceptance.mjs --check",
+    "acceptance:render": "node scripts/upgrade-acceptance.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  }
+}

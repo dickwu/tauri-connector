@@ -1,11 +1,9 @@
-// Real Chromium DOM tests. Requires the agent-browser CLI; no npm dependencies.
+// Real Chromium DOM tests using the repository's locked Playwright and React.
 // Run: node plugin/tests/workflow/page.test.cjs
 const { readFile } = require('node:fs/promises');
 const { createServer } = require('node:http');
-const { execFile } = require('node:child_process');
-const { promisify } = require('node:util');
 const { join } = require('node:path');
-const exec = promisify(execFile);
+const { chromium } = require('playwright');
 
 async function browserTests(runtime) {
   const results = [];
@@ -231,6 +229,15 @@ async function browserTests(runtime) {
       equal(e.error.code, 'observation_failed'); equal(e.dispatched, false);
     } finally { window.MutationObserver = original; }
   });
+  await test('UP-T020 semantic replacement cannot silently change active workflow meaning', async () => {
+    const h = await setup('<button>Save</button>');
+    const original = window.__CONNECTOR_SEMANTIC__;
+    try {
+      Object.defineProperty(window, '__CONNECTOR_SEMANTIC__', { value: { ...original, version: 'changed' }, configurable: true });
+      const r = await call('execute', { ...h, step: { op: 'click', target: target('button') } });
+      equal(r.error.code, 'semantic_version_changed'); equal(r.dispatched, false);
+    } finally { Object.defineProperty(window, '__CONNECTOR_SEMANTIC__', { value: original, configurable: true }); await call('cleanup', h); }
+  });
   await test('cleanup is idempotent and prevents action after cancellation', async () => {
     const h = await setup('<button>Save</button>');
     let clicks = 0; document.querySelector('button').onclick = () => clicks++;
@@ -281,31 +288,24 @@ async function browserTests(runtime) {
 
 (async () => {
   const runtime = await readFile(join(__dirname, '../../src/workflow/page.js'), 'utf8');
+  const semantic = await readFile(join(__dirname, '../../src/semantic/core.js'), 'utf8');
   const html = await readFile(join(__dirname, 'fixture.html'));
-  const reactBundle = process.env.WORKFLOW_REACT_MODULES ? require('./react-fixture.cjs')(process.env.WORKFLOW_REACT_MODULES) : null;
+  const reactBundle = require('./react-fixture.cjs')(process.env.WORKFLOW_REACT_MODULES || join(__dirname, '../../..'));
   const server = createServer((req, res) => {
     if (req.url === '/react-fixture.js' && reactBundle) { res.setHeader('Content-Type', 'text/javascript'); res.end(reactBundle); }
     else { res.setHeader('Content-Type', 'text/html'); res.end(Buffer.concat([html, Buffer.from(reactBundle ? '<script src="/react-fixture.js"></script>' : '')])); }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const session = `workflow-dom-${process.pid}`;
-  const options = { env: { ...process.env, AGENT_BROWSER_SESSION: session }, maxBuffer: 8 * 1024 * 1024, timeout: 60000 };
+  let browser;
   try {
-    await exec('agent-browser', ['open', `http://127.0.0.1:${server.address().port}`], options);
-    const child = execFile('agent-browser', ['--json', 'eval', '--stdin'], options);
-    const completion = new Promise((resolve, reject) => {
-      let out = ''; let err = '';
-      child.stdout.on('data', x => out += x); child.stderr.on('data', x => err += x);
-      child.on('error', reject); child.on('exit', code => code === 0 ? resolve(out) : reject(new Error(err || out)));
-    });
-    child.stdin.end(`(${browserTests.toString()})(${runtime})`);
-    const response = JSON.parse(await completion);
-    if (!response.success) throw new Error(JSON.stringify(response));
-    const result = response.data.result;
-    console.log(JSON.stringify(result, null, 2));
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    const result = await page.evaluate(`(async () => { ${semantic}; return (${browserTests.toString()})(${runtime}); })()`);
+    console.log(JSON.stringify({ layer: 'browser', browser: browser.version(), ...result }, null, 2));
     if (result.failures) process.exitCode = 1;
   } finally {
-    await exec('agent-browser', ['close'], options).catch(() => {});
+    await browser?.close();
     await new Promise(resolve => server.close(resolve));
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

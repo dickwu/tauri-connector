@@ -12,7 +12,23 @@
   </style>
 </head>
 <body>
+  <section id="upgrade-fixture" style="margin:60px 0 16px">
+    <button id="pick-save" data-testid="pick-save">Save</button>
+    <button id="pick-save-two" data-testid="pick-save-two">Save</button>
+    <input id="pick-checkbox" type="checkbox" aria-label="Fixture checkbox">
+    <a id="pick-link" href="#navigation">Fixture link</a>
+    <input id="pick-password" type="password" value="fixture-private-value" aria-label="Password">
+    <form id="pick-form"><button id="pick-submit">Submit fixture</button></form>
+  </section>
   <div id="fixture"></div>
+  <script>
+    const record = kind => window.__TAURI_INTERNALS__.invoke('fixture_record_input', {kind});
+    document.querySelector('#upgrade-fixture').addEventListener('click', () => record('click'));
+    document.querySelector('#pick-save').addEventListener('click', () => window.__TAURI_INTERNALS__.invoke('fixture_create_task', {name:'picker-must-not-save'}));
+    document.querySelector('#pick-form').addEventListener('submit', event => {event.preventDefault();record('submit');});
+    document.querySelector('#pick-checkbox').addEventListener('change', () => record('change'));
+    document.querySelector('#pick-link').addEventListener('click', () => record('navigation'));
+  </script>
   <script src="react.js"></script>
   <script src="fixture-app.js"></script>
 </body>

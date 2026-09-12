@@ -9,6 +9,8 @@ use connector_client::ConnectorClient;
 mod commands;
 mod doctor;
 mod hook;
+mod identity_binding;
+mod inspection;
 mod skills;
 mod snapshot;
 mod update;
@@ -31,11 +33,14 @@ struct Cli {
     /// Select a discovered app by identifier
     #[arg(long, global = true)]
     app_id: Option<String>,
+    /// Lock the exact application process instance (also TAURI_CONNECTOR_APP_INSTANCE_ID)
+    #[arg(long, global = true)]
+    app_instance_id: Option<String>,
     /// Explicit path to .connector.json
     #[arg(long, global = true)]
     pid_file: Option<PathBuf>,
     /// Target Tauri window label
-    #[arg(long, global = true, default_value = "main")]
+    #[arg(long, alias = "window", global = true, default_value = "main")]
     window_id: String,
     #[command(subcommand)]
     command: Commands,
@@ -43,6 +48,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Start, query or cancel active element selection (host token required).
+    Picker {
+        #[command(subcommand)]
+        command: inspection::PickerCommand,
+    },
+    /// Start active element selection and wait up to 10 seconds without resubmission.
+    SelectElement(inspection::PickerStart),
+    /// Query authenticated app instance and workspace identity.
+    Identity,
+    /// Diagnose transport, bridge and page responsiveness without repair or replay.
+    RuntimeHealth {
+        #[arg(long,default_value="runtime",value_parser=["transport","bridge","runtime"])]
+        depth: String,
+        #[arg(long,default_value_t=2000,value_parser=clap::value_parser!(u64).range(100..=10000))]
+        timeout_ms: u64,
+    },
     /// Execute and inspect app-owned workflows (requires host workflow token)
     Workflow {
         #[command(subcommand)]
@@ -223,6 +244,8 @@ enum Commands {
     },
     /// Take a screenshot and save to file
     Screenshot {
+        #[command(flatten)]
+        inspection: inspection::ScreenshotOptions,
         /// Output file path (e.g. /tmp/shot.png)
         output: Option<String>,
         /// CSS selector or @ref for an element-scoped screenshot
@@ -589,6 +612,13 @@ enum HookCommands {
 
 #[derive(Subcommand)]
 enum IpcCommands {
+    /// Manage authorized IPC v2 capture sessions.
+    Capture {
+        #[command(subcommand)]
+        command: inspection::CaptureCommand,
+    },
+    /// Query authorized v2 events and pending invocations.
+    Query(inspection::Query),
     /// Execute a Tauri IPC command
     Exec {
         /// Command name (e.g. "greet")
@@ -645,11 +675,70 @@ enum EventCommands {
 async fn main() {
     let cli = Cli::parse();
     commands::set_window_id(cli.window_id.clone());
+    let workflow_handle = match &cli.command {
+        Commands::Workflow {
+            command:
+                WorkflowCommand::Get { run_id, .. }
+                | WorkflowCommand::Cancel { run_id }
+                | WorkflowCommand::Resume { run_id, .. },
+        } => Some(run_id.as_str()),
+        _ => None,
+    };
+    let remembered = workflow_handle.and_then(|handle| match identity_binding::load(handle) {
+        Ok(binding) => binding,
+        Err(error) => {
+            eprintln!("Handle binding unavailable: {error}");
+            None
+        }
+    });
+    let explicit_instance = cli
+        .app_instance_id
+        .clone()
+        .or_else(|| std::env::var("TAURI_CONNECTOR_APP_INSTANCE_ID").ok());
+    if let (Some(explicit), Some(binding)) = (&explicit_instance, &remembered) {
+        if explicit != &binding.app_instance_id {
+            eprintln!("app_identity_mismatch: run belongs to another app instance");
+            std::process::exit(1);
+        }
+    }
+    let binding_unavailable =
+        workflow_handle.is_some() && remembered.is_none() && explicit_instance.is_none();
     let connection_options = ConnectionOptions {
         cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        host: cli.host.clone(),
-        port: cli.port,
+        host: cli
+            .host
+            .clone()
+            .or_else(|| remembered.as_ref().map(|b| b.host.clone())),
+        port: cli.port.or_else(|| remembered.as_ref().map(|b| b.port)),
         app_id: cli.app_id.clone(),
+        app_instance_id: explicit_instance
+            .or_else(|| remembered.as_ref().map(|b| b.app_instance_id.clone()))
+            .or_else(|| match &cli.command {
+                Commands::Picker { command } => command
+                    .handle()
+                    .and_then(connector_client::identity::instance_from_handle)
+                    .map(str::to_owned),
+                Commands::Ipc {
+                    action:
+                        IpcCommands::Capture {
+                            command:
+                                inspection::CaptureCommand::Status { capture_session_id }
+                                | inspection::CaptureCommand::Stop { capture_session_id },
+                        },
+                } => connector_client::identity::instance_from_handle(capture_session_id)
+                    .map(str::to_owned),
+                Commands::Ipc {
+                    action: IpcCommands::Query(query),
+                } => connector_client::identity::instance_from_handle(&query.capture_session_id)
+                    .map(str::to_owned),
+                Commands::Artifacts {
+                    action: ArtifactCommands::Show { artifact, .. },
+                } => connector_client::identity::instance_from_handle(artifact).map(str::to_owned),
+                Commands::Artifacts {
+                    action: ArtifactCommands::Compare { before, .. },
+                } => connector_client::identity::instance_from_handle(before).map(str::to_owned),
+                _ => None,
+            }),
         pid_file: cli.pid_file.clone(),
     };
 
@@ -792,13 +881,38 @@ async fn main() {
 
     let mut client = ConnectorClient::new();
 
-    // Connect with ping fallback
+    if let Some(identity) = &resolved.identity {
+        if let Err(error) = client.bind_instance(&identity.app_instance_id) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
+
+    // Connect only to the endpoint selected by strict discovery.
     if let Err(e) = client.connect(&resolved.host, resolved.port).await {
         eprintln!(
             "Error: Failed to connect to {}:{}: {e}",
             resolved.host, resolved.port
         );
         std::process::exit(1);
+    }
+
+    if binding_unavailable {
+        match client
+            .send(serde_json::json!({"type":"bridge_status"}))
+            .await
+        {
+            Ok(status)
+                if status
+                    .get("inspectionProtocolVersion")
+                    .and_then(serde_json::Value::as_u64)
+                    == Some(1) =>
+            {
+                eprintln!("app_identity_required: no retained binding for this run; supply --app-instance-id from the original report");
+                std::process::exit(1);
+            }
+            _ => {}
+        }
     }
 
     let refs = match snapshot::load_ref_cache(&resolved, &cli.window_id) {
@@ -810,6 +924,23 @@ async fn main() {
     };
 
     let result = match cli.command {
+        Commands::Picker { command } => {
+            inspection::lifecycle(&client, command, &cli.window_id).await
+        }
+        Commands::SelectElement(start) => {
+            inspection::picker(&client, start.args(&cli.window_id, true)).await
+        }
+        Commands::Identity => {
+            inspection::call(&client, "app_identity", &serde_json::json!({})).await
+        }
+        Commands::RuntimeHealth { depth, timeout_ms } => {
+            inspection::call(
+                &client,
+                "runtime_health",
+                &serde_json::json!({"windowId":cli.window_id,"depth":depth,"timeoutMs":timeout_ms}),
+            )
+            .await
+        }
         Commands::Snapshot {
             interactive,
             compact,
@@ -956,6 +1087,7 @@ async fn main() {
             .await
         }
         Commands::Screenshot {
+            inspection,
             output,
             selector,
             format,
@@ -966,22 +1098,45 @@ async fn main() {
             name_hint,
             annotate,
         } => {
-            let instance = resolved.instance.as_ref();
-            commands::screenshot(
-                &client,
-                output.as_deref(),
-                selector.as_deref(),
-                &format,
-                quality,
-                max_width,
-                overwrite,
-                output_dir.as_deref(),
-                name_hint.as_deref(),
-                annotate,
-                instance,
-                &resolved,
-            )
-            .await
+            if inspection.is_rich() {
+                let mut args = serde_json::json!({"windowId":cli.window_id,"format":format,"quality":quality,"overwrite":overwrite,"annotate":annotate});
+                if let Some(selector) = selector {
+                    args["selector"] = serde_json::json!(selector);
+                }
+                if let Some(width) = max_width {
+                    args["maxWidth"] = serde_json::json!(width);
+                }
+                if let Some(dir) = output_dir {
+                    args["outputDir"] = serde_json::json!(dir);
+                    args["save"] = serde_json::json!(true);
+                }
+                if let Some(name) = name_hint {
+                    args["nameHint"] = serde_json::json!(name);
+                }
+                match inspection.add_args(&mut args) {
+                    Ok(()) => {
+                        inspection::screenshot(&client, args, output.as_deref(), overwrite).await
+                    }
+                    Err(error) => Err(error),
+                }
+            } else {
+                let instance = resolved.instance.as_ref();
+                commands::screenshot(
+                    &client,
+                    output.as_deref(),
+                    selector.as_deref(),
+                    &format,
+                    quality,
+                    max_width,
+                    overwrite,
+                    output_dir.as_deref(),
+                    name_hint.as_deref(),
+                    annotate,
+                    instance,
+                    &resolved,
+                )
+                .await
+            }
         }
         Commands::Dom => commands::cached_dom(&client, &cli.window_id).await,
         Commands::Find { selector, strategy } => {
@@ -992,6 +1147,10 @@ async fn main() {
             commands::resize(&client, &cli.window_id, width, height).await
         }
         Commands::Ipc { action } => match action {
+            IpcCommands::Capture { command } => {
+                inspection::capture(&client, command, &cli.window_id).await
+            }
+            IpcCommands::Query(query) => inspection::query(&client, query).await,
             IpcCommands::Exec { command, args } => {
                 commands::ipc_exec(&client, &command, args.as_deref()).await
             }
@@ -1164,6 +1323,10 @@ async fn main() {
                 resolved.port,
                 command,
                 &cli.window_id,
+                resolved
+                    .identity
+                    .as_ref()
+                    .map(|v| v.app_instance_id.as_str()),
             )
             .await
             {
@@ -1416,5 +1579,103 @@ mod workflow_cli_tests {
             "evidence"
         ])
         .is_ok());
+    }
+}
+
+#[cfg(test)]
+mod inspection_cli_tests {
+    use super::*;
+    #[test]
+    fn picker_lifecycle_and_convenience_help_match_contract() {
+        let start = Cli::try_parse_from([
+            "tauri-connector",
+            "picker",
+            "start",
+            "--window",
+            "settings",
+            "--request-key",
+            "fixture",
+            "--timeout-ms",
+            "60000",
+        ])
+        .unwrap();
+        assert_eq!(start.window_id, "settings");
+        assert!(matches!(
+            start.command,
+            Commands::Picker {
+                command: inspection::PickerCommand::Start(_)
+            }
+        ));
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "picker",
+            "get",
+            "app:picker:id",
+            "--wait-ms",
+            "10000"
+        ])
+        .is_ok());
+        assert!(
+            Cli::try_parse_from(["tauri-connector", "picker", "cancel", "app:picker:id"]).is_ok()
+        );
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "select-element",
+            "--timeout-ms",
+            "60000"
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "select-element",
+            "--no-screenshot",
+            "--screenshot-source",
+            "auto"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "picker",
+            "start",
+            "--timeout-ms",
+            "4999"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "picker",
+            "get",
+            "p",
+            "--wait-ms",
+            "10001"
+        ])
+        .is_err());
+    }
+    #[test]
+    fn capture_and_health_help_match_contract() {
+        for args in [
+            vec!["identity"],
+            vec![
+                "runtime-health",
+                "--depth",
+                "transport",
+                "--timeout-ms",
+                "100",
+            ],
+            vec!["ipc", "capture", "start", "--result-policy", "preview"],
+            vec!["ipc", "capture", "status", "app:capture:id"],
+            vec!["ipc", "capture", "stop", "app:capture:id"],
+            vec![
+                "ipc",
+                "query",
+                "app:capture:id",
+                "--phase",
+                "failed",
+                "--limit",
+                "500",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(std::iter::once("tauri-connector").chain(args)).is_ok());
+        }
     }
 }

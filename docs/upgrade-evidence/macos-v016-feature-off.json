@@ -1,0 +1,13 @@
+{
+  "platform": "darwin",
+  "layer": "native-webview",
+  "display": "desktop-session",
+  "nativeAppRunning": true,
+  "connectorFeature": false,
+  "listeningPorts": [],
+  "checkedPorts": [
+    19555,
+    19556
+  ],
+  "passed": true
+}

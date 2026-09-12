@@ -1,0 +1,69 @@
+{
+  "recordedAt": "2026-09-12T21:18:59.600897+00:00",
+  "type": "final_local_evidence_mapping",
+  "sourceSpec": "tauri-connector-upgrade-codex-spec-v1.1.md",
+  "totalIds": 144,
+  "policy": "Each of the144 IDs has independent implementation, unit, integration, native and CI states. complete means implemented, not fully accepted. passed is limited to the described reached assertions. nativeVerified remains partial/blocked when a required desktop platform or scenario is unrun; macOS observations are separately recorded in nativePlatforms. All remote CI states remain not-run/blocked at this checkpoint. Original failed runs are retained and explicitly superseded by later evidence; ID labels alone are never credited.",
+  "nativeInputs": [
+    "docs/upgrade-evidence/macos-upgrade-native.json",
+    "docs/upgrade-evidence/macos-entry-points.json",
+    "docs/upgrade-evidence/macos-workflow-native.json",
+    "docs/upgrade-evidence/macos-screenshot-native.json",
+    "docs/upgrade-evidence/macos-feature-off-native.json"
+  ],
+  "remoteCi": "not_run",
+  "windowsNative": "not_run",
+  "linuxNative": "not_run",
+  "linuxBuild": "passed_real_sysroot_cross_check",
+  "supersededDraftCheckpoint": "2026-09-12T18:10:17.604099+00:00",
+  "counts": {
+    "implemented": {
+      "complete": 144
+    },
+    "unitVerified": {
+      "passed": 117,
+      "partial": 26,
+      "not_applicable": 1
+    },
+    "integrationVerified": {
+      "passed": 106,
+      "partial": 38
+    },
+    "nativeVerified": {
+      "partial": 35,
+      "not_applicable": 88,
+      "blocked": 21
+    },
+    "ciVerified": {
+      "blocked": 144
+    }
+  },
+  "macosNativeCounts": {
+    "partial": 34,
+    "not_applicable": 60,
+    "passed": 29,
+    "blocked": 21
+  },
+  "unimplementedIds": [],
+  "partialImplementationRequirements": [],
+  "summary": "docs/upgrade-evidence/final-verification-summary.json",
+  "checks": {
+    "render": "passed",
+    "acceptance": "passed",
+    "command": "node scripts/upgrade-acceptance.mjs; node scripts/upgrade-acceptance.mjs --check",
+    "diffWhitespace": "passed"
+  },
+  "reviewNotes": [
+    "Native ID tags were checked against actual script assertions; e.g. Escape-only does not prove Enter/IME, two-client handle equality does not prove independent installer-task counts, and one2x image does not prove all zoom levels.",
+    "Native100-cycle attempts remain incomplete; locked-desktop explanation never converts them to passed.",
+    "Earlier geometry/capture-expiry/Linux-sysroot shortcomings are superseded by final source and logs."
+  ],
+  "releaseCandidate": "0.16.0",
+  "latestBenchmarks": [
+    "docs/benchmarks/inspection-upgrade.json",
+    "docs/benchmarks/capture-benchmark.json",
+    "docs/upgrade-evidence/macos-screenshot-timings.json"
+  ],
+  "latestRust": "docs/upgrade-evidence/v016-workspace-tests.log",
+  "latestJavascript": "docs/upgrade-evidence/v016-js-tests.log"
+}

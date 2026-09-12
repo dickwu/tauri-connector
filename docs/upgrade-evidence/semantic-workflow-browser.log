@@ -1,0 +1,117 @@
+{
+  "layer": "browser",
+  "browser": "153.0.8010.12",
+  "tests": 27,
+  "failures": 0,
+  "reactCoverage": "verified",
+  "results": [
+    {
+      "name": "scope, role, name and entity intersect, with normalized exact names",
+      "passed": true
+    },
+    {
+      "name": "ambiguous targets and ambiguous scopes never choose first",
+      "passed": true
+    },
+    {
+      "name": "missing entity cannot degrade to the locator without entity",
+      "passed": true
+    },
+    {
+      "name": "entity is rechecked after virtual-list node reuse",
+      "passed": true
+    },
+    {
+      "name": "associated and nested labels locate inputs exactly",
+      "passed": true
+    },
+    {
+      "name": "fill replaces and type appends through native setter, with controlled event state",
+      "passed": true
+    },
+    {
+      "name": "React controlled textarea submits application state after fill and type",
+      "passed": true
+    },
+    {
+      "name": "number in a string slot is rejected without mutation",
+      "passed": true
+    },
+    {
+      "name": "hidden, disabled, readonly, covered and inert controls fail before dispatch",
+      "passed": true
+    },
+    {
+      "name": "press targets and reports the actual focused object",
+      "passed": true
+    },
+    {
+      "name": "duplicate in-flight step identity dispatches a click only once",
+      "passed": true
+    },
+    {
+      "name": "unsupported key chords fail before focus or keyboard effects",
+      "passed": true
+    },
+    {
+      "name": "application prevention and focus-time replacement never become successful fills",
+      "passed": true
+    },
+    {
+      "name": "input cannot succeed when focus is redirected or the rendered target rejects its value",
+      "passed": true
+    },
+    {
+      "name": "fresh current-state observation does not latch a vanished element",
+      "passed": true
+    },
+    {
+      "name": "conditions use current values, nullable attributes and any branch evidence",
+      "passed": true
+    },
+    {
+      "name": "result conditions preserve JSON pointer escapes and legitimate null",
+      "passed": true
+    },
+    {
+      "name": "negative conditions are state only and unsupported transition semantics fail closed",
+      "passed": true
+    },
+    {
+      "name": "stale page identity and unsupported bare refs cannot dispatch",
+      "passed": true
+    },
+    {
+      "name": "observer registration failure blocks subsequent dispatch",
+      "passed": true
+    },
+    {
+      "name": "UP-T020 semantic replacement cannot silently change active workflow meaning",
+      "passed": true
+    },
+    {
+      "name": "cleanup is idempotent and prevents action after cancellation",
+      "passed": true
+    },
+    {
+      "name": "expired observation cannot dispatch and releases resources",
+      "passed": true
+    },
+    {
+      "name": "evidence excludes user values and arbitrary data attributes",
+      "passed": true
+    },
+    {
+      "name": "sensitive field extraction fails closed before values enter result bindings",
+      "passed": true
+    },
+    {
+      "name": "scoped evidence stays within the requested dialog",
+      "passed": true
+    },
+    {
+      "name": "evidence does not echo unrecognized custom tag or role strings",
+      "passed": true
+    }
+  ]
+}

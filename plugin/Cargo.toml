@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-connector"
-version = "0.15.0"
+version = "0.16.0"
 edition = "2024"
 description = "MCP-compatible Tauri v2 plugin with xcap cross-platform screenshot, snapdom fallback, dual-path JS execution, and embedded MCP server"
 license = "MIT"
@@ -12,8 +12,10 @@ readme = "../README.md"
 links = "tauri-plugin-connector"
 
 [features]
-default = ["xcap"]
-xcap = ["dep:xcap", "dep:image"]
+default = ["xcap", "native-screenshot"]
+xcap = ["dep:xcap", "capture-codec"]
+capture-codec = ["dep:image"]
+native-screenshot = ["capture-codec", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-web-kit", "dep:objc2-foundation", "dep:objc2-core-graphics", "dep:block2", "dep:webview2-com", "dep:windows", "dep:webkit2gtk", "dep:gio", "dep:cairo-rs"]
 
 [package.metadata.docs.rs]
 no-default-features = true
@@ -26,7 +28,7 @@ crate-type = ["cdylib", "rlib"]
 tauri-plugin = { version = "2", features = ["build"] }
 
 [dependencies]
-connector-client = { version = "0.15.0", path = "../crates/client" }
+connector-client = { version = "0.16.0", path = "../crates/client" }
 tauri = "2"
 tauri-plugin = "2"
 serde = { version = "1", features = ["derive"] }
@@ -45,3 +47,20 @@ regex = { version = "1", default-features = false, features = ["std", "perf"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+block2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError"], optional = true }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSGraphicsContext", "objc2-core-graphics"], optional = true }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit", "objc2-core-foundation"], optional = true }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider"], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = { version = "0.38", optional = true }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2", features = ["v2_40"], optional = true }
+gio = { version = "0.18", optional = true }
+cairo-rs = { version = "0.18", optional = true }

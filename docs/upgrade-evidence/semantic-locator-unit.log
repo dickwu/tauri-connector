@@ -1,0 +1,11 @@
+✔ B09 role and text constraints intersect (2.396958ms)
+✔ B09 all provided attributes intersect rather than union (0.3875ms)
+✔ B09 text in a child does not discard the parent matching an explicit role (0.851125ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 43.571125

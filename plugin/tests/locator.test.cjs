@@ -3,6 +3,7 @@ const {test} = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto').webcrypto;
 function node(id, attrs, text) {
   return { id, tagName: 'BUTTON', nodeType: 1, textContent: text, children: [], parentElement: null,
     getAttribute(name) { return attrs[name] || null; }, hasAttribute(name) { return name in attrs; },
@@ -10,7 +11,9 @@ function node(id, attrs, text) {
 }
 async function locate(query, nodes) {
   const document = { querySelectorAll(selector) { return selector === '*' ? nodes : []; }, getElementById() { return null; } };
-  const context = {document, CSS:{escape: x=>x}};
+  const context = {document, crypto, CSS:{escape: x=>x}, getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})};
+  context.window = context;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/semantic/core.js'), 'utf8'), context);
   const helper = path.join(__dirname, '../js/locator.js');
   return vm.runInNewContext(fs.readFileSync(helper, 'utf8'), context)(query, null);
 }

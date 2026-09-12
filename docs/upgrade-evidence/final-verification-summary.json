@@ -1,0 +1,688 @@
+{
+  "recordedAt": "2026-09-12T21:15:33.117310+00:00",
+  "scope": "Final acceptance evidence audit; not a release/deployment receipt",
+  "statusPolicy": "Implementation, assertion coverage, native platforms and remote CI are separate. Test ID labels alone never establish coverage. Failed historical runs remain historical; only reached assertions are credited.",
+  "releasePreparationVersion": "0.16.0",
+  "baselineVersion": "0.15.0",
+  "supersededFindings": [
+    {
+      "finding": "macOS native geometry_unknown prevented image capture",
+      "history": [
+        "docs/upgrade-evidence/native-selection-incomplete.json"
+      ],
+      "supersededBy": [
+        "docs/upgrade-evidence/macos-screenshot-native.json",
+        "docs/upgrade-evidence/macos-upgrade-native.json"
+      ],
+      "current": "Real masked WKWebView viewport and element images verified; earlier failed run is preserved."
+    },
+    {
+      "finding": "capture sessions have no expiry",
+      "supersededBy": [
+        "plugin/src/capture/store.rs",
+        "plugin/src/capture/mod.rs",
+        "plugin/src/capture/page.js",
+        "docs/upgrade-evidence/capture-expiry-rust.log",
+        "docs/upgrade-evidence/capture-expiry-js.log"
+      ],
+      "current": "Monotonic ten-minute active lifetime, bounded page watchdog and background retention cleanup implemented and tested."
+    },
+    {
+      "finding": "Linux screenshot code cannot be checked without a sysroot",
+      "history": [
+        "docs/upgrade-evidence/platform-test-boundary.json"
+      ],
+      "supersededBy": [
+        "docs/upgrade-evidence/linux-final-check.log",
+        "docs/upgrade-evidence/linux-fixture-check.log",
+        "docs/upgrade-evidence/linux-sysroot-packages.json"
+      ],
+      "current": "Real Debian GTK/WebKit sysroot cross-check reached plugin tests/native+combined features and fixture; no Linux GUI execution."
+    },
+    {
+      "finding": "inspection capability declaration is absent",
+      "supersededBy": [
+        "plugin/src/capabilities.rs",
+        "docs/upgrade-evidence/capabilities-all-feature-tests.txt"
+      ],
+      "current": "Shared build-derived anonymous capability declaration is exported without private observations."
+    }
+  ],
+  "localTests": {
+    "final-core-tests.log": {
+      "evidence": "docs/upgrade-evidence/final-core-tests.log",
+      "sha256": "e7fb158213fa75a1de5547e211700cd6793cc89bce299c9c2322e1db606b8123",
+      "summaries": [
+        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.90s",
+        "test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s",
+        "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ],
+      "reproductionCommand": "cargo test --locked -p connector-cli -p connector-mcp-server -p connector-client",
+      "commandProvenance": "Executable reproduction command; exact original flags are not printed in this log. Original lane reports retain their recorded commands."
+    },
+    "final-plugin-tests.log": {
+      "evidence": "docs/upgrade-evidence/final-plugin-tests.log",
+      "sha256": "948d7552bbe7bfd1d31171b844cb0027d4f77f77e516d89f0a7cbea4909effb8",
+      "summaries": [
+        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.03s",
+        "test result: ok. 159 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.13s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ],
+      "reproductionCommand": "cargo test --locked -p tauri-plugin-connector",
+      "commandProvenance": "Executable reproduction command; exact original flags are not printed in this log. Original lane reports retain their recorded commands."
+    },
+    "release-gate-js-tests.log": {
+      "command": "npm test",
+      "evidence": "docs/upgrade-evidence/release-gate-js-tests.log",
+      "sha256": "341e048ea884e18781ee38cee9bb898ed577f0583fc0ae562d941a8653a8bec3",
+      "summaries": [
+        "ℹ tests 85",
+        "ℹ pass 85",
+        "ℹ fail 0",
+        "  \"tests\": 27,",
+        "  \"failures\": 0,",
+        "  \"tests\": 19,",
+        "  \"failures\": 0,",
+        "ℹ tests 5",
+        "ℹ pass 5",
+        "ℹ fail 0"
+      ],
+      "commandProvenance": "Confirmed in current root/semantic execution."
+    },
+    "capture-final-regressions.log": {
+      "command": "node --test plugin/tests/capture.test.cjs plugin/tests/monitor.test.cjs",
+      "evidence": "docs/upgrade-evidence/capture-final-regressions.log",
+      "sha256": "73c4fc291e188b6b0ebd8ea5f40cdcd9df059b3c8f9163d20c4eb9b2d544dc14",
+      "summaries": [
+        "ℹ tests 35",
+        "ℹ pass 35",
+        "ℹ fail 0"
+      ],
+      "commandProvenance": "Confirmed in current root/semantic execution."
+    },
+    "final-clippy.log": {
+      "evidence": "docs/upgrade-evidence/final-clippy.log",
+      "sha256": "4c85b43c68a042b6a5db2b1078a1256edb552bb1f5b61b54e377630c538e8793",
+      "summaries": [
+        "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.33s"
+      ],
+      "reproductionCommand": "cargo clippy --locked --workspace --all-targets -- -D warnings",
+      "commandProvenance": "Executable reproduction command; exact original flags are not printed in this log. Original lane reports retain their recorded commands."
+    },
+    "capture-expiry-rust.log": {
+      "evidence": "docs/upgrade-evidence/capture-expiry-rust.log",
+      "sha256": "eb3fe977e132f076eb60015e371f34290c26538e2b9ad28f88d070387542b9eb",
+      "summaries": [
+        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.20s",
+        "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 139 filtered out; finished in 0.05s"
+      ],
+      "reproductionCommand": "cargo test --locked -p tauri-plugin-connector capture::",
+      "commandProvenance": "Executable reproduction command; exact original flags are not printed in this log. Original lane reports retain their recorded commands."
+    },
+    "capture-expiry-js.log": {
+      "evidence": "docs/upgrade-evidence/capture-expiry-js.log",
+      "sha256": "c2947c352692d4197628edcc49bbb2d5ac4551d86a667f7dea5cf3691960b316",
+      "summaries": [
+        "ℹ tests 27",
+        "ℹ pass 27",
+        "ℹ fail 0"
+      ],
+      "reproductionCommand": "node --test plugin/tests/capture.test.cjs plugin/tests/monitor.test.cjs",
+      "commandProvenance": "Executable reproduction command; exact original flags are not printed in this log. Original lane reports retain their recorded commands."
+    },
+    "screenshot-reaper.log": {
+      "evidence": "docs/upgrade-evidence/screenshot-reaper.log",
+      "sha256": "544caffde8fbb941429619a359b6962b7c26a47d979bb1dede173644e9a5a0c8",
+      "summaries": [
+        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.76s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 158 filtered out; finished in 0.01s"
+      ],
+      "reproductionCommand": "cargo test --locked -p tauri-plugin-connector synchronous_host_setup_still_reaps_expired_images_without_api_reads",
+      "commandProvenance": "Executable reproduction command; exact original flags are not printed in this log. Original lane reports retain their recorded commands."
+    }
+  },
+  "nativeRuns": [
+    {
+      "evidence": "docs/upgrade-evidence/macos-upgrade-native.json",
+      "sha256": "10fdc486ee3e8067bf65d0b448c8192923caeb91c46422789d6198f9dc0f71bd",
+      "layer": "native_webview",
+      "passed": true,
+      "testCount": 20,
+      "tests": [
+        {
+          "name": "OS input driver reaches independent native fixture counter",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "legacy WS cannot discard requested native source or required masks",
+          "passed": true,
+          "ids": [
+            "UP-T052",
+            "UP-T060"
+          ]
+        },
+        {
+          "name": "anonymous rich request fails before picker creation",
+          "passed": true,
+          "ids": [
+            "UP-T036",
+            "UP-T102",
+            "UP-PK012"
+          ]
+        },
+        {
+          "name": "native identity and layered health expose cold state",
+          "passed": true,
+          "ids": [
+            "UP-T033"
+          ]
+        },
+        {
+          "name": "native save selection deduplicates, captures and never invokes save",
+          "passed": true,
+          "ids": [
+            "UP-PK001",
+            "UP-PK004",
+            "UP-PK007",
+            "UP-PK014",
+            "UP-PK026",
+            "UP-PK028",
+            "UP-PK029",
+            "UP-T067",
+            "UP-T068",
+            "UP-T074"
+          ]
+        },
+        {
+          "name": "omitted-action call waits for a real native user selection",
+          "passed": true,
+          "ids": [
+            "UP-PK001"
+          ]
+        },
+        {
+          "name": "explicit screenshot backend failure keeps the native selection",
+          "passed": true,
+          "ids": [
+            "UP-PK027",
+            "UP-T074"
+          ]
+        },
+        {
+          "name": "native checkbox gesture has no business default effect",
+          "passed": true,
+          "ids": [
+            "UP-PK014",
+            "UP-PK018"
+          ]
+        },
+        {
+          "name": "native link gesture has no business default effect",
+          "passed": true,
+          "ids": [
+            "UP-PK014",
+            "UP-PK018"
+          ]
+        },
+        {
+          "name": "native form gesture has no business default effect",
+          "passed": true,
+          "ids": [
+            "UP-PK014",
+            "UP-PK018"
+          ]
+        },
+        {
+          "name": "native Escape cancels and releases guard",
+          "passed": true,
+          "ids": [
+            "UP-PK019",
+            "UP-PK020",
+            "UP-T069"
+          ]
+        },
+        {
+          "name": "reload invalidates original picker identity",
+          "passed": true,
+          "ids": [
+            "UP-PK030",
+            "UP-PK031",
+            "UP-T076"
+          ]
+        },
+        {
+          "name": "same GUI workflow load with capture off and on",
+          "passed": true,
+          "ids": [
+            "UP-T105"
+          ]
+        },
+        {
+          "name": "legacy native data callbacks remain available without exposing protected capture",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "native capture returns bounded invoke evidence without legacy leak",
+          "passed": true,
+          "ids": [
+            "UP-T081",
+            "UP-T084",
+            "UP-T088",
+            "UP-T091",
+            "UP-T095"
+          ]
+        },
+        {
+          "name": "native capture preserves rejection, raw binary and pending business work",
+          "passed": true,
+          "ids": [
+            "UP-T084",
+            "UP-T087",
+            "UP-T088",
+            "UP-T093"
+          ]
+        },
+        {
+          "name": "strict instance, capture, GUI workflow, query and native image compose",
+          "passed": true,
+          "ids": [
+            "UP-T099"
+          ]
+        },
+        {
+          "name": "four real entry points share lifecycle, authority and exit semantics",
+          "passed": true,
+          "ids": [
+            "UP-T101",
+            "UP-PK003",
+            "UP-PK004",
+            "UP-PK005",
+            "UP-PK012"
+          ]
+        },
+        {
+          "name": "measured warm full-source vs short-packet transport",
+          "passed": true,
+          "ids": [
+            "UP-T105"
+          ]
+        },
+        {
+          "name": "unknown result keeps original effect and permits captured diagnostics without replay",
+          "passed": true,
+          "ids": [
+            "UP-T100"
+          ]
+        }
+      ]
+    },
+    {
+      "evidence": "docs/upgrade-evidence/macos-entry-points.json",
+      "sha256": "2d46aff25fcae12e0c2c5d9f1aa6c70a2f9dd938f32e03be211634bab737ad03",
+      "layer": "running-native-app-entry-points",
+      "passed": true,
+      "testCount": 8,
+      "tests": [
+        {
+          "name": "Opaque IPC cursor round-trips unchanged through WS, CLI and both MCP servers",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "embedded returns cached masked PNG and complete metadata",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "stdio returns cached masked PNG and complete metadata",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "Both MCPs preserve selected metadata when screenshot failed",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "CLI start -> embedded MCP get -> standalone MCP cancel -> WS retained result",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "Anonymous retained picker denied across WS and both MCP paths",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "CLI omitted-action convenience activates native page picker and cleans up",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "All four shipped inspection JSON examples execute with fresh keys and returned handles",
+          "passed": true,
+          "ids": []
+        }
+      ]
+    },
+    {
+      "evidence": "docs/upgrade-evidence/macos-workflow-native.json",
+      "sha256": "328ae172eefcddedb2e313b397c930ed0bddb31629c9bea5cc1fcff21673db4c",
+      "layer": "native-webview",
+      "passed": true,
+      "testCount": 8,
+      "tests": [
+        {
+          "name": "native React controlled input reaches Rust save exactly once",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "same UI path via one caller request per step",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "two clients share one runKey and cannot change its inputs",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "disconnect and resubmit retain the existing logical run",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "cancel stops an outstanding wait and releases bridge waiters/resources",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "WS operation beyond two seconds produces one native write",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "JS exception after native write does not replay through eval",
+          "passed": true,
+          "ids": []
+        },
+        {
+          "name": "unknown write response quarantines resource without replay",
+          "passed": true,
+          "ids": []
+        }
+      ]
+    },
+    {
+      "evidence": "docs/upgrade-evidence/macos-feature-off-native.json",
+      "sha256": "cc28b70bff5b8557582c582de2321b842223efa3d802267dceae2ecca783e103",
+      "layer": "native-webview",
+      "passed": true,
+      "testCount": 0,
+      "tests": []
+    },
+    {
+      "evidence": "docs/upgrade-evidence/macos-screenshot-native.json",
+      "sha256": "29a167f94dbabd7361b8fb0f442779a6eade1ead42499989ed68933bf6ed3912",
+      "layer": "native_webview",
+      "passed": true,
+      "testCount": 3,
+      "tests": [
+        {
+          "name": "native viewport corner markers and password mask match the declared affine mapping",
+          "passed": true,
+          "ids": [
+            "UP-T051",
+            "UP-T056",
+            "UP-T060",
+            "UP-T062"
+          ]
+        },
+        {
+          "name": "native element crops preserve rendering and clip negative CSS origin",
+          "passed": true,
+          "ids": [
+            "UP-T057",
+            "UP-PK026"
+          ]
+        },
+        {
+          "name": "protected reads keep capture identity and source failures do not fallback",
+          "passed": true,
+          "ids": [
+            "UP-T065",
+            "UP-T066",
+            "UP-PK028",
+            "UP-PK035"
+          ]
+        }
+      ]
+    }
+  ],
+  "crossBuilds": [
+    {
+      "platform": "windows",
+      "status": "passed",
+      "command": "cargo check -p tauri-plugin-connector --target x86_64-pc-windows-msvc --no-default-features --features native-screenshot --tests --locked --target-dir /tmp/tauri-upgrade-windows-check",
+      "evidence": "docs/upgrade-evidence/windows-final-check.log",
+      "sha256": "9e2199e92c67363e9ee8dde8545bf9c0548490e6b16259c0198648239908936c",
+      "note": "Cross-check of Windows bindings and test source; no linked/native Windows run."
+    },
+    {
+      "platform": "linux",
+      "status": "passed",
+      "command": "env PKG_CONFIG_ALLOW_CROSS=1 PKG_CONFIG_SYSROOT_DIR=/tmp/tauri-linux-sysroot/root PKG_CONFIG_LIBDIR=/tmp/tauri-linux-sysroot/root/usr/lib/x86_64-linux-gnu/pkgconfig:/tmp/tauri-linux-sysroot/root/usr/share/pkgconfig PKG_CONFIG_PATH= CC_x86_64_unknown_linux_gnu='clang --target=x86_64-unknown-linux-gnu --sysroot=/tmp/tauri-linux-sysroot/root' BINDGEN_EXTRA_CLANG_ARGS_x86_64_unknown_linux_gnu='--target=x86_64-unknown-linux-gnu --sysroot=/tmp/tauri-linux-sysroot/root' cargo check -p tauri-plugin-connector --target x86_64-unknown-linux-gnu --no-default-features --features xcap,native-screenshot --tests --locked --target-dir /tmp/tauri-linux-native-check",
+      "evidence": "docs/upgrade-evidence/linux-final-check.log",
+      "sha256": "8703f4902d2f84a9453d1607d49ac2a1d3be6a0989a5b5c79333d2423e1aa172",
+      "note": "Real Linux GTK/WebKit sysroot; native-only and combined plugin/test-source checks reported by root; final log is combined."
+    },
+    {
+      "platform": "linux",
+      "status": "passed",
+      "command": "env PKG_CONFIG_ALLOW_CROSS=1 PKG_CONFIG_SYSROOT_DIR=/tmp/tauri-linux-sysroot/root PKG_CONFIG_LIBDIR=/tmp/tauri-linux-sysroot/root/usr/lib/x86_64-linux-gnu/pkgconfig:/tmp/tauri-linux-sysroot/root/usr/share/pkgconfig PKG_CONFIG_PATH= CC_x86_64_unknown_linux_gnu='clang --target=x86_64-unknown-linux-gnu --sysroot=/tmp/tauri-linux-sysroot/root' BINDGEN_EXTRA_CLANG_ARGS_x86_64_unknown_linux_gnu='--target=x86_64-unknown-linux-gnu --sysroot=/tmp/tauri-linux-sysroot/root' cargo check --manifest-path examples/workflow-fixture/Cargo.toml --target x86_64-unknown-linux-gnu --locked --target-dir /tmp/tauri-linux-native-check",
+      "evidence": "docs/upgrade-evidence/linux-fixture-check.log",
+      "sha256": "3b9cd885f5f079a7fd573e72a8bfd0f75f9356281fdfa0b572f66da30d3b74b2",
+      "note": "Fixture cross-check, not linked GUI execution."
+    }
+  ],
+  "nativeStress": {
+    "status": "passed_on_local_candidate",
+    "cycles": 100,
+    "evidence": "docs/upgrade-evidence/macos-picker-stress-100.json",
+    "note": "Final stricter deadline and reference-watchdog changes have unit/browser coverage; final same-code GUI attempt was blocked by a locked desktop. Native expiry on that code is not yet credited."
+  },
+  "remoteCi": {
+    "status": "not_run",
+    "note": "Root is preparing commit/push. No remote CI completion is recorded in this snapshot."
+  },
+  "nonAdditiveCounts": true,
+  "countingNote": "Targeted suites overlap the full npm/cargo suites; do not sum them as unique tests.",
+  "latestGuardAndPicker": {
+    "source": "Current runtime_identity agent tool execution; original stdout was not redirected to a log file.",
+    "runs": [
+      {
+        "command": "node --test plugin/tests/runtime.test.cjs",
+        "passed": 21,
+        "failed": 0,
+        "durationApproxMs": 564,
+        "layer": "javascript_unit"
+      },
+      {
+        "command": "node --test plugin/tests/picker.test.cjs plugin/tests/picker-actionability.test.cjs",
+        "passed": 21,
+        "failed": 0,
+        "durationApproxMs": 50600,
+        "layer": "chromium_browser",
+        "assertion": "Includes100real-duration browser start/cancel cycles; not native WebView proof."
+      }
+    ],
+    "sourceHashes": {
+      "plugin/src/runtime/bootstrap.js": "1f7017406f0e167a823eb4346111417c59da8c9c2871fc268efab59a9fa051a6",
+      "plugin/tests/runtime.test.cjs": "133433057e92db0dc13dabf6ff1060aec2aabf00e6a880a34c4bde0ec8f8e079",
+      "plugin/tests/picker.test.cjs": "2143cf49a346e8137e2b56db34bfb3347a2d5729e0544143ff13f99e287fe077",
+      "plugin/tests/picker-actionability.test.cjs": "432073ab58cf5d9883af2a3cb4e2f40d8b5127dff36879e588fe130a2b2b3f6d"
+    }
+  },
+  "rootReportedFinalTargetedChecks": {
+    "provenance": "Earlier targeted execution reports retained as supplementary, non-additive evidence; latestCompleteLocalRuns supersedes full-suite running-state notes.",
+    "checks": [
+      "Runtime guard21passed and picker/actionability browser21passed, including100browser cycles.",
+      "Opaque ipc_query cursor service/CLI/schema roundtrip fix passed.",
+      "Legacy WS screenshot rich-field preflight rejection passed after failing regression.",
+      "Monotonic screenshot-stage timing focused suite16passed and all/no-feature Clippy passed."
+    ]
+  },
+  "currentSnapshot": "Implementation complete; final local checks and explicit GUI/platform gaps are recorded in local-final-verification.json. Remote CI/publication are pending.",
+  "refreshProvenance": {
+    "native": {
+      "originalSha256": "8de8456ef299d40727b25d022bbce6f25cdf1cbd654cab3bdd5bbf0b56be1898",
+      "retainedSha256": "10fdc486ee3e8067bf65d0b448c8192923caeb91c46422789d6198f9dc0f71bd",
+      "path": "docs/upgrade-evidence/macos-upgrade-native.json"
+    },
+    "entries": {
+      "originalSha256": "46f53bd39e27fd554dec920381fee5841bb116ff5c2460df0c57bb049a06c3d3",
+      "retainedSha256": "2d46aff25fcae12e0c2c5d9f1aa6c70a2f9dd938f32e03be211634bab737ad03",
+      "path": "docs/upgrade-evidence/macos-entry-points.json"
+    },
+    "transport": {
+      "originalSha256": "b24756b7306f021c0e683ec0612f28aed0fcadae257595608c3e6e6421f4acbb",
+      "retainedSha256": "2978a08322a08824bbccf5828a6a0bc459954627ae381f2cafdc198a0c41b118",
+      "path": "docs/benchmarks/inspection-upgrade.json"
+    },
+    "capture": {
+      "originalSha256": "06fc78c31b7d782af3e76fdb9e699a3c473e92a9b73a831274669774f5b61e32",
+      "retainedSha256": "f0f5103019558f6d48bd4ad4da59a565b82fc8fe15246322299720c73f4ca19e",
+      "path": "docs/benchmarks/capture-benchmark.json"
+    },
+    "v016-workspace-tests.log": {
+      "originalSha256": "70ed484f1126392c5f40684eac205dff3c1c061850994fff6feb44b11b2e6a95",
+      "retainedSha256": "3fb26dd492c8e90af11e8b1e2af3c797b16be3fe4f8acde3f7cd47410d587ae5",
+      "path": "docs/upgrade-evidence/v016-workspace-tests.log"
+    },
+    "v016-js-tests.log": {
+      "originalSha256": "4f856480c6f57c84dde492134a90b88a4afe3beafda27472a4410b84ce0b0d5e",
+      "retainedSha256": "dbdbc2f4487896d24d4391c416c1cb8ea56c7a6ffd1bc6f2c00c9841add51645",
+      "path": "docs/upgrade-evidence/v016-js-tests.log"
+    },
+    "navigation-race-red.log": {
+      "originalSha256": "5908534b291c90a3d1efe9d95da772ae57a8814ed6d0c916701c1bd8ed45be9e",
+      "retainedSha256": "2b9631e51257a4fbf1e6ab8488f91ccd7667df8a21095caaf0f965ce60d6e654",
+      "path": "docs/upgrade-evidence/navigation-race-red.log"
+    },
+    "navigation-race-green.log": {
+      "originalSha256": "960530be254fe57b30f0a7fc2c1fa3933e1b7c0b44bfa9f2b2da0f2eb985aae9",
+      "retainedSha256": "ce5bead01a443db6b0fc84cf731a8003bd8cd36382e39e16133ff2884de1cd92",
+      "path": "docs/upgrade-evidence/navigation-race-green.log"
+    }
+  },
+  "latestCompleteLocalRuns": {
+    "workspace": {
+      "evidence": "docs/upgrade-evidence/v016-final-rust.log",
+      "passed": 319,
+      "failed": 0,
+      "componentCounts": [
+        64,
+        33,
+        6,
+        3,
+        13,
+        15,
+        15,
+        1,
+        169
+      ],
+      "exactInvocationSource": "root execution / retained cargo output",
+      "reproductionCommand": "cargo test --workspace --all-features --locked"
+    },
+    "javascript": {
+      "command": "npm test",
+      "evidence": "docs/upgrade-evidence/v016-final-js.log",
+      "helperTests": 96,
+      "workflowBrowserTests": 27,
+      "semanticBrowserTests": 19,
+      "geometryBrowserChecks": 10,
+      "contractTests": 8,
+      "failed": 0
+    },
+    "navigationRace": {
+      "redEvidence": "docs/upgrade-evidence/navigation-race-red.log",
+      "red": {
+        "passed": 0,
+        "failed": 2
+      },
+      "greenEvidence": "docs/upgrade-evidence/navigation-race-green.log",
+      "green": {
+        "passed": 12,
+        "failed": 0,
+        "newRegressions": 2
+      },
+      "note": "Two deterministic regressions passed; stronger revision/sequence idempotence also passed in picker-navigation-idempotence.log. Latest full Rust suite includes these cases."
+    },
+    "featureOffHarness": {
+      "passed": 3,
+      "failed": 0,
+      "provenance": "Root reported targeted harness tests; not part of the earlier npm92run and not itself native feature-off proof."
+    },
+    "finalReceipt": "docs/upgrade-evidence/local-final-verification.json"
+  },
+  "benchmarks": {
+    "transport": "docs/benchmarks/inspection-upgrade.json",
+    "transportWarmRows": 180,
+    "transportColdRows": 3,
+    "capture": "docs/benchmarks/capture-benchmark.json",
+    "captureRows": 60,
+    "captureWarmups": 2,
+    "screenshotStages": "docs/upgrade-evidence/macos-screenshot-timings.json",
+    "unmeasured": [
+      "multi-window performance",
+      "preview capture overhead",
+      "process RSS",
+      "Windows/Linux GUI performance"
+    ],
+    "diskSave": "not_applicable_protected_memory_only"
+  },
+  "acceptanceCounts": {
+    "implemented": {
+      "complete": 144
+    },
+    "unitVerified": {
+      "passed": 117,
+      "partial": 26,
+      "not_applicable": 1
+    },
+    "integrationVerified": {
+      "passed": 106,
+      "partial": 38
+    },
+    "nativeVerified": {
+      "partial": 35,
+      "not_applicable": 88,
+      "blocked": 21
+    },
+    "ciVerified": {
+      "blocked": 144
+    }
+  },
+  "macosRequirementRows": {
+    "partial": 34,
+    "not_applicable": 60,
+    "passed": 29,
+    "blocked": 21
+  },
+  "implementationRequirements": {
+    "complete": 58,
+    "partial": 0,
+    "note": "Performance dimensions not measured are listed as limits, not falsely quantified."
+  }
+}

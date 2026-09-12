@@ -1,0 +1,32 @@
+✔ UP-T081/082/084 one pair preserves this, all arguments and resolved object (5.67875ms)
+✔ UP-T083 synchronous throw stays synchronous and preserves exception (0.538375ms)
+✔ UP-T084 rejection reason identity survives telemetry (0.464541ms)
+✔ UP-T085 ignored rejection remains unhandled (32.060958ms)
+✔ UP-T086 serialization never calls getters/toJSON or fails business (0.694ms)
+✔ UP-T087 binary and streams summarized without consuming data (0.736625ms)
+✔ UP-T088/089 sensitive keys removed before transport and UTF8 bounded (0.510125ms)
+✔ UP-T090 saturated telemetry queue leaves calls successful and counts drops (9.385834ms)
+✔ UP-T096 cleanup never overwrites a later wrapper (0.564375ms)
+✔ UP-T081 exact connector namespace excluded, similarly named business retained (0.502458ms)
+✔ UP-T097 controlled readiness self-test uses only connector namespace (0.389875ms)
+✔ UP-T096 stopped owned hook restores invoke and legacy can reactivate it (0.27575ms)
+✔ UP-T081 module and global forwarding paths produce one pair each (0.535084ms)
+✔ UP-T087 typed array overridden getter is never touched (0.350417ms)
+✔ UP-T093 stop never cancels the business promise or reports a terminal event (0.326584ms)
+✔ UP-T091/093 stop barrier delivers already queued evidence before acknowledgement (0.358791ms)
+✔ UP-T102/107 host revocation acknowledgement releases owned hook and queue (0.301333ms)
+✔ UP-T081/082/084 readonly native invoke observed through transport and exact callbacks (10.008084ms)
+✔ UP-T084 native rejected callback preserves exact reason (0.623958ms)
+✔ UP-T081/092 native fetch to postMessage fallback deduplicates callback pair (0.556583ms)
+✔ UP-T096 later callback wrappers survive capture cleanup (0.465583ms)
+✔ UP-T085 readonly native callback path preserves unhandled rejection (38.969333ms)
+✔ T14 monitor refuses wrong window before altering flags (0.769917ms)
+✔ T14 monitor acknowledges actual window, page epoch and applied state (0.3105ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 152.346167

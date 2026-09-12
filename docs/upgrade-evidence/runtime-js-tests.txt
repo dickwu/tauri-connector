@@ -1,0 +1,21 @@
+✔ UP-T021 bootstrap rejects child frames (1.097458ms)
+✔ UP-T012 UP-T013 same document bootstrap once, new document new epoch (1.201708ms)
+✔ UP-PK008 early idle guard has no effects; active guard suppresses before handlers (0.494417ms)
+✔ UP-PK011 UP-PK022 cleanup drains delayed click and then returns to idle (30.413167ms)
+✔ UP-T022 pagehide invalidates modules and bfcache restores a fresh epoch without sessions (0.682625ms)
+✔ UP-PK018 start refuses a held gesture, drain waits for release and a quiet interval (62.594ms)
+✔ UP-T015 ready-to-dispatch context race is rejected before handler (0.800958ms)
+✔ UP-T016 helper name in business exception does not replay (0.482833ms)
+✔ UP-T023 dangerous strings and prototype keys remain data (0.516167ms)
+✔ UP-T019 UP-T020 disposal prevents further dispatch and clears module resources (0.393666ms)
+✔ UP-T024 expired deadline and unknown module never enter handler (0.322542ms)
+✔ UP-PK031 old operation context is not rebound to a new runtime (0.331791ms)
+✔ UP-T001 legacy frontend runtime event array cannot collide with inspection dispatcher (0.278042ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 142.263459

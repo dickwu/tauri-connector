@@ -6,10 +6,10 @@ Use this guide when a user asks to install or upgrade the connector in an existi
 
 1. Read the target application's local instructions, Cargo manifest, feature gates, Tauri config and launch scripts. Record its uncommitted changes and existing lockfile before changing dependencies.
 2. Check `tauri-connector --version`, `tauri-connector update --check` and the plugin's published stable version. Updating the CLI does not update a plugin already compiled into an app.
-3. Change the existing `tauri-plugin-connector` requirement to the selected compatible release. Preserve the existing optional feature name and dependency pins. For the 0.15 release, the focused update is:
+3. Change the existing `tauri-plugin-connector` requirement to the selected compatible release. Preserve the existing optional feature name and dependency pins. For the 0.16 release, the focused update is:
 
    ```bash
-   cargo update --manifest-path src-tauri/Cargo.toml -p tauri-plugin-connector --precise 0.15.0
+   cargo update --manifest-path src-tauri/Cargo.toml -p tauri-plugin-connector --precise 0.16.0
    cargo tree --manifest-path src-tauri/Cargo.toml --locked --features connector -i tauri-plugin-connector
    ```
 
@@ -251,3 +251,14 @@ If an outcome is unknown, inspect `get`, `allowedNextActions` and available reco
 - Report the dependency version, build/config/type checks actually run, tested application/window, workflow and goal verdicts, duplicate-submit count and cleanup. Distinguish configuration checks, mock tests, real WebView tests and backend persistence evidence.
 
 A macOS WebView pass does not certify Windows/Linux, every application flow, or a production deployment. Workflow v1 currently refuses durable persistence without supported Unix private-file guarantees; capability errors must not be bypassed by silently switching the requested test to another execution path.
+
+
+## Inspection upgrade and verification layers
+
+After rebuilding, check `bridge_status.inspectionProtocolVersion` and authenticate `app_identity` before using rich inspection tools. A missing inspection protocol is an explicit unsupported result; do not install arbitrary helper text to emulate it. Bind a returned picker or capture session to its stored application/window/page identity across CLI, WS and both MCP adapters.
+
+Use the repository's isolated fixture with `npm ci`, `npm run fixture:prepare` and `cargo build --locked --manifest-path examples/workflow-fixture/Cargo.toml --target-dir target`. Test dependencies are pinned in the root npm lockfile and fixture Rust dependencies in its Cargo.lock. Browser tests use the actual shipped JavaScript with locked Playwright and React; no external workspace path or CDN is required.
+
+A picker smoke test must activate UI, select through real input, compare the independent fixture business counters, inspect the selected metadata and actual redacted element image, and verify cleanup. A schema test, mocked event, or static PNG does not satisfy native input/capture verification. Report implementation, unit, integration, native and CI independently, with separate macOS, Windows and Linux states; Linux Xvfb is a native WebKitGTK session but is not an interactive physical desktop. Windows workflow journal ACL remains fail-closed and is not relaxed by screenshot support.
+
+The implementation's complete 144-ID acceptance record lives in `docs/upgrade-acceptance.json`, with human-readable evidence in `docs/upgrade-implementation-status.md`. Unrun remote CI or an untested native platform stays unverified. Preserve prior workflow result semantics, run-key immutability, resource arbitration, redaction and quarantine throughout migration.

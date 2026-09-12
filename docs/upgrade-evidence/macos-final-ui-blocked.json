@@ -1,0 +1,17 @@
+{
+  "platform": "darwin",
+  "layer": "native_webview",
+  "inputPreparation": "Explicit fixture activation by native PID before OS input",
+  "input": "Quartz",
+  "display": "desktop",
+  "tests": [
+    {
+      "ids": [],
+      "name": "OS input driver reaches independent native fixture counter",
+      "passed": false,
+      "error": "Error: Command failed: <test-output> activate 95326\nnative_fixture_activation_unavailable\n"
+    }
+  ],
+  "passed": false,
+  "error": "Error: Command failed: <test-output> activate 95326\nnative_fixture_activation_unavailable\n\n    at genericNodeError (node:internal/errors:999:15)\n    at wrappedFn (node:internal/errors:544:14)\n    at ChildProcess.exithandler (node:child_process:417:12)\n    at ChildProcess.emit (node:events:514:20)\n    at maybeClose (node:internal/child_process:1125:16)\n    at Socket.<anonymous> (node:internal/child_process:497:11)\n    at Socket.emit (node:events:514:20)\n    at Pipe.<anonymous> (node:net:362:12)"
+}

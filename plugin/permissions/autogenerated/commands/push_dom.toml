@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-push-dom"
+description = "Enables the push_dom command without any pre-configured scope."
+commands.allow = ["push_dom"]
+
+[[permission]]
+identifier = "deny-push-dom"
+description = "Denies the push_dom command without any pre-configured scope."
+commands.deny = ["push_dom"]

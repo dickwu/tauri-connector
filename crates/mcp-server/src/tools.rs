@@ -28,7 +28,8 @@ pub fn tool_definitions() -> Value {
                 "properties": {
                     "action": { "type": "string", "enum": ["start", "stop", "status"] },
                     "host": { "type": "string" },
-                    "port": { "type": "number" }
+                    "port": { "type": "integer", "minimum":1, "maximum":65535 },
+                    "appInstanceId":{"type":"string"}
                 },
                 "required": ["action"]
             }
@@ -53,6 +54,23 @@ pub async fn call_tool(
 
     match result {
         Ok(data) => {
+            if name == "webview_select_element" {
+                return connector_client::inspection::picker_mcp_content(
+                    data,
+                    args.get("includeImage")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                );
+            }
+            if name == "webview_screenshot"
+                || name == "artifact_read"
+                    && connector_client::inspection::protected_artifact_request(name, args)
+            {
+                let protected = data.get("storage").and_then(Value::as_str)
+                    == Some("protected_memory")
+                    || connector_client::inspection::protected_artifact_request(name, args);
+                return connector_client::inspection::image_mcp_content(data, protected);
+            }
             let mut content = text_content(&data);
             if name.starts_with("workflow_")
                 && name != "workflow_capabilities"
@@ -92,7 +110,19 @@ pub async fn dispatch_tool(
     name: &str,
     args: &Value,
 ) -> Result<Value, String> {
+    if connector_client::inspection::protected_artifact_request(name, args) {
+        return client
+            .inspect(
+                name,
+                &connector_client::inspection::protected_artifact_args(args)
+                    .map_err(|e| e.to_string())?,
+            )
+            .await;
+    }
     match name {
+        "app_identity" | "runtime_health" | "ipc_capture" | "ipc_query" => {
+            client.inspect(name, args).await
+        }
         "workflow_run"
         | "workflow_get"
         | "workflow_cancel"
@@ -168,6 +198,16 @@ async fn handle_workflow(
             args["authToken"] = json!(token);
         }
     }
+    if operation != "workflow_capabilities"
+        && bridge
+            .get("inspectionProtocolVersion")
+            .and_then(Value::as_u64)
+            == Some(1)
+    {
+        client
+            .verify_app_identity(args.get("authToken").and_then(Value::as_str))
+            .await?;
+    }
     let timeout = args
         .get("waitMs")
         .and_then(Value::as_u64)
@@ -222,11 +262,35 @@ async fn handle_driver_session(
 ) -> Result<Value, String> {
     let action = str_arg(args, "action").unwrap_or_default();
     let h = str_arg(args, "host").unwrap_or_else(|| host.to_string());
-    let p = num_arg(args, "port").map(|n| n as u16).unwrap_or(port);
+    let p = args
+        .get("port")
+        .map(|p| {
+            p.as_u64()
+                .filter(|p| (1..=65535).contains(p))
+                .map(|p| p as u16)
+                .ok_or("invalid_arguments: port must be an integer in 1..65535")
+        })
+        .transpose()?
+        .unwrap_or(port);
 
     match action.as_str() {
         "start" => {
+            if let Some(expected) = args.get("appInstanceId") {
+                client.bind_instance(
+                    expected
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .ok_or("invalid_arguments: appInstanceId must be nonempty")?,
+                )?;
+            }
             client.connect(&h, p).await?;
+            if args.get("appInstanceId").is_some() {
+                let token = std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN").ok();
+                if let Err(error) = client.verify_app_identity(token.as_deref()).await {
+                    client.disconnect().await;
+                    return Err(error);
+                }
+            }
             Ok(json!(format!("Connected to {h}:{p}")))
         }
         "stop" => {
@@ -258,6 +322,9 @@ async fn handle_bridge_status(client: &ConnectorClient) -> Result<Value, String>
 }
 
 async fn handle_screenshot(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
+    if connector_client::inspection::is_rich_screenshot(args) {
+        return client.inspect("webview_screenshot", args).await;
+    }
     let format = str_arg(args, "format").unwrap_or_else(|| "jpeg".to_string());
     let quality = num_arg(args, "quality").unwrap_or(80.0) as u8;
     let max_width = num_arg(args, "maxWidth").map(|n| n as u32);
@@ -514,10 +581,7 @@ async fn handle_get_pointed_element(
 }
 
 async fn handle_select_element(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
-    let wid = window_id(args);
-    client
-        .send(json!({ "type": "select_element", "window_id": wid }))
-        .await
+    client.inspect("webview_select_element", args).await
 }
 
 async fn handle_manage_window(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
@@ -835,25 +899,17 @@ async fn handle_search_snapshot(client: &ConnectorClient, args: &Value) -> Resul
 }
 
 async fn handle_list_devices(host: &str, port: u16) -> Result<Value, String> {
-    // Scan the default port range to find running connector instances
     let mut devices = Vec::new();
-    let start = port;
-    let end = port + 100;
-
-    for p in start..end {
-        if let Ok(stream) = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            tokio::net::TcpStream::connect(format!("{host}:{p}")),
-        )
-        .await
-        {
-            if stream.is_ok() {
-                devices.push(json!({ "host": host, "port": p }));
-            }
+    let mut unverified = 0usize;
+    for p in port..=port.saturating_add(100) {
+        match connector_client::discovery::endpoint_identity(host,p,100).await {
+            Ok(identity)=>devices.push(json!({"host":host,"port":p,"appId":identity.app_id,"appInstanceId":identity.app_instance_id,"pid":identity.pid,"identityVerified":true})),
+            Err(_)=>unverified+=1,
         }
     }
-
-    Ok(json!({ "devices": devices, "count": devices.len() }))
+    Ok(
+        json!({"devices":devices,"count":devices.len(),"coverage":"authenticated_identity_only","unverifiedEndpoints":unverified,"limitations":["An unavailable or unauthorized endpoint is unobserved, not proof no application is running"]}),
+    )
 }
 
 const SETUP_INSTRUCTIONS: &str = r#"
@@ -1174,8 +1230,8 @@ mod tests {
         );
 
         // Pin the totals so accidental additions/deletions are caught.
-        assert_eq!(embedded.len(), 42, "shared tool count changed");
-        assert_eq!(standalone.len(), 43, "standalone tool count changed");
+        assert_eq!(embedded.len(), 46, "shared tool count changed");
+        assert_eq!(standalone.len(), 47, "standalone tool count changed");
     }
 
     #[test]

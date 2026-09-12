@@ -1,0 +1,145 @@
+{
+  "platform": "darwin",
+  "layer": "native_webview",
+  "input": "Quartz",
+  "display": "desktop",
+  "tests": [
+    {
+      "ids": [
+        "UP-T036",
+        "UP-T102",
+        "UP-PK012"
+      ],
+      "name": "anonymous rich request fails before picker creation",
+      "passed": true,
+      "durationMs": 0.31787500000018554
+    },
+    {
+      "ids": [
+        "UP-T011",
+        "UP-T033"
+      ],
+      "name": "native runtime handshake reports app/document/runtime identity",
+      "passed": true,
+      "durationMs": 2.8292079999998805,
+      "appInstanceId": "43b2f4a7-bae9-4c48-92f6-8803d6d2a74d"
+    },
+    {
+      "ids": [
+        "UP-T009",
+        "UP-T011",
+        "UP-T033",
+        "UP-PK023"
+      ],
+      "name": "native runtime installation bridge binding and explicit cancel",
+      "passed": true,
+      "durationMs": 611.228666,
+      "context": {
+        "appId": "dev.connector.workflow-fixture.88763f33-7ffe-4578-ac60-4644d00bf1cd",
+        "appInstanceId": "43b2f4a7-bae9-4c48-92f6-8803d6d2a74d",
+        "bundleHash": "fnv1a64:697f4949f8edb9b6",
+        "origin": "tauri://localhost",
+        "pageEpoch": "85d2f727-2e44-45bc-bd21-e438946c09a3",
+        "runtimeId": "b9134897-413f-45e0-a077-792993663cf8",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "5337e48b-548f-424a-b104-557f12504ebc"
+      },
+      "diagnostics": {
+        "activeObservers": 1,
+        "bundleBytesSent": 95337,
+        "commandBytesSent": 6010,
+        "installAttempts": 1,
+        "installSuccesses": 1,
+        "runtimeReuses": 2,
+        "staleContextRejects": 0
+      },
+      "cleanup": {
+        "leaseReleased": true,
+        "status": "confirmed"
+      }
+    }
+  ],
+  "health": {
+    "checks": {
+      "bridge": {
+        "connected": true,
+        "durationMs": 0,
+        "status": "responsive"
+      },
+      "runtime": {
+        "durationMs": 0,
+        "status": "unavailable"
+      },
+      "transport": {
+        "durationMs": 0,
+        "status": "responsive"
+      }
+    },
+    "conclusion": "runtime_missing",
+    "context": {
+      "appInstanceId": "43b2f4a7-bae9-4c48-92f6-8803d6d2a74d",
+      "windowId": "main"
+    },
+    "diagnostics": {
+      "activeObservers": null,
+      "bundleBytesSent": 0,
+      "commandBytesSent": 546,
+      "installAttempts": 0,
+      "installSuccesses": 0,
+      "runtimeReuses": 0,
+      "staleContextRejects": 0
+    },
+    "executionReplayed": false,
+    "limitations": [
+      "Probe success or timeout does not establish the original operation outcome or a deadlock"
+    ]
+  },
+  "runtimeReady": {
+    "checks": {
+      "bridge": {
+        "connected": true,
+        "durationMs": 0,
+        "status": "responsive"
+      },
+      "runtime": {
+        "durationMs": 0,
+        "status": "responsive"
+      },
+      "transport": {
+        "durationMs": 0,
+        "status": "responsive"
+      }
+    },
+    "conclusion": "runtime_responsive",
+    "context": {
+      "appId": "dev.connector.workflow-fixture.88763f33-7ffe-4578-ac60-4644d00bf1cd",
+      "appInstanceId": "43b2f4a7-bae9-4c48-92f6-8803d6d2a74d",
+      "bundleHash": "fnv1a64:697f4949f8edb9b6",
+      "origin": "tauri://localhost",
+      "pageEpoch": "85d2f727-2e44-45bc-bd21-e438946c09a3",
+      "runtimeId": "b9134897-413f-45e0-a077-792993663cf8",
+      "runtimeVersion": "1",
+      "semanticVersion": "1",
+      "windowId": "main",
+      "windowInstanceId": "5337e48b-548f-424a-b104-557f12504ebc"
+    },
+    "diagnostics": {
+      "activeObservers": 1,
+      "bundleBytesSent": 95337,
+      "commandBytesSent": 6010,
+      "installAttempts": 1,
+      "installSuccesses": 1,
+      "runtimeReuses": 2,
+      "staleContextRejects": 0
+    },
+    "executionReplayed": false,
+    "limitations": [
+      "Probe success or timeout does not establish the original operation outcome or a deadlock"
+    ]
+  },
+  "passed": true,
+  "inputScope": "Quartz helper availability probe only; no native input was dispatched in this runtime smoke",
+  "runner": "Derived diagnostic form of examples/workflow-fixture/scripts/upgrade-native-test.mjs; covered runtime_ready and explicit cancel only"
+}

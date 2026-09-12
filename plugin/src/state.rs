@@ -18,6 +18,17 @@ pub struct RefEntry {
     pub name: String,
     pub selector: String,
     pub nth: Option<usize>,
+    /// Opaque page-owned element identity. Modern refs never use fuzzy fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+    #[serde(
+        default,
+        rename = "semanticVersion",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub semantic_version: Option<String>,
+    #[serde(default, rename = "pageEpoch", skip_serializing_if = "Option::is_none")]
+    pub page_epoch: Option<String>,
 }
 
 /// Type alias for the ref map.
@@ -118,6 +129,9 @@ pub struct IpcMonitorStatus {
 /// Shared mutable state for the plugin.
 #[derive(Clone)]
 pub struct PluginState {
+    pub picker: Arc<crate::picker::PickerService>,
+    pub screenshot: Arc<crate::screenshot::ScreenshotService>,
+    pub capture: Arc<crate::capture::CaptureService>,
     pub workflow: Arc<crate::workflow::WorkflowService>,
     pub dom_cache: Arc<Mutex<std::collections::HashMap<String, DomEntry>>>,
     pub ipc_monitor_active: Arc<Mutex<bool>>,
@@ -155,6 +169,9 @@ impl PluginState {
         let runtime_file = open_append("runtime.log")?;
 
         Ok(Self {
+            picker: Arc::new(crate::picker::PickerService::default()),
+            screenshot: Arc::new(crate::screenshot::ScreenshotService::default()),
+            capture: Arc::new(crate::capture::CaptureService::default()),
             workflow: Arc::new(crate::workflow::WorkflowService::new(
                 log_dir.join("workflow"),
             )),

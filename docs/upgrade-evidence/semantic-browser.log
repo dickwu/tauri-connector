@@ -1,0 +1,84 @@
+{
+  "tests": 19,
+  "failures": 0,
+  "evidenceKind": "browser_chromium",
+  "results": [
+    {
+      "name": "UP-T037 UP-T038 ordered IDREF, hidden references, missing IDs and label precedence",
+      "passed": true
+    },
+    {
+      "name": "UP-T039 form labels, input defaults, icon alt and valid role fallback",
+      "passed": true
+    },
+    {
+      "name": "UP-T040 description remains separate from locator name",
+      "passed": true
+    },
+    {
+      "name": "U3.3 required ARIA states preserve false and mixed",
+      "passed": true
+    },
+    {
+      "name": "UP-T041 presentation wrappers preserve accessible descendants",
+      "passed": true
+    },
+    {
+      "name": "UP-T042 aria-owns prevents cycles and duplicate nodes",
+      "passed": true
+    },
+    {
+      "name": "UP-T043 visual exposure and enabled/editable remain distinct",
+      "passed": true
+    },
+    {
+      "name": "UP-T044 UP-T045 legacy action rejects ambiguity and intersections remain strict",
+      "passed": true
+    },
+    {
+      "name": "UP-T043 legacy wait uses shared inherited visibility and enabled/editable",
+      "passed": true
+    },
+    {
+      "name": "UP-T049 unsupported tree boundaries fail explicitly",
+      "passed": true
+    },
+    {
+      "name": "UP-T050 traversal budget exits without returning incomplete candidates",
+      "passed": true
+    },
+    {
+      "name": "UP-PK024 verified candidates handle CSS specials and current entity identity",
+      "passed": true
+    },
+    {
+      "name": "UP-T073 UP-PK025 sensitive metadata and locator values never escape",
+      "passed": true
+    },
+    {
+      "name": "UP-PK025 UTF-8 output bounds, sensitive references and huge text remain safe",
+      "passed": true
+    },
+    {
+      "name": "UP-PK025 nested and chained sensitive naming references are redacted cycle-safely",
+      "passed": true
+    },
+    {
+      "name": "UP-T042 snapshot ownership cycles terminate and count each node once",
+      "passed": true
+    },
+    {
+      "name": "UP-T071 picker-owned UI excluded from semantic and snapshot output",
+      "passed": true
+    },
+    {
+      "name": "UP-T046 modern refs reject reused entity, replaced node, page and semantic changes",
+      "passed": true
+    },
+    {
+      "name": "UP-T048 AI budget split, refs, React, portal and overlays preserved",
+      "passed": true
+    }
+  ],
+  "browser": "153.0.8010.12"
+}

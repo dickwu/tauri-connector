@@ -1,0 +1,10 @@
+   Compiling tauri-plugin-connector v0.15.0 (<repository>/plugin)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.04s
+     Running unittests src/lib.rs (target/debug/deps/tauri_plugin_connector-7506f1c7f230c652)
+
+running 3 tests
+test capabilities::tests::anonymous_capability_never_contains_handles_paths_or_observations ... ok
+test capabilities::tests::exported_capability_uses_actual_compilation_and_contract_limits ... ok
+test capabilities::tests::screenshot_availability_tracks_backend_codec_and_platform_flags ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 144 filtered out; finished in 0.01s

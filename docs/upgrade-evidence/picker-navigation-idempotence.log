@@ -1,0 +1,9 @@
+   Compiling tauri-plugin-connector v0.16.0 (<workspace>/plugin)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.42s
+     Running unittests src/lib.rs (target/debug/deps/tauri_plugin_connector-0cc8be093a30583f)
+
+running 2 tests
+test picker::tests::up_pk031_late_page_report_cannot_downgrade_confirmed_page_destruction ... ok
+test picker::tests::up_pk031_late_bridge_failure_cannot_downgrade_confirmed_page_destruction ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 164 filtered out; finished in 0.00s

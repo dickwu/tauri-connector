@@ -1,0 +1,832 @@
+{
+  "platform": "darwin",
+  "layer": "native_webview",
+  "inputPreparation": "Explicit fixture activation by native PID before OS input",
+  "input": "Quartz",
+  "display": "desktop",
+  "tests": [
+    {
+      "ids": [],
+      "name": "OS input driver reaches independent native fixture counter",
+      "passed": true,
+      "durationMs": 512.0547500000011,
+      "nativeWriteDelta": 1,
+      "reset": true
+    },
+    {
+      "ids": [
+        "UP-T052",
+        "UP-T060"
+      ],
+      "name": "legacy WS cannot discard requested native source or required masks",
+      "passed": true,
+      "durationMs": 0.5818340000005264,
+      "rejectedBeforeCapture": true
+    },
+    {
+      "ids": [
+        "UP-T036",
+        "UP-T102",
+        "UP-PK012"
+      ],
+      "name": "anonymous rich request fails before picker creation",
+      "passed": true,
+      "durationMs": 0.20587499999965075
+    },
+    {
+      "ids": [
+        "UP-T033"
+      ],
+      "name": "native identity and layered health expose cold state",
+      "passed": true,
+      "durationMs": 1.1516670000000886,
+      "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb"
+    },
+    {
+      "ids": [
+        "UP-PK001",
+        "UP-PK004",
+        "UP-PK007",
+        "UP-PK014",
+        "UP-PK026",
+        "UP-PK028",
+        "UP-PK029",
+        "UP-T067",
+        "UP-T068",
+        "UP-T074"
+      ],
+      "name": "native save selection deduplicates, captures and never invokes save",
+      "passed": true,
+      "durationMs": 1007.4947920000013,
+      "nativeSaveDelta": 0,
+      "screenshot": "webview_native",
+      "dimensions": [
+        126,
+        76
+      ]
+    },
+    {
+      "ids": [
+        "UP-PK001"
+      ],
+      "name": "omitted-action call waits for a real native user selection",
+      "passed": true,
+      "durationMs": 941.8732499999987
+    },
+    {
+      "ids": [
+        "UP-PK027",
+        "UP-T074"
+      ],
+      "name": "explicit screenshot backend failure keeps the native selection",
+      "passed": true,
+      "durationMs": 944.4622089999993
+    },
+    {
+      "ids": [
+        "UP-PK014",
+        "UP-PK018"
+      ],
+      "name": "native checkbox gesture has no business default effect",
+      "passed": true,
+      "durationMs": 955.3624999999993
+    },
+    {
+      "ids": [
+        "UP-PK014",
+        "UP-PK018"
+      ],
+      "name": "native link gesture has no business default effect",
+      "passed": true,
+      "durationMs": 953.6987910000007
+    },
+    {
+      "ids": [
+        "UP-PK014",
+        "UP-PK018"
+      ],
+      "name": "native form gesture has no business default effect",
+      "passed": true,
+      "durationMs": 1121.5022919999992
+    },
+    {
+      "ids": [
+        "UP-PK019",
+        "UP-PK020",
+        "UP-T069"
+      ],
+      "name": "native Escape cancels and releases guard",
+      "passed": true,
+      "durationMs": 871.1664169999985
+    },
+    {
+      "ids": [
+        "UP-PK030",
+        "UP-PK031",
+        "UP-T076"
+      ],
+      "name": "reload invalidates original picker identity",
+      "passed": true,
+      "durationMs": 612.4253750000025
+    },
+    {
+      "ids": [
+        "UP-T105"
+      ],
+      "name": "same GUI workflow load with capture off and on",
+      "passed": true,
+      "durationMs": 8700.040542000002,
+      "groups": [
+        {
+          "mode": "capture_off",
+          "samples": 30,
+          "warmups": 1,
+          "workflowSteps": 4,
+          "medianMs": 118.04904150000038,
+          "p95Ms": 162.12958400000207,
+          "medianValidatedMs": 119.47137500000099,
+          "p95ValidatedMs": 163.822959000001,
+          "nativeSaveDelta": 30,
+          "nativeTaskDelta": 30,
+          "frontendInputEvents": 30,
+          "frontendOpens": 30,
+          "frontendSaves": 30,
+          "nativeSaveCallsIncludingWarmup": 31,
+          "nativePendingInvocations": 0,
+          "capturePending": {
+            "status": "not_enabled",
+            "final": null
+          },
+          "maxObservedQueuedEvents": 0,
+          "maxObservedQueuedBytes": 0,
+          "droppedEvents": 0,
+          "context": {
+            "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+            "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+            "attempt": 1,
+            "bundleHash": "fnv1a64:0ca54740d91d0491",
+            "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+            "requestId": "4283ce0f-7ad6-4127-b75f-e746eddd1f80",
+            "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+            "runtimeVersion": "1",
+            "semanticVersion": "1",
+            "windowId": "main",
+            "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+          }
+        },
+        {
+          "mode": "capture_on",
+          "samples": 30,
+          "warmups": 1,
+          "workflowSteps": 4,
+          "medianMs": 136.79406200000085,
+          "p95Ms": 205.02737500000148,
+          "medianValidatedMs": 137.98952100000133,
+          "p95ValidatedMs": 205.9861669999991,
+          "nativeSaveDelta": 30,
+          "nativeTaskDelta": 30,
+          "frontendInputEvents": 30,
+          "frontendOpens": 30,
+          "frontendSaves": 30,
+          "nativeSaveCallsIncludingWarmup": 31,
+          "nativePendingInvocations": 0,
+          "capturePending": {
+            "status": "observed",
+            "final": 0
+          },
+          "maxObservedQueuedEvents": 0,
+          "maxObservedQueuedBytes": 0,
+          "droppedEvents": 0,
+          "context": {
+            "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+            "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+            "attempt": 1,
+            "bundleHash": "fnv1a64:0ca54740d91d0491",
+            "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+            "requestId": "a175837a-733b-434b-99a7-d751e7f3000c",
+            "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+            "runtimeVersion": "1",
+            "semanticVersion": "1",
+            "windowId": "main",
+            "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+          }
+        }
+      ]
+    },
+    {
+      "ids": [],
+      "name": "legacy native data callbacks remain available without exposing protected capture",
+      "passed": true,
+      "durationMs": 4.45679200000086
+    },
+    {
+      "ids": [
+        "UP-T081",
+        "UP-T084",
+        "UP-T088",
+        "UP-T091",
+        "UP-T095"
+      ],
+      "name": "native capture returns bounded invoke evidence without legacy leak",
+      "passed": true,
+      "durationMs": 167.76995800000077,
+      "eventCount": 2,
+      "coverage": {
+        "beforeStart": "unobserved",
+        "businessPersistence": "unobserved",
+        "cachedBeforeInstall": "unobserved",
+        "correlation": "none",
+        "followPages": false,
+        "hookSources": [
+          "frontend_tauri_transport_callbacks"
+        ],
+        "pageGaps": 0,
+        "pendingMayBeIncomplete": false,
+        "preTransportFailures": "unobserved_on_immutable_invoke",
+        "previewPolicy": "host_command_and_string_path_allowlist",
+        "promiseIdentity": "preserved",
+        "rustTrace": "unobserved",
+        "source": "frontend_invoke_observation"
+      }
+    },
+    {
+      "ids": [
+        "UP-T084",
+        "UP-T087",
+        "UP-T088",
+        "UP-T093"
+      ],
+      "name": "native capture preserves rejection, raw binary and pending business work",
+      "passed": true,
+      "durationMs": 168.4290000000001,
+      "nativeExpectedWriteDelta": 1,
+      "binaryBytes": 4,
+      "pendingBusinessStillActive": 1,
+      "redactedError": true
+    },
+    {
+      "ids": [
+        "UP-T099"
+      ],
+      "name": "strict instance, capture, GUI workflow, query and native image compose",
+      "passed": true,
+      "durationMs": 1022.8238750000019,
+      "runId": "76935e11-22f1-4b64-9791-113d6bd6c616",
+      "nativeSaveDelta": 1,
+      "invocationId": "34726ed3-b232-4523-8fcb-bdb3f8b649e9:8",
+      "screenshotSource": "webview_native"
+    },
+    {
+      "ids": [
+        "UP-T101",
+        "UP-PK003",
+        "UP-PK004",
+        "UP-PK005",
+        "UP-PK012"
+      ],
+      "name": "four real entry points share lifecycle, authority and exit semantics",
+      "passed": true,
+      "durationMs": 3471.5830000000024,
+      "layer": "running-native-app-entry-points",
+      "syntheticSelectionUsed": false,
+      "nativeUserSelectionPerformed": false,
+      "cases": [
+        {
+          "name": "Opaque IPC cursor round-trips unchanged through WS, CLI and both MCP servers",
+          "passed": true
+        },
+        {
+          "name": "embedded returns cached masked PNG and complete metadata",
+          "passed": true,
+          "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:f59b5994-8ef3-4e9c-b3a8-1521257639d7",
+          "pngSha256": "f9f9566539d4b67c2849064b6eda8ecaadf029d50a6dad3be8f7cb2db73c85d5"
+        },
+        {
+          "name": "stdio returns cached masked PNG and complete metadata",
+          "passed": true,
+          "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:f59b5994-8ef3-4e9c-b3a8-1521257639d7",
+          "pngSha256": "f9f9566539d4b67c2849064b6eda8ecaadf029d50a6dad3be8f7cb2db73c85d5"
+        },
+        {
+          "name": "Both MCPs preserve selected metadata when screenshot failed",
+          "passed": true,
+          "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:dd951cd1-9b08-4691-bfbb-0908d942c20a"
+        },
+        {
+          "name": "CLI start -> embedded MCP get -> standalone MCP cancel -> WS retained result",
+          "passed": true,
+          "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:6b1a43c0-fbf0-48cc-8926-213c890f134f",
+          "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+          "cliStartExit": 2,
+          "cliCancelExit": 0,
+          "cliMissingHandleExit": 1,
+          "status": "cancelled",
+          "cleanup": "confirmed",
+          "requestKeyPresentOnStderr": true,
+          "metadataContextEqual": true
+        },
+        {
+          "name": "Anonymous retained picker denied across WS and both MCP paths",
+          "passed": true,
+          "oldProtocolTextRetained": true
+        },
+        {
+          "name": "CLI omitted-action convenience activates native page picker and cleans up",
+          "passed": true,
+          "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:880dabaf-4721-4234-a645-a2038c7e9334",
+          "beforeCancel": "awaiting_selection",
+          "afterCancel": "cancelled",
+          "cleanup": "confirmed",
+          "cliExit": 2
+        },
+        {
+          "name": "All four shipped inspection JSON examples execute with fresh keys and returned handles",
+          "passed": true,
+          "examples": [
+            "picker-start.json",
+            "picker-get.json",
+            "picker-cancel.json",
+            "picker-convenience.json"
+          ]
+        }
+      ]
+    },
+    {
+      "ids": [
+        "UP-T105"
+      ],
+      "name": "measured warm full-source vs short-packet transport",
+      "passed": true,
+      "durationMs": 13983.352165999997,
+      "samplesPerConfiguration": 30
+    },
+    {
+      "ids": [
+        "UP-T100"
+      ],
+      "name": "unknown result keeps original effect and permits captured diagnostics without replay",
+      "passed": true,
+      "durationMs": 30036.15950000001,
+      "nativeSaveDelta": 1,
+      "originalExecution": "outcome_unknown",
+      "quarantinePreserved": true,
+      "diagnosticEvents": 2
+    }
+  ],
+  "inputPoint": {
+    "x": 1005.484375,
+    "y": 436
+  },
+  "health": {
+    "checks": {
+      "bridge": {
+        "connected": true,
+        "durationMs": 0,
+        "status": "responsive"
+      },
+      "runtime": {
+        "durationMs": 0,
+        "status": "unavailable"
+      },
+      "transport": {
+        "durationMs": 0,
+        "status": "responsive"
+      }
+    },
+    "conclusion": "runtime_missing",
+    "context": {
+      "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+      "windowId": "main"
+    },
+    "diagnostics": {
+      "activeObservers": null,
+      "bundleBytesSent": 0,
+      "commandBytesSent": 546,
+      "inputGuard": null,
+      "installAttempts": 0,
+      "installSuccesses": 0,
+      "runtimeReuses": 0,
+      "staleContextRejects": 0
+    },
+    "executionReplayed": false,
+    "limitations": [
+      "Probe success or timeout does not establish the original operation outcome or a deadlock"
+    ]
+  },
+  "selection": {
+    "businessActionDispatched": false,
+    "cleanup": {
+      "leaseReleased": true,
+      "status": "confirmed"
+    },
+    "context": {
+      "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+      "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+      "bundleHash": "fnv1a64:0ca54740d91d0491",
+      "origin": "tauri://localhost",
+      "pageEpoch": "0db1d441-b65b-4651-a7a4-b0221d2ea469",
+      "runtimeId": "3c67804a-4d8a-4b73-8f39-94b8c123c590",
+      "runtimeVersion": "1",
+      "semanticVersion": "1",
+      "windowId": "main",
+      "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+    },
+    "deadlineAtMs": 1789247408435,
+    "error": null,
+    "limitations": [
+      "No isolation guarantee against earlier page-global listeners",
+      "Light DOM element boundaries only",
+      "Selection does not authorize workflow spec mutation",
+      "Screenshot and selection are separate observations"
+    ],
+    "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:f59b5994-8ef3-4e9c-b3a8-1521257639d7",
+    "requestKey": "1e5e2cc8-2411-447f-95e4-e44e18115188",
+    "resultComplete": true,
+    "retainedUntil": 1789247648714,
+    "revision": 7,
+    "screenshot": {
+      "artifactId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:f59b5994-8ef3-4e9c-b3a8-1521257639d7:image",
+      "captureSource": "webview_native",
+      "capturedAt": 1789247348891,
+      "consistency": {
+        "atomic": false,
+        "status": "stable_context"
+      },
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "origin": "tauri://localhost",
+        "pageEpoch": "0db1d441-b65b-4651-a7a4-b0221d2ea469",
+        "runtimeId": "3c67804a-4d8a-4b73-8f39-94b8c123c590",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "fallbacks": [],
+      "geometry": {
+        "clipped": false,
+        "coordinateSpace": "layout_viewport_css",
+        "cropPx": [
+          60,
+          132,
+          126,
+          76
+        ],
+        "cssToImage": [
+          2,
+          0,
+          0,
+          2,
+          -60,
+          -132
+        ],
+        "status": "known"
+      },
+      "heightPx": 76,
+      "mimeType": "image/png",
+      "redaction": {
+        "coverage": "declared_regions_and_field_heuristics",
+        "maskFingerprint": "fnv1a64:0553fcbcaa2fa5a4",
+        "maskedRegions": 1,
+        "policy": "required",
+        "policyVersion": "1",
+        "status": "applied",
+        "uncoveredReasons": []
+      },
+      "retainedUntil": 1789247648714,
+      "sideEffects": [],
+      "status": "captured",
+      "timings": {
+        "capture": {
+          "elapsedMs": 4.635208,
+          "elapsedNs": 4635208,
+          "status": "measured"
+        },
+        "clock": "monotonic",
+        "cropResize": {
+          "elapsedMs": 0.355292,
+          "elapsedNs": 355292,
+          "status": "measured"
+        },
+        "decode": {
+          "elapsedMs": 100.905125,
+          "elapsedNs": 100905125,
+          "status": "measured"
+        },
+        "diskSave": {
+          "reason": "protected_memory_only",
+          "status": "not_applicable"
+        },
+        "encode": {
+          "elapsedMs": 2.833166,
+          "elapsedNs": 2833166,
+          "status": "measured"
+        },
+        "formatConversion": {
+          "reason": "png_output",
+          "status": "not_applicable"
+        },
+        "mask": {
+          "elapsedMs": 0.742333,
+          "elapsedNs": 742333,
+          "status": "measured"
+        },
+        "protectedMemoryStore": {
+          "elapsedMs": 0.008124999999999999,
+          "elapsedNs": 8125,
+          "status": "measured"
+        }
+      },
+      "viewport": {
+        "devicePixelRatio": 2,
+        "heightCss": 788,
+        "offsetLeft": 0,
+        "offsetTop": 0,
+        "visualScale": 1,
+        "widthCss": 1120
+      },
+      "widthPx": 126
+    },
+    "selection": {
+      "actionable": true,
+      "capturedAtMs": 1789247348671,
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "origin": "tauri://localhost",
+        "pageEpoch": "0db1d441-b65b-4651-a7a4-b0221d2ea469",
+        "runtimeId": "3c67804a-4d8a-4b73-8f39-94b8c123c590",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "coordinateSpace": "layout_viewport_css",
+      "description": "",
+      "locatorCandidates": [
+        {
+          "locator": {
+            "by": "testId",
+            "value": "pick-save"
+          },
+          "matchCount": 1,
+          "reason": "unique_same_element",
+          "semanticVersion": "1",
+          "stability": "current_document_only",
+          "target": {
+            "by": "testId",
+            "value": "pick-save"
+          },
+          "validatedAtMs": 1789247348671,
+          "validatedInPageEpoch": "0db1d441-b65b-4651-a7a4-b0221d2ea469",
+          "validity": "observed_context_only",
+          "verified": true
+        },
+        {
+          "locator": {
+            "by": "css",
+            "value": "#pick-save"
+          },
+          "matchCount": 1,
+          "reason": "unique_same_element",
+          "semanticVersion": "1",
+          "stability": "current_document_only",
+          "target": {
+            "by": "css",
+            "value": "#pick-save"
+          },
+          "validatedAtMs": 1789247348671,
+          "validatedInPageEpoch": "0db1d441-b65b-4651-a7a4-b0221d2ea469",
+          "validity": "observed_context_only",
+          "verified": true
+        },
+        {
+          "locator": {
+            "by": "css",
+            "value": "html > body > section > button:nth-of-type(1)"
+          },
+          "matchCount": 1,
+          "reason": "unique_same_element",
+          "semanticVersion": "1",
+          "stability": "current_document_only",
+          "target": {
+            "by": "css",
+            "value": "html > body > section > button:nth-of-type(1)"
+          },
+          "validatedAtMs": 1789247348671,
+          "validatedInPageEpoch": "0db1d441-b65b-4651-a7a4-b0221d2ea469",
+          "validity": "observed_context_only",
+          "verified": true
+        }
+      ],
+      "name": "Save",
+      "rect": {
+        "height": 38,
+        "width": 62.96875,
+        "x": 30,
+        "y": 66
+      },
+      "redaction": {
+        "omittedFields": [
+          "value",
+          "outerHTML",
+          "attributes"
+        ],
+        "status": "applied"
+      },
+      "role": "button",
+      "selectionId": "198d0c12-9bc9-402c-a627-26f87c374dc7",
+      "semanticVersion": "1",
+      "states": {},
+      "tag": "button",
+      "visible": true,
+      "warnings": []
+    },
+    "sideEffects": [],
+    "status": "selected",
+    "warnings": []
+  },
+  "partialPickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:dd951cd1-9b08-4691-bfbb-0908d942c20a",
+  "captureBenchmark": [
+    {
+      "mode": "capture_off",
+      "samples": 30,
+      "warmups": 1,
+      "workflowSteps": 4,
+      "medianMs": 118.04904150000038,
+      "p95Ms": 162.12958400000207,
+      "medianValidatedMs": 119.47137500000099,
+      "p95ValidatedMs": 163.822959000001,
+      "nativeSaveDelta": 30,
+      "nativeTaskDelta": 30,
+      "frontendInputEvents": 30,
+      "frontendOpens": 30,
+      "frontendSaves": 30,
+      "nativeSaveCallsIncludingWarmup": 31,
+      "nativePendingInvocations": 0,
+      "capturePending": {
+        "status": "not_enabled",
+        "final": null
+      },
+      "maxObservedQueuedEvents": 0,
+      "maxObservedQueuedBytes": 0,
+      "droppedEvents": 0,
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "4283ce0f-7ad6-4127-b75f-e746eddd1f80",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      }
+    },
+    {
+      "mode": "capture_on",
+      "samples": 30,
+      "warmups": 1,
+      "workflowSteps": 4,
+      "medianMs": 136.79406200000085,
+      "p95Ms": 205.02737500000148,
+      "medianValidatedMs": 137.98952100000133,
+      "p95ValidatedMs": 205.9861669999991,
+      "nativeSaveDelta": 30,
+      "nativeTaskDelta": 30,
+      "frontendInputEvents": 30,
+      "frontendOpens": 30,
+      "frontendSaves": 30,
+      "nativeSaveCallsIncludingWarmup": 31,
+      "nativePendingInvocations": 0,
+      "capturePending": {
+        "status": "observed",
+        "final": 0
+      },
+      "maxObservedQueuedEvents": 0,
+      "maxObservedQueuedBytes": 0,
+      "droppedEvents": 0,
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "a175837a-733b-434b-99a7-d751e7f3000c",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      }
+    }
+  ],
+  "captureStart": {
+    "acknowledgedAt": 1789247365021,
+    "applied": true,
+    "captureSessionId": "14162934-48f6-4226-bd56-6f4ea376c6cb:capture:c3a82250-637e-4dad-ba85-09c76471e8c2",
+    "context": {
+      "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+      "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+      "bundleHash": "fnv1a64:0ca54740d91d0491",
+      "origin": "tauri://localhost",
+      "pageEpoch": "4e8e749f-f0f1-4075-9543-c976a5af8187",
+      "runtimeId": "3f3f49ee-0695-4464-9946-9109f3ed816e",
+      "runtimeVersion": "1",
+      "semanticVersion": "1",
+      "windowId": "main",
+      "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+    },
+    "coverage": {
+      "beforeStart": "unobserved",
+      "businessPersistence": "unobserved",
+      "cachedBeforeInstall": "unobserved",
+      "correlation": "none",
+      "followPages": false,
+      "hookSources": [
+        "frontend_tauri_transport_callbacks"
+      ],
+      "pageGaps": 0,
+      "pendingMayBeIncomplete": false,
+      "preTransportFailures": "unobserved_on_immutable_invoke",
+      "previewPolicy": "host_command_and_string_path_allowlist",
+      "promiseIdentity": "preserved",
+      "rustTrace": "unobserved",
+      "source": "frontend_invoke_observation"
+    },
+    "desired": true,
+    "droppedEvents": 0,
+    "endSequence": null,
+    "remainingMs": 599990,
+    "startSequence": 63,
+    "status": "active"
+  },
+  "benchmark": [
+    {
+      "steps": 2,
+      "mode": "full_source",
+      "samples": 30,
+      "medianMs": 11.009500000000116,
+      "p95Ms": 13.535792000002402,
+      "meanScriptBytes": 123871.33333333333,
+      "meanBridgeCommandBytes": 127143.33333333333,
+      "nativeSaveDelta": 0
+    },
+    {
+      "steps": 2,
+      "mode": "short_packet",
+      "samples": 30,
+      "medianMs": 3.748249999996915,
+      "p95Ms": 5.410125000002154,
+      "meanScriptBytes": 6151.333333333333,
+      "meanBridgeCommandBytes": 7578.333333333333,
+      "nativeSaveDelta": 0
+    },
+    {
+      "steps": 10,
+      "mode": "full_source",
+      "samples": 30,
+      "medianMs": 77.43737500000134,
+      "p95Ms": 235.1377500000017,
+      "meanScriptBytes": 421664.6666666667,
+      "meanBridgeCommandBytes": 431576.6666666667,
+      "nativeSaveDelta": 0
+    },
+    {
+      "steps": 10,
+      "mode": "short_packet",
+      "samples": 30,
+      "medianMs": 27.987915999998222,
+      "p95Ms": 208.91908400000102,
+      "meanScriptBytes": 21416.666666666668,
+      "meanBridgeCommandBytes": 25055.666666666668,
+      "nativeSaveDelta": 0
+    },
+    {
+      "steps": 20,
+      "mode": "full_source",
+      "samples": 30,
+      "medianMs": 139.78941699999996,
+      "p95Ms": 288.3390419999996,
+      "meanScriptBytes": 793916.3333333334,
+      "meanBridgeCommandBytes": 812128.3333333334,
+      "nativeSaveDelta": 0
+    },
+    {
+      "steps": 20,
+      "mode": "short_packet",
+      "samples": 30,
+      "medianMs": 40.57204199999978,
+      "p95Ms": 66.17591700000048,
+      "meanScriptBytes": 40508.333333333336,
+      "meanBridgeCommandBytes": 46912.333333333336,
+      "nativeSaveDelta": 0
+    }
+  ],
+  "passed": true
+}

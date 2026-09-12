@@ -1,0 +1,44 @@
+    Checking tauri-plugin-connector v0.15.0 (<repository>/plugin)
+error: method `start` is never used
+   --> plugin/src/capture/store.rs:262:19
+    |
+103 | impl Store {
+    | ---------- method in this implementation
+...
+262 |     pub(super) fn start(
+    |                   ^^^^^
+    |
+    = note: `-D dead-code` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: could not compile `tauri-plugin-connector` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: field assignment outside of initializer for an instance created with Default::default()
+   --> plugin/src/capture/store_tests.rs:203:5
+    |
+203 |     s.session_lifetime = Duration::from_millis(100);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: consider initializing the variable with `capture::store::Store { session_lifetime: Duration::from_millis(100), ..Default::default() }` and removing relevant reassignments
+   --> plugin/src/capture/store_tests.rs:202:5
+    |
+202 |     let mut s = Store::default();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#field_reassign_with_default
+    = note: `-D clippy::field-reassign-with-default` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::field_reassign_with_default)]`
+
+error: field assignment outside of initializer for an instance created with Default::default()
+   --> plugin/src/capture/store_tests.rs:236:5
+    |
+236 |     s.session_lifetime = Duration::from_millis(5);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: consider initializing the variable with `capture::store::Store { session_lifetime: Duration::from_millis(5), retention: Duration::from_millis(10), ..Default::default() }` and removing relevant reassignments
+   --> plugin/src/capture/store_tests.rs:235:5
+    |
+235 |     let mut s = Store::default();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#field_reassign_with_default
+
+error: could not compile `tauri-plugin-connector` (lib test) due to 2 previous errors

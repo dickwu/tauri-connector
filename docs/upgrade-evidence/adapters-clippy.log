@@ -1,0 +1,4 @@
+    Checking connector-client v0.15.0 ([workspace]/crates/client)
+    Checking connector-mcp-server v0.15.0 ([workspace]/crates/mcp-server)
+    Checking connector-cli v0.15.0 ([workspace]/crates/cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.39s

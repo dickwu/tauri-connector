@@ -1,0 +1,5288 @@
+{
+  "schemaVersion": 1,
+  "platform": "darwin",
+  "layer": "native_webview_workflow_gui_dispatch",
+  "input": "Existing workflow click/fill/click/query GUI dispatch inside the native WebView; not OS input",
+  "status": "completed",
+  "passed": true,
+  "samplesPerConfiguration": 30,
+  "warmupsPerConfiguration": 1,
+  "capturePolicy": {
+    "resultPolicy": "metadata",
+    "argumentPolicy": "metadata",
+    "commands": [
+      "fixture_create_task"
+    ],
+    "followPages": false
+  },
+  "measuredDimensions": [
+    "fullWorkflowElapsedMs",
+    "validatedSampleElapsedMs",
+    "frontendInputEvents",
+    "frontendOpens",
+    "frontendSaves",
+    "nativeSaveDelta",
+    "nativeTaskDelta",
+    "nativePendingInvocations",
+    "captureQueue",
+    "captureDrops",
+    "capturePending"
+  ],
+  "configurationOrder": [
+    "capture_off",
+    "capture_on"
+  ],
+  "rows": [
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 0,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-000-中文",
+      "runKey": "capture-benchmark-bd34b27b-b12b-4bdb-8a66-7d55895a9db3",
+      "beforeNative": {
+        "saveCalls": 1,
+        "taskCount": 1,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 135.06733299999905,
+      "runId": "0839283e-ef32-4a1f-a7a3-241b6985642a",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "4283ce0f-7ad6-4127-b75f-e746eddd1f80",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 2,
+        "taskCount": 2,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 136.41529099999752,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 1,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-001-中文",
+      "runKey": "capture-benchmark-120c6a8f-c7cf-451a-8030-5fcd001a3ba5",
+      "beforeNative": {
+        "saveCalls": 2,
+        "taskCount": 2,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 162.12958400000207,
+      "runId": "b890cf6d-16cd-4248-ba7a-34827011ae83",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "03d184d8-910a-4e96-953f-8bdbb29a6f50",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 3,
+        "taskCount": 3,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 163.822959000001,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 2,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-002-中文",
+      "runKey": "capture-benchmark-f6b19544-8a6b-4da9-bf89-c0f2fe5746ac",
+      "beforeNative": {
+        "saveCalls": 3,
+        "taskCount": 3,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 141.33474999999817,
+      "runId": "c38f3f1f-87bf-499d-b650-705d605ba9fd",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "6e2d9286-acf1-4425-a1cb-8068dc765672",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 4,
+        "taskCount": 4,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 143.2900419999969,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 3,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-003-中文",
+      "runKey": "capture-benchmark-d61899e2-a933-4a83-9ffe-09758ed89eec",
+      "beforeNative": {
+        "saveCalls": 4,
+        "taskCount": 4,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 177.93195800000103,
+      "runId": "6e37f143-853e-49f8-8cb2-91a99d35ec67",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "a849c00b-8b78-44ed-a8b0-93fe6cdfdc6d",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 5,
+        "taskCount": 5,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 179.31104100000084,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 4,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-004-中文",
+      "runKey": "capture-benchmark-a919b63b-7d70-4308-9182-65be0a953099",
+      "beforeNative": {
+        "saveCalls": 5,
+        "taskCount": 5,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 138.2719999999972,
+      "runId": "e22e238f-ffa8-48bd-b668-22e25ccde514",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "99c2bbc0-bdcb-4f1f-9969-12b6cac63401",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 6,
+        "taskCount": 6,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 140.11766599999828,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 5,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-005-中文",
+      "runKey": "capture-benchmark-48263fd0-ecf7-4e6a-a8bc-e9378ef148de",
+      "beforeNative": {
+        "saveCalls": 6,
+        "taskCount": 6,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 139.95275000000038,
+      "runId": "c81ea2d7-2d82-46b8-b894-50377c48413a",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "6c202e03-6c0a-48fc-b1aa-e09425077160",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 7,
+        "taskCount": 7,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 141.99966700000004,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 6,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-006-中文",
+      "runKey": "capture-benchmark-df11fded-838f-4ebf-b637-20256d0f00a0",
+      "beforeNative": {
+        "saveCalls": 7,
+        "taskCount": 7,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 158.82087500000125,
+      "runId": "41e05eae-cb96-4a89-8b8d-95103184b002",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "2d4021f9-077a-414f-8182-3dfe6a60c472",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 8,
+        "taskCount": 8,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 160.26733299999978,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 7,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-007-中文",
+      "runKey": "capture-benchmark-2685be72-c0d9-46b2-a5b9-99511bc166be",
+      "beforeNative": {
+        "saveCalls": 8,
+        "taskCount": 8,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 113.38404100000116,
+      "runId": "8047dd7c-2d1b-4863-8bcc-6ceb4b35483d",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "9386435d-62b5-4171-86c0-2a789f5e298b",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 9,
+        "taskCount": 9,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 114.74687500000073,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 8,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-008-中文",
+      "runKey": "capture-benchmark-cf3fd5fb-dba4-4e94-92c4-3756318a3353",
+      "beforeNative": {
+        "saveCalls": 9,
+        "taskCount": 9,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 119.74766699999964,
+      "runId": "a6d68835-601e-4d3e-a6d8-1b0757c6c5af",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "ba3a5b90-ad4a-4f6f-8cd6-e584cf6590c3",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 10,
+        "taskCount": 10,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 120.83308300000135,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 9,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-009-中文",
+      "runKey": "capture-benchmark-5b1cb1e9-5598-4ff4-b654-4928c470f91c",
+      "beforeNative": {
+        "saveCalls": 10,
+        "taskCount": 10,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 113.68862499999886,
+      "runId": "7e637136-32e0-4fa2-ad91-1c6925c13bc6",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "7ae19526-234f-4743-8e76-72682c4a1f72",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 11,
+        "taskCount": 11,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 114.8971249999995,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 10,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-010-中文",
+      "runKey": "capture-benchmark-3c053d9e-5694-4cb9-b469-e0c4636b2584",
+      "beforeNative": {
+        "saveCalls": 11,
+        "taskCount": 11,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 114.30020800000057,
+      "runId": "8f1a797c-f614-41ed-ad66-df6c7dcf4fa5",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "a9bbee52-f1ba-41f4-b543-51bd9c92a93f",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 12,
+        "taskCount": 12,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 115.43612500000017,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 11,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-011-中文",
+      "runKey": "capture-benchmark-ec930990-74b1-4503-8eef-3396fc5ebd56",
+      "beforeNative": {
+        "saveCalls": 12,
+        "taskCount": 12,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 118.07304099999965,
+      "runId": "78864a5b-d41c-4cee-ae9c-17f4ab23b45b",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "bc59da2e-32aa-4039-902d-9c7789397033",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 13,
+        "taskCount": 13,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 119.56183299999975,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 12,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-012-中文",
+      "runKey": "capture-benchmark-085041e7-b298-4bf2-be9f-82aa0f736c04",
+      "beforeNative": {
+        "saveCalls": 13,
+        "taskCount": 13,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 136.6012499999997,
+      "runId": "7f844efd-d710-42bd-b38a-40473a4764e9",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "6034298b-46db-42d9-9836-a642a20debce",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 14,
+        "taskCount": 14,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 137.75641600000017,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 13,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-013-中文",
+      "runKey": "capture-benchmark-0cd1e1b1-d172-4670-b8bc-83c59008e5c1",
+      "beforeNative": {
+        "saveCalls": 14,
+        "taskCount": 14,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 118.02504200000112,
+      "runId": "bf6f7fd7-1078-4896-a57f-7013e34dc567",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "55b201fd-9a78-4fd5-8309-9c77227d3e7f",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 15,
+        "taskCount": 15,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 119.38091700000223,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 14,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-014-中文",
+      "runKey": "capture-benchmark-807690a7-f698-43f8-8529-6e8b2c6b4999",
+      "beforeNative": {
+        "saveCalls": 15,
+        "taskCount": 15,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 115.3716659999991,
+      "runId": "c5d229f9-a055-4058-bfdc-9d2dc6c2b92b",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "262be027-3577-4370-868b-1d507dddf102",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 16,
+        "taskCount": 16,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 116.91937500000131,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 15,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-015-中文",
+      "runKey": "capture-benchmark-54dd1007-351a-4525-81db-97ba6204e84c",
+      "beforeNative": {
+        "saveCalls": 16,
+        "taskCount": 16,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 112.26841599999898,
+      "runId": "18c7f700-e22e-4bf8-91c0-7ec728ef96a2",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "bbba3268-c093-44f4-90e4-e50c167ae3da",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 17,
+        "taskCount": 17,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 113.41791599999851,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 16,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-016-中文",
+      "runKey": "capture-benchmark-e6132b27-913c-4512-824d-69dadcc1ac3e",
+      "beforeNative": {
+        "saveCalls": 17,
+        "taskCount": 17,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 119.05899999999747,
+      "runId": "81c3557b-ddac-4faa-ad23-572130d0d057",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "7f2bb697-384d-4c67-bfa0-a8364c7420cb",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 18,
+        "taskCount": 18,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 120.53337499999907,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 17,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-017-中文",
+      "runKey": "capture-benchmark-29dbee26-566c-4a7b-a0ca-1431816feaee",
+      "beforeNative": {
+        "saveCalls": 18,
+        "taskCount": 18,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 122.80595799999719,
+      "runId": "380ba8b6-7c1d-43a3-a141-c3aad79527ba",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "08501b1f-3ef4-4aaa-a5aa-9de2c7f412bf",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 19,
+        "taskCount": 19,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 124.03591599999709,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 18,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-018-中文",
+      "runKey": "capture-benchmark-a060b17f-76cb-4d28-8d1d-7bb237f6f263",
+      "beforeNative": {
+        "saveCalls": 19,
+        "taskCount": 19,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 118.94612499999857,
+      "runId": "e7d071c4-7973-45d9-8e7d-324ae63f8570",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "817bbeba-eb95-466a-a470-0ad2baa2f003",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 20,
+        "taskCount": 20,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 120.03120800000033,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 19,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-019-中文",
+      "runKey": "capture-benchmark-f51c7331-6cd3-47d3-859f-d95804c90f31",
+      "beforeNative": {
+        "saveCalls": 20,
+        "taskCount": 20,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 119.82170899999983,
+      "runId": "ff6078f3-1194-41c6-aa90-4c6a68e710e9",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "bf9038ce-efdd-404b-9a01-fb432cb5201c",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 21,
+        "taskCount": 21,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 121.10133399999904,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 20,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-020-中文",
+      "runKey": "capture-benchmark-bd8cf952-1e0e-4844-a397-6a540105c4e1",
+      "beforeNative": {
+        "saveCalls": 21,
+        "taskCount": 21,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 113.67854100000113,
+      "runId": "797c6a14-afb0-4fe9-9dbe-bac91fbe8b51",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "ed547f21-b461-4dd3-975d-59951da43603",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 22,
+        "taskCount": 22,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 114.8614579999994,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 21,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-021-中文",
+      "runKey": "capture-benchmark-bcdfca62-9881-4072-8e19-a1c2f59847cc",
+      "beforeNative": {
+        "saveCalls": 22,
+        "taskCount": 22,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 137.6664579999997,
+      "runId": "b559bd44-ba8d-4238-81b7-3cb024ec4890",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "b627b4e9-890d-463d-9d61-3a9aa12e8efe",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 23,
+        "taskCount": 23,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 139.16449999999895,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 22,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-022-中文",
+      "runKey": "capture-benchmark-f4ee364a-50c4-401a-8a58-ab5d9ade359f",
+      "beforeNative": {
+        "saveCalls": 23,
+        "taskCount": 23,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 112.04504199999792,
+      "runId": "7da3075a-d1e7-494f-8a1f-72cd2a346102",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "884e41c7-d681-477d-b8b4-d81322437ff0",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 24,
+        "taskCount": 24,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 113.37204199999906,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 23,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-023-中文",
+      "runKey": "capture-benchmark-ac04b90d-74e1-4d61-8d66-75ab142212d8",
+      "beforeNative": {
+        "saveCalls": 24,
+        "taskCount": 24,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 112.40258400000312,
+      "runId": "2ebf1918-9512-493b-893c-23878280f32c",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "3daf4015-5d2f-4212-9123-5634fde98974",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 25,
+        "taskCount": 25,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 113.49458400000003,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 24,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-024-中文",
+      "runKey": "capture-benchmark-cdbc9f41-559b-4cc0-9bc7-ec09b66d5ca5",
+      "beforeNative": {
+        "saveCalls": 25,
+        "taskCount": 25,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 116.6631669999988,
+      "runId": "70a00c7b-bbf0-4e24-a7c9-f66c76f7cb0a",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "6835715c-4842-457c-a3e5-555bd3c20182",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 26,
+        "taskCount": 26,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 117.76862499999697,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 25,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-025-中文",
+      "runKey": "capture-benchmark-aeeb7a43-a654-4c06-a3f0-6ec1d4a19b1c",
+      "beforeNative": {
+        "saveCalls": 26,
+        "taskCount": 26,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 112.83316600000035,
+      "runId": "24618bb3-ba46-41e5-9a62-36acff7ef350",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "cddd382e-a6bb-4cae-9f32-e7ffcf528515",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 27,
+        "taskCount": 27,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 113.93274999999994,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 26,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-026-中文",
+      "runKey": "capture-benchmark-f637de8c-71b7-400f-8c5c-20bc8b19a895",
+      "beforeNative": {
+        "saveCalls": 27,
+        "taskCount": 27,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 116.7722500000018,
+      "runId": "4018aae3-2edc-408d-9908-c1208e9f60c9",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "4d3e8abc-202d-4778-8e3d-3fdf695347af",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 28,
+        "taskCount": 28,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 118.14562500000102,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 27,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-027-中文",
+      "runKey": "capture-benchmark-baf3c3fd-4573-4cd2-8323-5ee01a1b5120",
+      "beforeNative": {
+        "saveCalls": 28,
+        "taskCount": 28,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 115.08224999999948,
+      "runId": "d1a62021-4773-4331-a5ec-b00cd796093c",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "16d3213a-e99f-4104-b012-3b709c6c637c",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 29,
+        "taskCount": 29,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 116.18045799999891,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 28,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-028-中文",
+      "runKey": "capture-benchmark-6b4a7c66-66e0-44c6-9036-1059bcaee3de",
+      "beforeNative": {
+        "saveCalls": 29,
+        "taskCount": 29,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 112.83329199999935,
+      "runId": "a7abffba-a012-4a28-843c-cccf44b397dd",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "8518a7f9-11c5-4bed-b18c-8f3f89cdff5c",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 30,
+        "taskCount": 30,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 113.99187499999971,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_off",
+      "phase": "sample",
+      "index": 29,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-029-中文",
+      "runKey": "capture-benchmark-e59cf1d6-8fc2-467a-bd0b-3679c12177a1",
+      "beforeNative": {
+        "saveCalls": 30,
+        "taskCount": 30,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 116.70941699999821,
+      "runId": "f15ec2d0-411e-4c8d-8ecd-08d9a43c7d28",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "168011f5-6966-4a99-b66b-35c49f31137e",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 31,
+        "taskCount": 31,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 118.07195900000079,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 0,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-000-中文",
+      "runKey": "capture-benchmark-434b9865-c4bd-4706-8d30-76b536b24e41",
+      "beforeNative": {
+        "saveCalls": 1,
+        "taskCount": 1,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 112.08179199999722,
+      "runId": "608b3261-3ad9-4f3f-a92c-ca3c4ada910d",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "a175837a-733b-434b-99a7-d751e7f3000c",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 2,
+        "taskCount": 2,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 113.63324999999895,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.4",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          3,
+          4
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:3"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 1,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-001-中文",
+      "runKey": "capture-benchmark-ea891c3b-856d-4867-bc3d-de057e577a04",
+      "beforeNative": {
+        "saveCalls": 2,
+        "taskCount": 2,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 113.55970900000102,
+      "runId": "0c60d30f-a119-428e-9938-9ca0d34555f9",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "db202e66-aa63-4dfd-8ce4-1d383d4f68a1",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 3,
+        "taskCount": 3,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 114.9967919999981,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.6",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          5,
+          6
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:4"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 2,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-002-中文",
+      "runKey": "capture-benchmark-1d53b3bc-ad9d-4831-b507-372c70b971bf",
+      "beforeNative": {
+        "saveCalls": 3,
+        "taskCount": 3,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 111.50733300000138,
+      "runId": "097d4c06-f729-48ba-9ef7-c34ed57dc67c",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "4db822bd-3d0f-4ca5-9ab2-91b040299632",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 4,
+        "taskCount": 4,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 112.68579200000022,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.8",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          7,
+          8
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:5"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 3,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-003-中文",
+      "runKey": "capture-benchmark-d38dda5c-12ff-49db-aa06-cff5bb7a0adf",
+      "beforeNative": {
+        "saveCalls": 4,
+        "taskCount": 4,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 112.07954100000279,
+      "runId": "b84dcfee-51ff-468b-908a-387a50a0215a",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "f91b65de-0de0-455b-95f2-7b0adc239362",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 5,
+        "taskCount": 5,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 113.53150000000096,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.10",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          9,
+          10
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:6"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 4,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-004-中文",
+      "runKey": "capture-benchmark-c3009ce8-ec04-4895-bc8f-802328d03658",
+      "beforeNative": {
+        "saveCalls": 5,
+        "taskCount": 5,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 224.4343340000014,
+      "runId": "0e92d7ae-7665-4358-9b9b-f6beb4b6a91e",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "1ccd5923-f04e-48e2-b14d-3f5a42dae4cd",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 6,
+        "taskCount": 6,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 225.37216700000135,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.12",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          11,
+          12
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:7"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 5,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-005-中文",
+      "runKey": "capture-benchmark-095510f1-62cc-4479-a2be-6ae52d513b7e",
+      "beforeNative": {
+        "saveCalls": 6,
+        "taskCount": 6,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 128.19020899999668,
+      "runId": "6d633554-6d9d-4788-b0d0-7a567ef6d39f",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "ea33a12a-53fb-493e-80f2-c8016732585f",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 7,
+        "taskCount": 7,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 129.3910419999993,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.14",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          13,
+          14
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:8"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 6,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-006-中文",
+      "runKey": "capture-benchmark-04632795-8538-4e99-b8ce-e47adffae32a",
+      "beforeNative": {
+        "saveCalls": 7,
+        "taskCount": 7,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 136.26720800000112,
+      "runId": "642bbada-0f8c-47c1-a674-08f518e5b5ce",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "e32871bc-85c1-4d0a-8595-3b81a7b938b2",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 8,
+        "taskCount": 8,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 137.26766700000007,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.16",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          15,
+          16
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:9"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 7,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-007-中文",
+      "runKey": "capture-benchmark-a32ceaa1-0561-42d4-9d54-30a28f16db05",
+      "beforeNative": {
+        "saveCalls": 8,
+        "taskCount": 8,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 168.94133299999885,
+      "runId": "8ef1d91d-6b12-4c08-a49a-bcee84ef74fc",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "2a2d226b-be34-4747-8f6a-32df2fe505f4",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 9,
+        "taskCount": 9,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 170.039166999999,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.18",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          17,
+          18
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:10"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 8,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-008-中文",
+      "runKey": "capture-benchmark-d9aa9f26-fc35-4983-8325-ebfb2865d400",
+      "beforeNative": {
+        "saveCalls": 9,
+        "taskCount": 9,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 205.02737500000148,
+      "runId": "4c58cbbd-1425-4d76-bd97-da0fa2c75a56",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "8b94f2fd-e086-4a3a-8262-fdb1b6149306",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 10,
+        "taskCount": 10,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 205.9861669999991,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.20",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          19,
+          20
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:11"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 9,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-009-中文",
+      "runKey": "capture-benchmark-915540af-99d1-4c63-9c7c-31ac5e2063ae",
+      "beforeNative": {
+        "saveCalls": 10,
+        "taskCount": 10,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 115.73937499999738,
+      "runId": "9df24fdf-e7f1-44ea-aa71-f63c54e372ea",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "17873d3f-8555-47df-b2f1-86cf323566ee",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 11,
+        "taskCount": 11,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 116.69629200000054,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.22",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          21,
+          22
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:12"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 10,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-010-中文",
+      "runKey": "capture-benchmark-cb2464bc-b67b-48bb-af7c-8dff7e59f550",
+      "beforeNative": {
+        "saveCalls": 11,
+        "taskCount": 11,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 139.46754200000214,
+      "runId": "96457f8b-e54c-49be-a699-3589d1345850",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "e69d43f4-be3f-4f86-b8b8-db117f411f8f",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 12,
+        "taskCount": 12,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 140.8415840000016,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.24",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          23,
+          24
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:13"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 11,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-011-中文",
+      "runKey": "capture-benchmark-fd35f07b-cfec-4365-af80-4369b8880596",
+      "beforeNative": {
+        "saveCalls": 12,
+        "taskCount": 12,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 116.70591699999932,
+      "runId": "10ccfe7f-14be-4f3f-be88-2a53a1194370",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "7df3f709-fca7-4e5c-96dd-3662ddf13b70",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 13,
+        "taskCount": 13,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 117.79520899999989,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.26",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          25,
+          26
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:14"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 12,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-012-中文",
+      "runKey": "capture-benchmark-1f72fc51-3244-44c0-a297-7dc384e1b5e7",
+      "beforeNative": {
+        "saveCalls": 13,
+        "taskCount": 13,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 117.15587500000038,
+      "runId": "7287394b-453a-45da-9b8d-11a510b6df71",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "c72fb5d1-32e5-45c9-8db4-056caffb2ca5",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 14,
+        "taskCount": 14,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 121.85416599999735,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.28",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          27,
+          28
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:15"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 13,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-013-中文",
+      "runKey": "capture-benchmark-8b1ad24f-c3b1-4102-8aaf-f6dc0e03eaa4",
+      "beforeNative": {
+        "saveCalls": 14,
+        "taskCount": 14,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 113.60908399999971,
+      "runId": "a44a5a9d-dc49-4000-8fb8-1773911521c9",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "36913a42-4565-47db-814a-8490557c4632",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 15,
+        "taskCount": 15,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 114.76316700000098,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.30",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          29,
+          30
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:16"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 14,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-014-中文",
+      "runKey": "capture-benchmark-fc8984ce-89c8-493d-9331-b9034fc0e50a",
+      "beforeNative": {
+        "saveCalls": 15,
+        "taskCount": 15,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 113.62633300000016,
+      "runId": "b6ac67f8-5aba-4c43-80bb-16d458eb089f",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "c4389cda-d8ea-4751-85f1-5593b8ab795a",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 16,
+        "taskCount": 16,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 114.73487499999828,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.32",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          31,
+          32
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:17"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 15,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-015-中文",
+      "runKey": "capture-benchmark-610fd458-d83f-47ea-8b33-39e5813ddbe2",
+      "beforeNative": {
+        "saveCalls": 16,
+        "taskCount": 16,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 111.25895899999887,
+      "runId": "29a64fae-f5bb-4df3-9c7a-1be3637a32c1",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "1edd0362-9401-49dd-9b2a-96833d4e2e82",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 17,
+        "taskCount": 17,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 112.39291700000103,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.34",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          33,
+          34
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:18"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 16,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-016-中文",
+      "runKey": "capture-benchmark-cbd46f88-13d6-4d8b-bbd8-892563337d25",
+      "beforeNative": {
+        "saveCalls": 17,
+        "taskCount": 17,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 116.5946249999979,
+      "runId": "35b86edc-2ef9-43a0-9dd5-0549cc39a38b",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "c021df88-c646-462d-b8df-9be4d6ca5a79",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 18,
+        "taskCount": 18,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 117.67083400000047,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.36",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          35,
+          36
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:19"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 17,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-017-中文",
+      "runKey": "capture-benchmark-206c37d6-e536-42c2-9c11-fa675bf8ef0b",
+      "beforeNative": {
+        "saveCalls": 18,
+        "taskCount": 18,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 143.2485830000005,
+      "runId": "053aa0e5-1c55-4030-b631-12e82352e64c",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "4201eab3-c720-4de3-9556-aaff0a4aedbe",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 19,
+        "taskCount": 19,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 144.56491599999936,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.38",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          37,
+          38
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:20"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 18,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-018-中文",
+      "runKey": "capture-benchmark-12e3c245-8c43-4c58-81e6-b9743c32cfa6",
+      "beforeNative": {
+        "saveCalls": 19,
+        "taskCount": 19,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 137.32091600000058,
+      "runId": "469f7200-7d4b-47d3-b7b3-daf1df4ae2e8",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "ec0e6af2-fbd3-4ffe-9912-e2e72b00007e",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 20,
+        "taskCount": 20,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 138.7113750000026,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.40",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          39,
+          40
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:21"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 19,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-019-中文",
+      "runKey": "capture-benchmark-ffe49e93-df22-4e76-ada3-a7b444572a8e",
+      "beforeNative": {
+        "saveCalls": 20,
+        "taskCount": 20,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 145.5958750000027,
+      "runId": "67d14b66-ecba-4943-8e1d-31199f91bfbf",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "5d2877dc-36f8-45c8-a842-412201bb9677",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 21,
+        "taskCount": 21,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 147.23829200000182,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.42",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          41,
+          42
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:22"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 20,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-020-中文",
+      "runKey": "capture-benchmark-3483bcc6-278e-417d-a0e6-aeb69709685c",
+      "beforeNative": {
+        "saveCalls": 21,
+        "taskCount": 21,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 139.31504199999836,
+      "runId": "aefdfe62-c098-4602-9e7f-de6956637538",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "5822a044-e784-4788-9dae-f1a7361c413a",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 22,
+        "taskCount": 22,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 140.46054199999708,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.44",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          43,
+          44
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:23"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 21,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-021-中文",
+      "runKey": "capture-benchmark-43df4cf5-85f4-44b2-9385-f00acdefb0f8",
+      "beforeNative": {
+        "saveCalls": 22,
+        "taskCount": 22,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 140.04095799999777,
+      "runId": "87fa224d-8115-4f53-98d1-651a3aaa9814",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "af697c8a-062a-4244-8d63-36aaf9bfee69",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 23,
+        "taskCount": 23,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 142.00741700000071,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.46",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          45,
+          46
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:24"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 22,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-022-中文",
+      "runKey": "capture-benchmark-0bd6cfa5-a8be-4bc0-a8ad-42b3374020cf",
+      "beforeNative": {
+        "saveCalls": 23,
+        "taskCount": 23,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 141.7101249999978,
+      "runId": "1485c561-008d-4f5d-be73-b582277bdce6",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "bb731ab7-3f1a-4eaf-80bd-0a1fc2ee0b60",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 24,
+        "taskCount": 24,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 143.38066699999763,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.48",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          47,
+          48
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:25"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 23,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-023-中文",
+      "runKey": "capture-benchmark-7116b843-8f04-499f-9837-e476b4a1ad0d",
+      "beforeNative": {
+        "saveCalls": 24,
+        "taskCount": 24,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 142.08899999999994,
+      "runId": "9d1e8102-2170-4a2d-a8e8-3041e480561a",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "8b6b871f-8bbd-4ee1-b0c1-b18e3c0a8072",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 25,
+        "taskCount": 25,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 143.60054200000013,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.50",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          49,
+          50
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:26"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 24,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-024-中文",
+      "runKey": "capture-benchmark-89306204-b3ec-41d6-a8dc-f16cdd810859",
+      "beforeNative": {
+        "saveCalls": 25,
+        "taskCount": 25,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 147.05916699999943,
+      "runId": "aadd765d-e923-461e-8534-44675573a1aa",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "13677cce-689a-4921-8423-78659a05ded1",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 26,
+        "taskCount": 26,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 148.1461249999993,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.52",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          51,
+          52
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:27"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 25,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-025-中文",
+      "runKey": "capture-benchmark-7d0a98b3-d6b3-4624-b8e1-794515e4b8ff",
+      "beforeNative": {
+        "saveCalls": 26,
+        "taskCount": 26,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 138.04741699999795,
+      "runId": "72b67750-f5ad-4e93-90e5-467dc9b59b4b",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "b00c6aaa-302f-40d7-8564-6062360eefec",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 27,
+        "taskCount": 27,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 139.45779200000106,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.54",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          53,
+          54
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:28"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 26,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-026-中文",
+      "runKey": "capture-benchmark-ed7a81cc-e375-4bc1-a5ca-a4095e657554",
+      "beforeNative": {
+        "saveCalls": 27,
+        "taskCount": 27,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 144.90012500000012,
+      "runId": "68678eb6-9b08-4d4a-b0b5-7db6d5f32229",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "9425af64-f113-4a6a-8f53-dc3ec1189f8c",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 28,
+        "taskCount": 28,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 146.23891600000206,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.56",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          55,
+          56
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:29"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 27,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-027-中文",
+      "runKey": "capture-benchmark-8c0aad6a-a841-4fbf-984e-a54191307347",
+      "beforeNative": {
+        "saveCalls": 28,
+        "taskCount": 28,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 142.88379200000054,
+      "runId": "a5a520d0-ea87-48e4-b749-3dc6fca81520",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "603d9dc6-8826-4247-b236-fef9086af08b",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 29,
+        "taskCount": 29,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 144.07737499999712,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.58",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          57,
+          58
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:30"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 28,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-028-中文",
+      "runKey": "capture-benchmark-22c19a66-b684-4e29-a10d-f022f73d0951",
+      "beforeNative": {
+        "saveCalls": 29,
+        "taskCount": 29,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 116.87454100000105,
+      "runId": "e8391d9d-262d-4482-92ae-2983cb53ff6c",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "732cff5d-719a-47a9-a9d1-7295e76f6246",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 30,
+        "taskCount": 30,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 117.9431250000016,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.60",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          59,
+          60
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:31"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "sample",
+      "index": 29,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-sample-029-中文",
+      "runKey": "capture-benchmark-80b854d4-29ff-4666-912d-85b1ba8e6c14",
+      "beforeNative": {
+        "saveCalls": 30,
+        "taskCount": 30,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 117.89562500000102,
+      "runId": "f69a716b-11eb-4d91-a5af-aecd80fa6e18",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "5dace0f9-0bdc-49cc-b545-2e5b5aca33e3",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 31,
+        "taskCount": 31,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 118.893167000002,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.62",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          61,
+          62
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:32"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    }
+  ],
+  "warmups": [
+    {
+      "mode": "capture_off",
+      "phase": "warmup",
+      "index": 0,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-warmup-000-中文",
+      "runKey": "capture-benchmark-5185b23f-e2db-46ed-9a56-a1dbb3d55d1b",
+      "beforeNative": {
+        "saveCalls": 0,
+        "taskCount": 0,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 0,
+        "applied": false,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": null,
+        "status": "stopped"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 175.07545799999934,
+      "runId": "d87161be-93be-427b-96ae-053802fcae5b",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "1c89cdfc-d6fc-4a58-bca4-7ad0de556112",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 1,
+        "taskCount": 1,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 176.25933299999815,
+      "capture": {
+        "status": "disabled",
+        "queuedEvents": 0,
+        "queuedBytes": 0,
+        "droppedEvents": 0,
+        "pendingCount": null,
+        "pendingStatus": "not_observed_capture_disabled"
+      }
+    },
+    {
+      "mode": "capture_on",
+      "phase": "warmup",
+      "index": 0,
+      "taskName": "capture-benchmark-6f06c0dd-747a-42ca-bf09-1ac491dc7074-warmup-000-中文",
+      "runKey": "capture-benchmark-c9fa9ea9-6f81-4f1a-a116-3c90ee5562d7",
+      "beforeNative": {
+        "saveCalls": 0,
+        "taskCount": 0,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "beforeCapture": {
+        "activeSessions": 1,
+        "applied": true,
+        "droppedEvents": 0,
+        "queuedBytes": 0,
+        "queuedEvents": 0,
+        "sourceId": "7d2420b3-fbdc-47a3-bf3a-1262d4428eeb",
+        "status": "active"
+      },
+      "status": "passed",
+      "fullWorkflowElapsedMs": 119.9900830000006,
+      "runId": "9a5a345f-c23b-4712-94d6-476d264addad",
+      "workflowStatus": "completed",
+      "goalStatus": "passed",
+      "originalTestVerdict": "passed",
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "fbf73e2f-00a5-4689-ba10-9e1874a4b851",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      },
+      "afterNative": {
+        "saveCalls": 1,
+        "taskCount": 1,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "nativeSaveDelta": 1,
+      "nativeTaskDelta": 1,
+      "frontendInputEvents": 1,
+      "frontendOpens": 1,
+      "frontendSaves": 1,
+      "nativePendingInvocations": 0,
+      "nativeInputEffectsUnchanged": true,
+      "validatedSampleElapsedMs": 121.27716700000019,
+      "capture": {
+        "cursor": "148252ca-629e-4e86-b101-300c8b09d36e.14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b.2",
+        "started": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "pendingCount": 0,
+        "droppedEvents": 0,
+        "sourceSequences": [
+          1,
+          2
+        ],
+        "invocationIds": [
+          "b92f85f9-07b3-4eda-a23b-ca51734e58ec:2"
+        ],
+        "coverage": {
+          "beforeStart": "unobserved",
+          "businessPersistence": "unobserved",
+          "cachedBeforeInstall": "unobserved",
+          "correlation": "none",
+          "followPages": false,
+          "hookSources": [
+            "frontend_tauri_transport_callbacks"
+          ],
+          "pageGaps": 0,
+          "pendingMayBeIncomplete": false,
+          "preTransportFailures": "unobserved_on_immutable_invoke",
+          "previewPolicy": "host_command_and_string_path_allowlist",
+          "promiseIdentity": "preserved",
+          "rustTrace": "unobserved",
+          "source": "frontend_invoke_observation"
+        },
+        "observations": [
+          {
+            "queuedEvents": 0,
+            "queuedBytes": 0,
+            "droppedEvents": 0,
+            "pageDroppedEvents": 0,
+            "pendingCount": 0
+          }
+        ]
+      }
+    }
+  ],
+  "groups": [
+    {
+      "mode": "capture_off",
+      "samples": 30,
+      "warmups": 1,
+      "workflowSteps": 4,
+      "medianMs": 118.04904150000038,
+      "p95Ms": 162.12958400000207,
+      "medianValidatedMs": 119.47137500000099,
+      "p95ValidatedMs": 163.822959000001,
+      "nativeSaveDelta": 30,
+      "nativeTaskDelta": 30,
+      "frontendInputEvents": 30,
+      "frontendOpens": 30,
+      "frontendSaves": 30,
+      "nativeSaveCallsIncludingWarmup": 31,
+      "nativePendingInvocations": 0,
+      "capturePending": {
+        "status": "not_enabled",
+        "final": null
+      },
+      "maxObservedQueuedEvents": 0,
+      "maxObservedQueuedBytes": 0,
+      "droppedEvents": 0,
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+        "requestId": "4283ce0f-7ad6-4127-b75f-e746eddd1f80",
+        "runtimeId": "600ac093-486c-4bca-b0f3-c70d3f06fa08",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      }
+    },
+    {
+      "mode": "capture_on",
+      "samples": 30,
+      "warmups": 1,
+      "workflowSteps": 4,
+      "medianMs": 136.79406200000085,
+      "p95Ms": 205.02737500000148,
+      "medianValidatedMs": 137.98952100000133,
+      "p95ValidatedMs": 205.9861669999991,
+      "nativeSaveDelta": 30,
+      "nativeTaskDelta": 30,
+      "frontendInputEvents": 30,
+      "frontendOpens": 30,
+      "frontendSaves": 30,
+      "nativeSaveCallsIncludingWarmup": 31,
+      "nativePendingInvocations": 0,
+      "capturePending": {
+        "status": "observed",
+        "final": 0
+      },
+      "maxObservedQueuedEvents": 0,
+      "maxObservedQueuedBytes": 0,
+      "droppedEvents": 0,
+      "context": {
+        "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+        "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+        "attempt": 1,
+        "bundleHash": "fnv1a64:0ca54740d91d0491",
+        "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+        "requestId": "a175837a-733b-434b-99a7-d751e7f3000c",
+        "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+      }
+    }
+  ],
+  "resets": [
+    {
+      "phase": "before_capture_off",
+      "before": {
+        "saveCalls": 0,
+        "taskCount": 0,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "after": {
+        "saveCalls": 0,
+        "taskCount": 0,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "oldPageEpoch": "6e4c7f7d-0768-483a-9a77-557d95c5d527",
+      "pageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0"
+    },
+    {
+      "phase": "before_capture_on",
+      "before": {
+        "saveCalls": 31,
+        "taskCount": 31,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "after": {
+        "saveCalls": 0,
+        "taskCount": 0,
+        "pendingInvocations": 0,
+        "delayMs": 0,
+        "inputEffects": {}
+      },
+      "oldPageEpoch": "6323b9aa-2fa9-4825-9e1e-d36b7c4363e0",
+      "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38"
+    }
+  ],
+  "cleanup": {
+    "phase": "after_benchmark",
+    "before": {
+      "saveCalls": 31,
+      "taskCount": 31,
+      "pendingInvocations": 0,
+      "delayMs": 0,
+      "inputEffects": {}
+    },
+    "after": {
+      "saveCalls": 0,
+      "taskCount": 0,
+      "pendingInvocations": 0,
+      "delayMs": 0,
+      "inputEffects": {}
+    },
+    "oldPageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+    "pageEpoch": "4e8e749f-f0f1-4075-9543-c976a5af8187",
+    "performed": true
+  },
+  "limitations": [
+    "Measures full workflow service, local transport, journal, semantic checks and GUI postconditions. It is not an isolated per-invoke CPU or allocation benchmark.",
+    "Both modes use the same plugin build; capture-off still includes its installed but dormant interception code.",
+    "One window and metadata capture policy only; result preview and multi-window overhead are not measured.",
+    "Modes run in two blocks because completed capture sessions retain evidence and cannot be resumed. Reset/reload and matching warmups equalize DOM/backend sizes but cannot eliminate temporal, thermal or journal-history bias.",
+    "Queue and pending metrics are sampled before/after workflows and during evidence drainage, outside the timed workflow. They do not establish continuous queue high-water marks.",
+    "Thirty samples per configuration do not establish production tail latency. Median and nearest-rank p95 retain all successful samples; no outlier removal is performed.",
+    "Rust counters come from the independently published fixture state file. pendingInvocations counts the dedicated never-completing fixture command, not arbitrary Rust tasks.",
+    "This harness does not bypass the Windows durable-workflow private-storage boundary; run only where the normal workflow service is supported."
+  ],
+  "identity": {
+    "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+    "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb"
+  },
+  "initialNative": {
+    "saveCalls": 0,
+    "taskCount": 0,
+    "pendingInvocations": 0,
+    "delayMs": 0,
+    "inputEffects": {}
+  },
+  "captureStart": {
+    "captureSessionId": "14162934-48f6-4226-bd56-6f4ea376c6cb:capture:b64fae89-7d75-4615-b759-925feeac8f4b",
+    "context": {
+      "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+      "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+      "bundleHash": "fnv1a64:0ca54740d91d0491",
+      "origin": "tauri://localhost",
+      "pageEpoch": "bf5d5a94-a99f-4cce-b953-112c26496b38",
+      "runtimeId": "d11334f2-ce65-4409-8158-249f94c5ff65",
+      "runtimeVersion": "1",
+      "semanticVersion": "1",
+      "windowId": "main",
+      "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+    },
+    "remainingMs": 599990,
+    "coverage": {
+      "beforeStart": "unobserved",
+      "businessPersistence": "unobserved",
+      "cachedBeforeInstall": "unobserved",
+      "correlation": "none",
+      "followPages": false,
+      "hookSources": [
+        "frontend_tauri_transport_callbacks"
+      ],
+      "pageGaps": 0,
+      "pendingMayBeIncomplete": false,
+      "preTransportFailures": "unobserved_on_immutable_invoke",
+      "previewPolicy": "host_command_and_string_path_allowlist",
+      "promiseIdentity": "preserved",
+      "rustTrace": "unobserved",
+      "source": "frontend_invoke_observation"
+    }
+  },
+  "comparison": {
+    "medianDeltaMs": 18.745020500000464,
+    "p95DeltaMs": 42.897790999999415,
+    "medianRatio": 1.1587901118197592,
+    "p95Ratio": 1.264589533517824
+  }
+}

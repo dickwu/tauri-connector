@@ -1,0 +1,3 @@
+   Compiling tauri-plugin-connector v0.15.0 (<workspace>/plugin)
+    Checking connector-client v0.15.0 (<workspace>/crates/client)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.39s

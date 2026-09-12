@@ -779,7 +779,7 @@ dependencies = [
 
 [[package]]
 name = "connector-cli"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "clap",
  "connector-client",
@@ -792,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "connector-client"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "futures-util",
  "serde",
@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "connector-mcp-server"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "connector-client",
  "serde",
@@ -4748,13 +4748,21 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-connector"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "block2",
+ "cairo-rs",
  "connector-client",
  "futures-util",
+ "gio",
  "image",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-graphics",
+ "objc2-foundation",
+ "objc2-web-kit",
  "regex",
  "serde",
  "serde_json",
@@ -4766,6 +4774,9 @@ dependencies = [
  "tokio-tungstenite",
  "tower",
  "uuid",
+ "webkit2gtk",
+ "webview2-com",
+ "windows 0.61.3",
  "xcap",
 ]
 

@@ -1,0 +1,4 @@
+{
+  "action": "cancel",
+  "pickerId": "picker-returned-by-start"
+}

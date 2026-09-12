@@ -11,7 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const output = process.env.CONNECTOR_FIXTURE_OUTPUT || mkdtempSync(resolve(tmpdir(), 'connector-workflow-native-'));
 mkdirSync(output, { recursive: true, mode: 0o700 });
-const binary = process.env.CONNECTOR_FIXTURE_BINARY || resolve(root, 'target/debug/connector-workflow-fixture');
+const binary = process.env.CONNECTOR_FIXTURE_BINARY || resolve(root, `target/debug/connector-workflow-fixture${process.platform === 'win32' ? '.exe' : ''}`);
 const evidencePath = resolve(output, 'native-store.json');
 const token = randomBytes(32).toString('hex');
 const instance = `dev.connector.workflow-fixture.${randomUUID()}`;
@@ -285,7 +285,8 @@ try {
 } finally {
   for (const socket of sockets) socket.close();
   await stopFixture();
-  writeFileSync(resultPath, JSON.stringify({ platform: process.platform, runtime: 'actual Tauri Wry native WebView',
+  writeFileSync(resultPath, JSON.stringify({ platform: process.platform, layer: 'native-webview', runtime: 'actual Tauri Wry native WebView',
+    display: process.platform === 'linux' ? (process.env.DISPLAY || 'unavailable') : 'desktop-session',
     instance, isolatedInstances, tests, metrics, passed: tests.length > 0 && tests.every(test => test.passed) && !process.exitCode,
     untestedPlatforms: ['win32', 'linux'].filter(platform => platform !== process.platform),
     caveats: ['UI state and isolated native fixture store only; no production service or business persistence provider', 'Synthetic DOM input and event dispatch'],

@@ -21,6 +21,13 @@ pub enum Command {
         args: serde_json::Value,
     },
 
+    /// Authenticated inspection lifecycle, handled by application services.
+    Inspection {
+        operation: String,
+        #[serde(default)]
+        args: serde_json::Value,
+    },
+
     // --- JavaScript Execution ---
     ExecuteJs {
         script: String,
@@ -100,10 +107,10 @@ pub enum Command {
         #[serde(default = "default_window")]
         window_id: String,
     },
+    /// Compatibility alias for the app-owned active picker inspection operation.
     SelectElement {
-        #[serde(default = "default_window")]
-        #[allow(dead_code)]
-        window_id: String,
+        #[serde(flatten)]
+        args: serde_json::Value,
     },
     GetPointedElement {
         #[serde(default = "default_window")]

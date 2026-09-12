@@ -1,0 +1,28 @@
+▶ shipped picker input, lifecycle and privacy
+  ✔ UP-PK001 active UI and UP-PK014 click isolation (524.543458ms)
+  ✔ UP-PK018 double-click tail is swallowed (289.327416ms)
+  ✔ UP-PK019 Escape and keyup consumed; no focus restoration (13.965875ms)
+  ✔ UP-PK017 drag gesture does not select (77.336333ms)
+  ✔ UP-PK023 virtual node identity change rejects confirmation (42.693666ms)
+  ✔ UP-PK016 modal top layer and UP-PK021 actual span target (498.525458ms)
+  ✔ UP-PK025 sensitive element has no value or executable candidate (30.528541ms)
+  ✔ UP-PK028 get freezes observation and UP-PK032 cancel preserves selected (25.828959ms)
+  ✔ UP-PK023 Enter revalidates a covered stale hover without pointer movement (48.519167ms)
+  ✔ UP-PK020 visible cancel button cancels without business click or focus restoration (494.230666ms)
+  ✔ UP-PK020 toolbar text does not select the business element behind it (39.335333ms)
+  ✔ UP-PK019 unsupported modifiers, repeat, IME and empty hover never confirm (48.722ms)
+  ✔ UP-PK021 disabled button, span, SVG and SVG child preserve exact hit targets (111.226417ms)
+  ✔ UP-PK017 synthetic pointer mismatch, multi-touch, cancel and lost capture do not select (133.685708ms)
+  ✔ UP-PK018 actual browser touch selects once without compatibility click-through (510.706917ms)
+  ✔ UP-PK025 nested and chained sensitive ARIA refs never appear in hover or candidates (90.252291ms)
+  ✔ UP-PK028 screenshots-off page polling never re-observes selection or invokes capture (513.692125ms)
+  ✔ UP-PK029 100 start/cancel cycles return real resources to baseline (46391.051792ms)
+✔ shipped picker input, lifecycle and privacy (50038.09125ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 50191.160375

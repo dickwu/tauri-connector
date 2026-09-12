@@ -6,13 +6,31 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify-ci:
+    name: Require successful CI for the release commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the exact commit before building publishable assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_SHA=$(git rev-parse HEAD)
+          gh run list --workflow ci.yml --branch main --commit "$RELEASE_SHA" \
+            --limit 1 --json conclusion,status,headSha > ci-runs.json
+          jq -e --arg sha "$RELEASE_SHA" \
+            'length == 1 and .[0].headSha == $sha and .[0].status == "completed" and .[0].conclusion == "success"' \
+            ci-runs.json
+
   build:
     name: Build ${{ matrix.target }}
+    needs: verify-ci
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -46,19 +64,19 @@ jobs:
 
       - name: Install cross (Linux ARM64)
         if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        run: cargo install cross --version 0.2.5 --locked
 
       - name: Build (native)
         if: "!matrix.cross"
         run: |
-          cargo build --release -p connector-cli --target ${{ matrix.target }}
-          cargo build --release -p connector-mcp-server --target ${{ matrix.target }}
+          cargo build --locked --release -p connector-cli --target ${{ matrix.target }}
+          cargo build --locked --release -p connector-mcp-server --target ${{ matrix.target }}
 
       - name: Build (cross)
         if: matrix.cross
         run: |
-          cross build --release -p connector-cli --target ${{ matrix.target }}
-          cross build --release -p connector-mcp-server --target ${{ matrix.target }}
+          cross build --locked --release -p connector-cli --target ${{ matrix.target }}
+          cross build --locked --release -p connector-mcp-server --target ${{ matrix.target }}
 
       - name: Package
         shell: bash

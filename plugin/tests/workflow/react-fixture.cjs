@@ -1,9 +1,10 @@
-// Test-only bundling of an already installed React development build. The
-// module directory is explicit; this never installs or changes dependencies.
+// Test-only bundling of locally installed React. npm ci provides the default
+// version from the repository lockfile; no helper is loaded from a CDN.
 const { readFileSync } = require('node:fs');
-const { dirname } = require('node:path');
+const { dirname, relative, sep } = require('node:path');
 
 module.exports = function bundleReact(moduleDirectory) {
+  const moduleId = filename => relative(moduleDirectory, filename).split(sep).join('/');
   const modules = new Map();
   function add(filename) {
     if (modules.has(filename)) return;
@@ -19,6 +20,6 @@ module.exports = function bundleReact(moduleDirectory) {
   const react = require.resolve('react', { paths: [moduleDirectory] });
   const client = require.resolve('react-dom/client', { paths: [moduleDirectory] });
   add(react); add(client);
-  const wrappers = Array.from(modules, ([filename, module]) => `${JSON.stringify(filename)}:[function(module,exports,require){\n${module.source}\n},${JSON.stringify(module.dependencies)}]`);
-  return `(() => {const process={env:{NODE_ENV:'development'}};const modules={${wrappers.join(',')}};const cache={};function load(id){if(cache[id])return cache[id].exports;const module={exports:{}};cache[id]=module;const [fn,deps]=modules[id];fn(module,module.exports,name=>load(deps[name]));return module.exports;}window.WorkflowReact={React:load(${JSON.stringify(react)}),ReactDOM:load(${JSON.stringify(client)})};})()`;
+  const wrappers = Array.from(modules, ([filename, module]) => `${JSON.stringify(moduleId(filename))}:[function(module,exports,require){\n${module.source}\n},${JSON.stringify(Object.fromEntries(Object.entries(module.dependencies).map(([name, path]) => [name, moduleId(path)])))}]`);
+  return `(() => {const process={env:{NODE_ENV:'development'}};const modules={${wrappers.join(',')}};const cache={};function load(id){if(cache[id])return cache[id].exports;const module={exports:{}};cache[id]=module;const [fn,deps]=modules[id];fn(module,module.exports,name=>load(deps[name]));return module.exports;}window.WorkflowReact={React:load(${JSON.stringify(moduleId(react))}),ReactDOM:load(${JSON.stringify(moduleId(client))})};})()`;
 };

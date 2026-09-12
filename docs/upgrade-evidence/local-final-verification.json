@@ -1,0 +1,96 @@
+{
+  "recordedAt": "2026-09-12T22:00:42.796543+00:00",
+  "version": "0.16.0",
+  "scope": "Local final verification before remote CI and publication",
+  "checks": {
+    "workspaceRust": {
+      "command": "cargo test --workspace --all-features --locked",
+      "exitCode": 0,
+      "testsPassed": 319
+    },
+    "javascript": {
+      "command": "npm test",
+      "exitCode": 0,
+      "helpers": 96,
+      "workflow": 27,
+      "semantic": 19,
+      "geometry": 10,
+      "contractsAndHarness": 8
+    },
+    "clippy": {
+      "command": "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
+      "exitCode": 0
+    },
+    "windows": {
+      "features": [
+        "",
+        "xcap",
+        "native-screenshot",
+        "xcap,native-screenshot"
+      ],
+      "layer": "cross_type_check",
+      "exitCode": 0,
+      "evidence": "docs/upgrade-evidence/windows-four-features.json"
+    },
+    "linux": {
+      "command": "bash scripts/check-linux-sysroot.sh <sysroot>/root <linux-check-output>",
+      "layer": "plugin_and_fixture_cross_type_check",
+      "exitCode": 0
+    },
+    "macosFeatureOff": {
+      "nativeAppRunning": true,
+      "listeners": [],
+      "exitCode": 0
+    },
+    "macosPicker100": {
+      "cycles": 100,
+      "passed": true,
+      "layer": "real_native_webview_no_OS_input",
+      "note": "Passed after bounded cleanup retries. Subsequent stricter host deadline and page reference watchdog changes passed unit/browser tests; final same-code GUI run was blocked by a locked desktop."
+    },
+    "latestMacosGuiAttempt": {
+      "status": "blocked",
+      "reason": "CGSSessionScreenIsLocked=1, foreground=loginwindow; fixture activation unavailable. Not credited as a passed native test."
+    }
+  },
+  "logs": {
+    "v016-final-rust.log": {
+      "sha256": "509267ab5f98879ecc3c985917740102ddcd6ca5d29726bdc7de32be966cbfe6",
+      "evidence": "docs/upgrade-evidence/v016-final-rust.log"
+    },
+    "v016-final-js.log": {
+      "sha256": "dfee33c21897b1c5a5a319c576eabd9ec9a5c391d99da10b522c0a7fa1c4a696",
+      "evidence": "docs/upgrade-evidence/v016-final-js.log"
+    },
+    "v016-final-clippy.log": {
+      "sha256": "d331a92a87689e0e79b4fec6eddc86b7a7be115f3efb6827478301dc88eea693",
+      "evidence": "docs/upgrade-evidence/v016-final-clippy.log"
+    },
+    "v016-final-linux.log": {
+      "sha256": "b7bdf83fa708f9ca068154eeeaf781a58a408f40aaa36c89777c4271c04ca7f5",
+      "evidence": "docs/upgrade-evidence/v016-final-linux.log"
+    },
+    "macos-v016-feature-off.json": {
+      "sha256": "cc28b70bff5b8557582c582de2321b842223efa3d802267dceae2ecca783e103",
+      "evidence": "docs/upgrade-evidence/macos-v016-feature-off.json"
+    },
+    "macos-picker-stress-100.json": {
+      "sha256": "f3d947dc1c47b7387a9aa44ad3c7dde4af84a3ed83539ed8de9a3c74bf7c465a",
+      "evidence": "docs/upgrade-evidence/macos-picker-stress-100.json"
+    },
+    "picker-final-state-tests.log": {
+      "sha256": "a0abb8f25af6e43449abe217ae87a6bb5797c405367b4603c34d17b6bcae4a43",
+      "evidence": "docs/upgrade-evidence/picker-final-state-tests.log"
+    },
+    "picker-navigation-idempotence.log": {
+      "sha256": "1107042ada9d3c3a62f6dba9d9906597281efaaf5629656ebdb118ecb082aa16",
+      "evidence": "docs/upgrade-evidence/picker-navigation-idempotence.log"
+    },
+    "macos-final-ui-blocked.json": {
+      "sha256": "934398a89c6957051f9e92c93ee96dcaea8ef09e5e7a10119defba1dbc6a92b4",
+      "evidence": "docs/upgrade-evidence/macos-final-ui-blocked.json"
+    }
+  },
+  "publication": "not_started",
+  "remoteCi": "not_started"
+}

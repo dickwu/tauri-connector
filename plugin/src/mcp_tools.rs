@@ -42,28 +42,14 @@ fn to_mcp_content(response: Response) -> Value {
 /// Convert a screenshot Response to MCP image content (or fall back to text).
 fn to_mcp_image_or_text(response: Response) -> Value {
     match response.payload {
-        ResponsePayload::Success { ref result } => {
-            if let (Some(base64), Some(mime)) = (
-                result.get("base64").and_then(|v| v.as_str()),
-                result.get("mimeType").and_then(|v| v.as_str()),
-            ) {
-                let mut content = vec![json!({
-                    "type": "image",
-                    "data": base64,
-                    "mimeType": mime,
-                })];
-                if let Some(artifact) = result.get("artifact") {
-                    content.push(json!({
-                        "type": "text",
-                        "text": serde_json::to_string_pretty(artifact).unwrap_or_default(),
-                    }));
-                }
-                json!({
-                    "content": content
-                })
-            } else {
-                to_mcp_content(response)
+        ResponsePayload::Success { result } => {
+            let protected =
+                result.get("storage").and_then(Value::as_str) == Some("protected_memory");
+            let mut content = connector_client::inspection::image_mcp_content(result, protected);
+            if let Some(outcome) = response.outcome {
+                content["outcome"] = json!(outcome);
             }
+            content
         }
         _ => to_mcp_content(response),
     }
@@ -342,10 +328,7 @@ pub(crate) async fn dispatch_raw(
 
         "webview_get_pointed_element" => handlers::get_pointed_element(id, state).await,
 
-        "webview_select_element" => Response::error(
-            id.to_string(),
-            "Select element (visual picker) not yet implemented",
-        ),
+        "webview_select_element" => inspection_response(id, name, args, bridge, app, state).await,
 
         "manage_window" => {
             let action = str_arg(args, "action").unwrap_or_default();
@@ -637,6 +620,88 @@ pub(crate) async fn dispatch_raw(
     }
 }
 
+/// Single application-side inspection entry point shared by external WS and embedded MCP.
+pub(crate) async fn inspection_call(
+    name: &str,
+    args: &Value,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+    state: &PluginState,
+) -> Result<Value, Value> {
+    let generation = state.workflow.inspection_authorize(args)?;
+    if name == "webview_screenshot"
+        && let Some(target) = args.get("target")
+    {
+        connector_client::inspection::validate_static_locator(target)?;
+    }
+    let result = match name {
+        "webview_select_element" => crate::picker::handle(args, bridge, app, state).await,
+        "ipc_capture" | "ipc_query" => crate::capture::handle(name, args, state, bridge).await,
+        "webview_screenshot" => crate::screenshot::handle(args, bridge, app, state).await,
+        "artifact_list" | "artifact_read" | "artifact_compare" | "artifact_prune" => {
+            let args = connector_client::inspection::protected_artifact_args(args)?;
+            if name == "artifact_read"
+                && args
+                    .get("artifactId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| id.contains(":picker:") && id.ends_with(":image"))
+            {
+                crate::picker::artifact_read(args["artifactId"].as_str().unwrap(), &args, state)
+            } else {
+                crate::screenshot::artifact_handle(name, &args, state)
+            }
+        }
+        "app_identity" => {
+            if !args
+                .as_object()
+                .is_some_and(|m| m.keys().all(|k| k == "authToken"))
+            {
+                return Err(
+                    json!({"code":"invalid_arguments","message":"app_identity only accepts authToken"}),
+                );
+            }
+            app.map(crate::identity::app_identity).ok_or_else(
+                || json!({"code":"unavailable","message":"application handle unavailable"}),
+            )
+        }
+        "runtime_health" => crate::health::query(bridge, args)
+            .await
+            .map_err(|message| json!({"code":"invalid_arguments","message":message})),
+        _ => Err(json!({"code":"unsupported_feature","message":"unknown inspection operation"})),
+    }?;
+    if !state.workflow.inspection_authorized(generation) {
+        return Err(json!({"code":"unauthorized","message":"inspection authorization revoked"}));
+    }
+    Ok(result)
+}
+
+pub(crate) async fn inspection_response(
+    id: &str,
+    name: &str,
+    args: &Value,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+    state: &PluginState,
+) -> Response {
+    match inspection_call(name, args, bridge, app, state).await {
+        Ok(report) => Response::success(id.into(), report),
+        Err(error) => Response::error(id.into(), error.to_string()),
+    }
+}
+
+fn is_inspection(name: &str, args: &Value) -> bool {
+    connector_client::inspection::protected_artifact_request(name, args)
+        || matches!(
+            name,
+            "webview_select_element"
+                | "runtime_health"
+                | "app_identity"
+                | "ipc_capture"
+                | "ipc_query"
+        )
+        || name == "webview_screenshot" && connector_client::inspection::is_rich_screenshot(args)
+}
+
 /// App-owned resource arbitration is shared by every legacy embedded entry point.
 pub(crate) async fn call_raw(
     name: &str,
@@ -645,6 +710,9 @@ pub(crate) async fn call_raw(
     app: Option<&tauri::AppHandle>,
     state: &PluginState,
 ) -> Response {
+    if is_inspection(name, args) {
+        return inspection_response("mcp", name, args, bridge, app, state).await;
+    }
     let lease = match crate::workflow::resources::acquire(state, name, args).await {
         Ok(lease) => lease,
         Err(error) => return Response::rejected("mcp".into(), &error),
@@ -666,6 +734,17 @@ pub async fn call_tool(
     app: Option<&tauri::AppHandle>,
     state: &PluginState,
 ) -> Value {
+    if name == "webview_select_element" {
+        return match inspection_call(name, args, bridge, app, state).await {
+            Ok(report) => connector_client::inspection::picker_mcp_content(
+                report,
+                args.get("includeImage")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            ),
+            Err(error) => to_mcp_content(Response::error("mcp".into(), error.to_string())),
+        };
+    }
     if name.starts_with("workflow_") {
         return match crate::workflow::call(name, args, bridge, app, state).await {
             Ok(report) => {
@@ -701,7 +780,10 @@ pub async fn call_tool(
         };
     }
     let response = call_raw(name, args, bridge, app, state).await;
-    if name == "webview_screenshot" {
+    if name == "webview_screenshot"
+        || name == "artifact_read"
+            && connector_client::inspection::protected_artifact_request(name, args)
+    {
         to_mcp_image_or_text(response)
     } else {
         to_mcp_content(response)
@@ -847,5 +929,69 @@ mod tests {
                 "missing locator prop {key}"
             );
         }
+    }
+    #[tokio::test]
+    async fn screenshot_rich_schema_constraints_match_parser_vectors_and_preserve_legacy_defaults()
+    {
+        let schema = tool("webview_screenshot")["inputSchema"].clone();
+        assert_eq!(schema["properties"]["quality"]["minimum"], 0);
+        assert_eq!(schema["properties"]["quality"]["type"], "number");
+        assert_eq!(schema["then"]["additionalProperties"], false);
+        assert_eq!(
+            schema["then"]["properties"]["quality"],
+            json!({"type":"integer","minimum":1,"maximum":100})
+        );
+        assert_eq!(
+            schema["then"]["properties"]["maxWidth"],
+            json!({"type":"integer","minimum":1,"maximum":4294967295u64})
+        );
+        assert!(!connector_client::inspection::is_rich_screenshot(
+            &json!({"quality":0,"selector":"@e1","format":"jpeg"})
+        ));
+        for field in connector_client::inspection::RICH_SCREENSHOT_FIELDS {
+            assert!(
+                schema["if"]["anyOf"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!({"required":[field]}))
+            );
+        }
+        let directory =
+            std::env::temp_dir().join(format!("screenshot-schema-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let state = PluginState::new(directory.clone()).unwrap();
+        let bridge = Bridge::start().unwrap();
+        let token = "isolated-schema-contract-token-32-bytes";
+        state.workflow.set_token(Some(token.into()));
+        for (mut args, valid) in [
+            (json!({"source":"auto","quality":1,"maxWidth":1}), true),
+            (
+                json!({"source":"auto","quality":100,"maxWidth":4294967295u64,"format":"jpg"}),
+                true,
+            ),
+            (json!({"source":"auto","quality":0}), false),
+            (json!({"source":"auto","quality":1.5}), false),
+            (json!({"source":"auto","quality":"50"}), false),
+            (json!({"source":"auto","maxWidth":0}), false),
+            (json!({"source":"auto","maxWidth":1.5}), false),
+            (json!({"source":"auto","maxWidth":4294967296u64}), false),
+            (json!({"source":"auto","undeclared":true}), false),
+            (json!({"source":"auto","windowId":""}), false),
+        ] {
+            args["authToken"] = json!(token);
+            let error = inspection_call("webview_screenshot", &args, &bridge, None, &state)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error["code"],
+                if valid {
+                    "app_unavailable"
+                } else {
+                    "invalid_arguments"
+                }
+            );
+        }
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

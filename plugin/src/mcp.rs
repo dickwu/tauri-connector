@@ -171,7 +171,9 @@ async fn streamable_post(
                 Err(err) => return err.into_response(),
             };
 
-            let response = dispatch_jsonrpc_request(state, id, &method, params, false).await;
+            let response =
+                dispatch_jsonrpc_request(state, id, &method, params, &session.protocol_version)
+                    .await;
             jsonrpc_response_with_session(response, &session)
         }
         JsonRpcMessageKind::Notification {
@@ -349,7 +351,8 @@ async fn handle_legacy_jsonrpc_request(
     let id = id.unwrap_or(Value::Null);
     let params_val = request.get("params").cloned().unwrap_or(json!({}));
 
-    let response = dispatch_jsonrpc_request(state.clone(), id, method, params_val, true).await;
+    let response =
+        dispatch_jsonrpc_request(state.clone(), id, method, params_val, PROTOCOL_LEGACY_SSE).await;
 
     let response_str = serde_json::to_string(&response).unwrap_or_default();
 
@@ -368,10 +371,10 @@ async fn dispatch_jsonrpc_request(
     id: Value,
     method: &str,
     params_val: Value,
-    legacy_sse: bool,
+    protocol_version: &str,
 ) -> Value {
     match method {
-        "initialize" if legacy_sse => jsonrpc_success(
+        "initialize" if protocol_version == PROTOCOL_LEGACY_SSE => jsonrpc_success(
             id,
             json!({
                 "protocolVersion": PROTOCOL_LEGACY_SSE,
@@ -402,7 +405,10 @@ async fn dispatch_jsonrpc_request(
                 &state.plugin_state,
             )
             .await;
-            jsonrpc_success(id, result)
+            jsonrpc_success(
+                id,
+                connector_client::inspection::shape_mcp_result(result, Some(protocol_version)),
+            )
         }
 
         "ping" => jsonrpc_success(id, json!({})),
@@ -974,5 +980,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ping_response.status(), StatusCode::NOT_FOUND);
+    }
+    #[tokio::test]
+    async fn negotiated_tool_content_keeps_legacy_text_without_unnegotiated_structured_fields() {
+        for version in ["2025-03-26", "2025-06-18", "2025-11-25"] {
+            let app = test_router();
+            let init=app.clone().oneshot(mcp_request(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":version}}))).await.unwrap();
+            let session = init.headers().get(HEADER_MCP_SESSION_ID).unwrap().clone();
+            let mut request = mcp_request(
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"webview_select_element","arguments":{"action":"get","pickerId":"missing"}}}),
+            );
+            request.headers_mut().insert(HEADER_MCP_SESSION_ID, session);
+            let response = body_json(app.oneshot(request).await.unwrap()).await;
+            assert_eq!(response["result"]["isError"], true);
+            assert_eq!(response["result"]["content"][0]["type"], "text");
+            assert_eq!(
+                response["result"].get("structuredContent").is_some(),
+                version != "2025-03-26"
+            );
+        }
+        let app = test_router();
+        let response=app.oneshot(Request::builder().method(Method::POST).uri("/message?sessionId=legacy-test").header(CONTENT_TYPE,"application/json").body(Body::from(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webview_select_element","arguments":{"action":"get","pickerId":"missing"}}}).to_string())).unwrap()).await.unwrap();
+        let body = body_json(response).await;
+        assert!(body["result"].get("structuredContent").is_none());
+        assert_eq!(body["result"]["content"][0]["type"], "text");
     }
 }

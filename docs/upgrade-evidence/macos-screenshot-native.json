@@ -1,0 +1,351 @@
+{
+  "platform": "darwin",
+  "layer": "native_webview",
+  "source": "webview_native",
+  "tests": [
+    {
+      "ids": [
+        "UP-T051",
+        "UP-T056",
+        "UP-T060",
+        "UP-T062"
+      ],
+      "name": "native viewport corner markers and password mask match the declared affine mapping",
+      "passed": true,
+      "durationMs": 806.2792500000002,
+      "dimensions": [
+        2240,
+        1576
+      ],
+      "cssViewport": [
+        1120,
+        788
+      ],
+      "cssToImage": [
+        2,
+        0,
+        0,
+        2,
+        0,
+        0
+      ],
+      "markers": 4,
+      "maskedPasswordSamples": 9
+    },
+    {
+      "ids": [
+        "UP-T057",
+        "UP-PK026"
+      ],
+      "name": "native element crops preserve rendering and clip negative CSS origin",
+      "passed": true,
+      "durationMs": 671.655,
+      "button": [
+        126,
+        76
+      ],
+      "buttonColors": 182,
+      "password": [
+        451,
+        76
+      ],
+      "clipped": [
+        40,
+        40
+      ]
+    },
+    {
+      "ids": [
+        "UP-T065",
+        "UP-T066",
+        "UP-PK028",
+        "UP-PK035"
+      ],
+      "name": "protected reads keep capture identity and source failures do not fallback",
+      "passed": true,
+      "durationMs": 234.8357500000002,
+      "artifactReadStable": true,
+      "anonymousReadDenied": true,
+      "explicitDomFailed": true,
+      "saveWarning": "protected_disk_storage_unavailable",
+      "comparison": {
+        "comparable": false,
+        "equal": null,
+        "method": "encoded_byte_equality",
+        "reason": "capture_contract_changed"
+      }
+    }
+  ],
+  "full": {
+    "artifactId": "095ea1de-034e-4bbc-b612-2a256ad6329f:artifact:6e028335-e1b0-4968-8bb7-83baf2f5652b",
+    "captureSource": "webview_native",
+    "capturedAt": 1789236336032,
+    "consistency": {
+      "atomic": false,
+      "status": "stable_context"
+    },
+    "context": {
+      "appId": "dev.connector.workflow-fixture.624da5bc-5795-4905-aec4-14263f750623",
+      "appInstanceId": "095ea1de-034e-4bbc-b612-2a256ad6329f",
+      "bundleHash": "fnv1a64:10eee4c5bd2fe7f2",
+      "origin": "tauri://localhost",
+      "pageEpoch": "cbf9a17a-9cce-4942-939c-487951031397",
+      "runtimeId": "ad1e8a84-8dd9-40aa-af2c-f5517abde9d9",
+      "runtimeVersion": "1",
+      "semanticVersion": "1",
+      "windowId": "main",
+      "windowInstanceId": "09eabdd3-32b9-470f-a408-cfdb2899ad6b"
+    },
+    "fallbacks": [],
+    "geometry": {
+      "clipped": false,
+      "coordinateSpace": "layout_viewport_css",
+      "cropPx": [
+        0,
+        0,
+        2240,
+        1576
+      ],
+      "cssToImage": [
+        2,
+        0,
+        0,
+        2,
+        0,
+        0
+      ],
+      "status": "known"
+    },
+    "image": {
+      "heightPx": 1576,
+      "mimeType": "image/png",
+      "widthPx": 2240
+    },
+    "mimeType": "image/png",
+    "redaction": {
+      "coverage": "declared_regions_and_field_heuristics",
+      "maskFingerprint": "fnv1a64:0553fcbcaa2fa5a4",
+      "maskedRegions": 1,
+      "policy": "required",
+      "policyVersion": "1",
+      "status": "applied",
+      "uncoveredReasons": []
+    },
+    "retainedUntil": 1789236636032,
+    "sideEffects": [],
+    "storage": "protected_memory",
+    "viewport": {
+      "devicePixelRatio": 2,
+      "heightCss": 788,
+      "offsetLeft": 0,
+      "offsetTop": 0,
+      "visualScale": 1,
+      "widthCss": 1120
+    }
+  },
+  "crops": {
+    "button": {
+      "artifactId": "095ea1de-034e-4bbc-b612-2a256ad6329f:artifact:04087e6e-e6c5-4ac7-ac11-2377e5cace3d",
+      "captureSource": "webview_native",
+      "capturedAt": 1789236336312,
+      "consistency": {
+        "atomic": false,
+        "status": "stable_context"
+      },
+      "context": {
+        "appId": "dev.connector.workflow-fixture.624da5bc-5795-4905-aec4-14263f750623",
+        "appInstanceId": "095ea1de-034e-4bbc-b612-2a256ad6329f",
+        "bundleHash": "fnv1a64:10eee4c5bd2fe7f2",
+        "origin": "tauri://localhost",
+        "pageEpoch": "cbf9a17a-9cce-4942-939c-487951031397",
+        "runtimeId": "ad1e8a84-8dd9-40aa-af2c-f5517abde9d9",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "09eabdd3-32b9-470f-a408-cfdb2899ad6b"
+      },
+      "fallbacks": [],
+      "geometry": {
+        "clipped": false,
+        "coordinateSpace": "layout_viewport_css",
+        "cropPx": [
+          60,
+          132,
+          126,
+          76
+        ],
+        "cssToImage": [
+          2,
+          0,
+          0,
+          2,
+          -60,
+          -132
+        ],
+        "status": "known"
+      },
+      "image": {
+        "heightPx": 76,
+        "mimeType": "image/png",
+        "widthPx": 126
+      },
+      "mimeType": "image/png",
+      "redaction": {
+        "coverage": "declared_regions_and_field_heuristics",
+        "maskFingerprint": "fnv1a64:0553fcbcaa2fa5a4",
+        "maskedRegions": 1,
+        "policy": "required",
+        "policyVersion": "1",
+        "status": "applied",
+        "uncoveredReasons": []
+      },
+      "retainedUntil": 1789236636313,
+      "sideEffects": [],
+      "storage": "protected_memory",
+      "viewport": {
+        "devicePixelRatio": 2,
+        "heightCss": 788,
+        "offsetLeft": 0,
+        "offsetTop": 0,
+        "visualScale": 1,
+        "widthCss": 1120
+      }
+    },
+    "password": {
+      "artifactId": "095ea1de-034e-4bbc-b612-2a256ad6329f:artifact:9c04381c-a596-4462-afac-76090811c887",
+      "captureSource": "webview_native",
+      "capturedAt": 1789236336539,
+      "consistency": {
+        "atomic": false,
+        "status": "stable_context"
+      },
+      "context": {
+        "appId": "dev.connector.workflow-fixture.624da5bc-5795-4905-aec4-14263f750623",
+        "appInstanceId": "095ea1de-034e-4bbc-b612-2a256ad6329f",
+        "bundleHash": "fnv1a64:10eee4c5bd2fe7f2",
+        "origin": "tauri://localhost",
+        "pageEpoch": "cbf9a17a-9cce-4942-939c-487951031397",
+        "runtimeId": "ad1e8a84-8dd9-40aa-af2c-f5517abde9d9",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "09eabdd3-32b9-470f-a408-cfdb2899ad6b"
+      },
+      "fallbacks": [],
+      "geometry": {
+        "clipped": false,
+        "coordinateSpace": "layout_viewport_css",
+        "cropPx": [
+          598,
+          132,
+          451,
+          76
+        ],
+        "cssToImage": [
+          2,
+          0,
+          0,
+          2,
+          -598,
+          -132
+        ],
+        "status": "known"
+      },
+      "image": {
+        "heightPx": 76,
+        "mimeType": "image/png",
+        "widthPx": 451
+      },
+      "mimeType": "image/png",
+      "redaction": {
+        "coverage": "declared_regions_and_field_heuristics",
+        "maskFingerprint": "fnv1a64:0553fcbcaa2fa5a4",
+        "maskedRegions": 1,
+        "policy": "required",
+        "policyVersion": "1",
+        "status": "applied",
+        "uncoveredReasons": []
+      },
+      "retainedUntil": 1789236636541,
+      "sideEffects": [],
+      "storage": "protected_memory",
+      "viewport": {
+        "devicePixelRatio": 2,
+        "heightCss": 788,
+        "offsetLeft": 0,
+        "offsetTop": 0,
+        "visualScale": 1,
+        "widthCss": 1120
+      }
+    },
+    "clipped": {
+      "artifactId": "095ea1de-034e-4bbc-b612-2a256ad6329f:artifact:a01772dc-393b-4be3-b4a8-f2a8c95b7553",
+      "captureSource": "webview_native",
+      "capturedAt": 1789236336763,
+      "consistency": {
+        "atomic": false,
+        "status": "stable_context"
+      },
+      "context": {
+        "appId": "dev.connector.workflow-fixture.624da5bc-5795-4905-aec4-14263f750623",
+        "appInstanceId": "095ea1de-034e-4bbc-b612-2a256ad6329f",
+        "bundleHash": "fnv1a64:10eee4c5bd2fe7f2",
+        "origin": "tauri://localhost",
+        "pageEpoch": "cbf9a17a-9cce-4942-939c-487951031397",
+        "runtimeId": "ad1e8a84-8dd9-40aa-af2c-f5517abde9d9",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "09eabdd3-32b9-470f-a408-cfdb2899ad6b"
+      },
+      "fallbacks": [],
+      "geometry": {
+        "clipped": true,
+        "coordinateSpace": "layout_viewport_css",
+        "cropPx": [
+          0,
+          420,
+          40,
+          40
+        ],
+        "cssToImage": [
+          2,
+          0,
+          0,
+          2,
+          0,
+          -420
+        ],
+        "status": "known"
+      },
+      "image": {
+        "heightPx": 40,
+        "mimeType": "image/png",
+        "widthPx": 40
+      },
+      "mimeType": "image/png",
+      "redaction": {
+        "coverage": "declared_regions_and_field_heuristics",
+        "maskFingerprint": "fnv1a64:0553fcbcaa2fa5a4",
+        "maskedRegions": 1,
+        "policy": "required",
+        "policyVersion": "1",
+        "status": "applied",
+        "uncoveredReasons": []
+      },
+      "retainedUntil": 1789236636765,
+      "sideEffects": [],
+      "storage": "protected_memory",
+      "viewport": {
+        "devicePixelRatio": 2,
+        "heightCss": 788,
+        "offsetLeft": 0,
+        "offsetTop": 0,
+        "visualScale": 1,
+        "widthCss": 1120
+      }
+    }
+  },
+  "businessEffectsChanged": false,
+  "passed": true
+}

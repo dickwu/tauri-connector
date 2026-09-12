@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::identity::{workspace_matches, AppIdentity};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -21,6 +22,7 @@ pub struct ConnectorInstance {
     pub bridge_port: Option<u16>,
     pub app_name: Option<String>,
     pub app_id: Option<String>,
+    pub app_instance_id: Option<String>,
     pub log_dir: Option<PathBuf>,
     pub exe: Option<PathBuf>,
     pub started_at: Option<u64>,
@@ -45,6 +47,7 @@ pub struct ConnectionOptions {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub app_id: Option<String>,
+    pub app_instance_id: Option<String>,
     pub pid_file: Option<PathBuf>,
 }
 
@@ -55,6 +58,7 @@ impl ConnectionOptions {
             host: None,
             port: None,
             app_id: None,
+            app_instance_id: None,
             pid_file: None,
         }
     }
@@ -77,6 +81,7 @@ pub struct ResolvedConnection {
     pub port: u16,
     pub source: ConnectionSource,
     pub instance: Option<ConnectorInstance>,
+    pub identity: Option<AppIdentity>,
 }
 
 /// Status for one discovered PID file.
@@ -89,97 +94,234 @@ pub struct InstanceStatus {
     pub error: Option<String>,
 }
 
-/// Resolve an endpoint using explicit inputs, environment, PID files, then scan.
+/// Resolve every candidate against its live identity. Explicit constraints never fall back.
 pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConnection, String> {
     let env_host = std::env::var("TAURI_CONNECTOR_HOST").ok();
     let env_port = std::env::var("TAURI_CONNECTOR_PORT")
         .ok()
         .map(|p| {
             p.parse::<u16>()
-                .map_err(|_| format!("Invalid TAURI_CONNECTOR_PORT={p}"))
+                .map_err(|_| "invalid_arguments: invalid TAURI_CONNECTOR_PORT".to_string())
         })
         .transpose()?;
-
-    if opts.port.is_some() || opts.host.is_some() {
-        let host = opts
-            .host
-            .or(env_host)
-            .unwrap_or_else(|| DEFAULT_HOST.to_string());
-        let port = opts.port.or(env_port).unwrap_or(9555);
-        return Ok(ResolvedConnection {
-            host,
-            port,
-            source: ConnectionSource::Explicit,
-            instance: None,
-        });
-    }
-
-    if let Some(port) = env_port {
-        return Ok(ResolvedConnection {
-            host: env_host.unwrap_or_else(|| DEFAULT_HOST.to_string()),
-            port,
-            source: ConnectionSource::Env,
-            instance: None,
-        });
-    }
-
-    let host = env_host.unwrap_or_else(|| DEFAULT_HOST.to_string());
+    let host = opts
+        .host
+        .clone()
+        .or(env_host)
+        .unwrap_or_else(|| DEFAULT_HOST.into());
     let app_id = opts
         .app_id
+        .clone()
         .or_else(|| std::env::var("TAURI_CONNECTOR_APP_ID").ok());
-
-    let instances = discover_instances(&opts.cwd, app_id.as_deref(), opts.pid_file.as_deref());
-    let mut live = Vec::new();
-    let mut stale = Vec::new();
-    for instance in instances {
-        if !pid_is_alive(instance.pid) {
-            stale.push(format!(
-                "{} (pid {} is not running)",
-                instance.pid_file.display(),
-                instance.pid
-            ));
-            continue;
-        }
-        match ping_ws(&host, instance.ws_port, 1_500).await {
-            Ok(()) => live.push(instance),
-            Err(e) => stale.push(format!(
-                "{} (ws_port {} not reachable: {e})",
-                instance.pid_file.display(),
-                instance.ws_port
-            )),
+    let expected_instance = opts
+        .app_instance_id
+        .clone()
+        .or_else(|| std::env::var("TAURI_CONNECTOR_APP_INSTANCE_ID").ok());
+    for identifier in [app_id.as_deref(), expected_instance.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        if identifier.is_empty()
+            || identifier.len() > 256
+            || identifier.chars().any(char::is_control)
+        {
+            return Err("invalid_arguments: malformed application identifier".into());
         }
     }
-
-    if !live.is_empty() {
-        live.sort_by_key(|i| std::cmp::Reverse(i.started_at.unwrap_or(0)));
-        let instance = live.remove(0);
+    let pid_file = opts.pid_file.clone().or_else(|| {
+        std::env::var("TAURI_CONNECTOR_PID_FILE")
+            .ok()
+            .map(PathBuf::from)
+    });
+    let explicit_endpoint = opts.port.is_some() || opts.host.is_some() || env_port.is_some();
+    if explicit_endpoint {
+        let port = opts.port.or(env_port).unwrap_or(9555);
+        if port == 0 {
+            return Err("invalid_arguments: port must be nonzero".into());
+        }
+        let identity = endpoint_identity(&host, port, 1500).await;
+        let identity = match identity {
+            Ok(identity) => Some(identity),
+            Err(error) if app_id.is_some() || expected_instance.is_some() || pid_file.is_some() => {
+                return Err(error)
+            }
+            Err(_) => {
+                ping_ws(&host, port, 1500).await?;
+                None
+            }
+        };
+        if let Some(ref identity) = identity {
+            validate_identity(
+                identity,
+                app_id.as_deref(),
+                expected_instance.as_deref(),
+                None,
+            )?;
+            if let Some(path) = pid_file.as_deref() {
+                let hint = read_instance_file(path)
+                    .ok_or("app_not_found: explicit PID file unavailable")?;
+                validate_identity(
+                    identity,
+                    app_id.as_deref(),
+                    expected_instance.as_deref(),
+                    Some(&hint),
+                )?;
+            }
+        }
         return Ok(ResolvedConnection {
             host,
-            port: instance.ws_port,
-            source: ConnectionSource::PidFile,
-            instance: Some(instance),
+            port,
+            source: if opts.host.is_some() || opts.port.is_some() {
+                ConnectionSource::Explicit
+            } else {
+                ConnectionSource::Env
+            },
+            instance: None,
+            identity,
         });
     }
-
-    for port in DEFAULT_SCAN_RANGE {
-        if ping_ws(&host, port, 250).await.is_ok() {
-            return Ok(ResolvedConnection {
-                host,
-                port,
-                source: ConnectionSource::PortScan,
-                instance: None,
-            });
+    let hints = discover_instances(&opts.cwd, app_id.as_deref(), pid_file.as_deref());
+    let mut candidates = Vec::new();
+    let mut endpoints = HashSet::new();
+    for hint in hints {
+        if !pid_is_alive(hint.pid) || !endpoints.insert((host.clone(), hint.ws_port)) {
+            continue;
+        }
+        if let Ok(identity) = endpoint_identity(&host, hint.ws_port, 1500).await {
+            if validate_identity(
+                &identity,
+                app_id.as_deref(),
+                expected_instance.as_deref(),
+                Some(&hint),
+            )
+            .is_ok()
+                && (app_id.is_some()
+                    || expected_instance.is_some()
+                    || pid_file.is_some()
+                    || identity
+                        .workspace_path
+                        .as_deref()
+                        .is_some_and(|path| workspace_matches(&opts.cwd, path)))
+            {
+                candidates.push(ResolvedConnection {
+                    host: host.clone(),
+                    port: hint.ws_port,
+                    source: ConnectionSource::PidFile,
+                    instance: Some(hint),
+                    identity: Some(identity),
+                });
+            }
         }
     }
+    if pid_file.is_none() {
+        use futures_util::stream;
+        let results = stream::iter(
+            DEFAULT_SCAN_RANGE.filter(|port| !endpoints.contains(&(host.clone(), *port))),
+        )
+        .map(|port| {
+            let host = host.clone();
+            async move { (port, endpoint_identity(&host, port, 250).await) }
+        })
+        .buffer_unordered(12)
+        .collect::<Vec<_>>()
+        .await;
+        for (port, result) in results {
+            if let Ok(identity) = result {
+                if validate_identity(
+                    &identity,
+                    app_id.as_deref(),
+                    expected_instance.as_deref(),
+                    None,
+                )
+                .is_ok()
+                    && (app_id.is_some()
+                        || expected_instance.is_some()
+                        || identity
+                            .workspace_path
+                            .as_deref()
+                            .is_some_and(|path| workspace_matches(&opts.cwd, path)))
+                {
+                    candidates.push(ResolvedConnection {
+                        host: host.clone(),
+                        port,
+                        source: ConnectionSource::PortScan,
+                        instance: None,
+                        identity: Some(identity),
+                    });
+                }
+            }
+        }
+    }
+    select_unique(candidates)
+}
 
-    let stale_hint = if stale.is_empty() {
-        String::new()
-    } else {
-        format!("\nStale connector files:\n- {}", stale.join("\n- "))
-    };
-    Err(format!(
-        "No running tauri-connector instance found. Start the Tauri app, pass --host/--port, set TAURI_CONNECTOR_PORT, or remove stale .connector.json files.{stale_hint}"
-    ))
+pub fn select_unique(
+    mut candidates: Vec<ResolvedConnection>,
+) -> Result<ResolvedConnection, String> {
+    match candidates.len() {
+        0=>Err("app_not_found: no endpoint satisfies the requested identity; no default-instance fallback was attempted".into()),
+        1=>Ok(candidates.remove(0)),
+        _=>{
+            let summaries=candidates.iter().map(|candidate|json!({"host":candidate.host,"port":candidate.port,"appId":candidate.identity.as_ref().map(|identity|&identity.app_id),"appInstanceId":candidate.identity.as_ref().map(|identity|&identity.app_instance_id)})).collect::<Vec<_>>();
+            Err(format!("ambiguous_app: {} verified candidates {}; specify --app-instance-id or --host/--port",candidates.len(),json!(summaries)))
+        },
+    }
+}
+
+pub fn validate_identity(
+    identity: &AppIdentity,
+    app_id: Option<&str>,
+    instance_id: Option<&str>,
+    hint: Option<&ConnectorInstance>,
+) -> Result<(), String> {
+    if app_id.is_some_and(|id| identity.app_id != id)
+        || instance_id.is_some_and(|id| identity.app_instance_id != id)
+    {
+        return Err("app_identity_mismatch: endpoint does not match requested app".into());
+    }
+    if let Some(hint) = hint {
+        if hint.pid != identity.pid
+            || hint
+                .started_at
+                .is_some_and(|start| start != identity.started_at)
+            || hint
+                .app_id
+                .as_deref()
+                .is_some_and(|id| id != identity.app_id)
+            || hint
+                .app_instance_id
+                .as_deref()
+                .is_some_and(|id| id != identity.app_instance_id)
+        {
+            return Err("app_identity_mismatch: stale PID file or reused endpoint/process".into());
+        }
+    }
+    Ok(())
+}
+
+pub async fn endpoint_identity(
+    host: &str,
+    port: u16,
+    timeout_ms: u64,
+) -> Result<AppIdentity, String> {
+    tokio::time::timeout(Duration::from_millis(timeout_ms), async {
+        let mut client = crate::ConnectorClient::new();
+        client.connect(host, port).await?;
+        let mut args = json!({});
+        if let Ok(token) = std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN") {
+            args["authToken"] = json!(token);
+        }
+        AppIdentity::parse(
+            client
+                .send_with_timeout(
+                    json!({"type":"inspection","operation":"app_identity","args":args}),
+                    timeout_ms,
+                )
+                .await?,
+        )
+    })
+    .await
+    .map_err(|_| "identity_unavailable: handshake timed out".to_string())?
 }
 
 /// Return statuses for every PID file candidate.
@@ -195,7 +337,10 @@ pub async fn instance_statuses(
     for instance in instances {
         let pid_alive = pid_is_alive(instance.pid);
         let (ws_reachable, error) = if pid_alive {
-            match ping_ws(host, instance.ws_port, 1_000).await {
+            match endpoint_identity(host, instance.ws_port, 1_000)
+                .await
+                .and_then(|identity| validate_identity(&identity, app_id, None, Some(&instance)))
+            {
                 Ok(()) => (true, None),
                 Err(e) => (false, Some(e)),
             }
@@ -220,14 +365,13 @@ pub fn discover_instances(
     app_id: Option<&str>,
     pid_file: Option<&Path>,
 ) -> Vec<ConnectorInstance> {
-    let mut paths = Vec::new();
-    if let Some(p) = pid_file {
-        paths.push(p.to_path_buf());
-    }
-    if let Ok(p) = std::env::var("TAURI_CONNECTOR_PID_FILE") {
-        paths.push(PathBuf::from(p));
-    }
-    paths.extend(pid_file_candidates(cwd));
+    let paths = if let Some(p) = pid_file {
+        vec![p.to_path_buf()]
+    } else if let Ok(p) = std::env::var("TAURI_CONNECTOR_PID_FILE") {
+        vec![PathBuf::from(p)]
+    } else {
+        pid_file_candidates(cwd)
+    };
 
     let mut seen = HashSet::new();
     let mut instances = Vec::new();
@@ -276,6 +420,8 @@ fn read_instance_file(path: &Path) -> Option<ConnectorInstance> {
         app_name: Option<String>,
         #[serde(default)]
         app_id: Option<String>,
+        #[serde(default, alias = "appInstanceId")]
+        app_instance_id: Option<String>,
         #[serde(default)]
         log_dir: Option<PathBuf>,
         #[serde(default)]
@@ -292,6 +438,7 @@ fn read_instance_file(path: &Path) -> Option<ConnectorInstance> {
         bridge_port: raw.bridge_port,
         app_name: raw.app_name,
         app_id: raw.app_id,
+        app_instance_id: raw.app_instance_id,
         log_dir: raw.log_dir,
         exe: raw.exe,
         started_at: raw.started_at,
@@ -366,6 +513,7 @@ mod tests {
             bridge_port: None,
             app_name: None,
             app_id: None,
+            app_instance_id: None,
             log_dir: Some(PathBuf::from("/tmp/logs")),
             exe: None,
             started_at: None,

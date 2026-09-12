@@ -1,0 +1,65 @@
+{
+  "layer": "running-native-app-entry-points",
+  "syntheticSelectionUsed": false,
+  "nativeUserSelectionPerformed": false,
+  "cases": [
+    {
+      "name": "Opaque IPC cursor round-trips unchanged through WS, CLI and both MCP servers",
+      "passed": true
+    },
+    {
+      "name": "embedded returns cached masked PNG and complete metadata",
+      "passed": true,
+      "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:f59b5994-8ef3-4e9c-b3a8-1521257639d7",
+      "pngSha256": "f9f9566539d4b67c2849064b6eda8ecaadf029d50a6dad3be8f7cb2db73c85d5"
+    },
+    {
+      "name": "stdio returns cached masked PNG and complete metadata",
+      "passed": true,
+      "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:f59b5994-8ef3-4e9c-b3a8-1521257639d7",
+      "pngSha256": "f9f9566539d4b67c2849064b6eda8ecaadf029d50a6dad3be8f7cb2db73c85d5"
+    },
+    {
+      "name": "Both MCPs preserve selected metadata when screenshot failed",
+      "passed": true,
+      "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:dd951cd1-9b08-4691-bfbb-0908d942c20a"
+    },
+    {
+      "name": "CLI start -> embedded MCP get -> standalone MCP cancel -> WS retained result",
+      "passed": true,
+      "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:6b1a43c0-fbf0-48cc-8926-213c890f134f",
+      "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+      "cliStartExit": 2,
+      "cliCancelExit": 0,
+      "cliMissingHandleExit": 1,
+      "status": "cancelled",
+      "cleanup": "confirmed",
+      "requestKeyPresentOnStderr": true,
+      "metadataContextEqual": true
+    },
+    {
+      "name": "Anonymous retained picker denied across WS and both MCP paths",
+      "passed": true,
+      "oldProtocolTextRetained": true
+    },
+    {
+      "name": "CLI omitted-action convenience activates native page picker and cleans up",
+      "passed": true,
+      "pickerId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:880dabaf-4721-4234-a645-a2038c7e9334",
+      "beforeCancel": "awaiting_selection",
+      "afterCancel": "cancelled",
+      "cleanup": "confirmed",
+      "cliExit": 2
+    },
+    {
+      "name": "All four shipped inspection JSON examples execute with fresh keys and returned handles",
+      "passed": true,
+      "examples": [
+        "picker-start.json",
+        "picker-get.json",
+        "picker-cancel.json",
+        "picker-convenience.json"
+      ]
+    }
+  ]
+}

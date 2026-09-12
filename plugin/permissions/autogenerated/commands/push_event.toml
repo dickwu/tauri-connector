@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-push-event"
+description = "Enables the push_event command without any pre-configured scope."
+commands.allow = ["push_event"]
+
+[[permission]]
+identifier = "deny-push-event"
+description = "Denies the push_event command without any pre-configured scope."
+commands.deny = ["push_event"]

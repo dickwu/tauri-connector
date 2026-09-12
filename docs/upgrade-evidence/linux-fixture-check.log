@@ -1,0 +1,7 @@
+   Compiling tauri-build v2.6.3
+   Compiling tauri-plugin-connector v0.15.0 (<workspace>/plugin)
+   Compiling tauri-macros v2.6.3
+    Checking connector-client v0.15.0 (<workspace>/crates/client)
+   Compiling tauri v2.11.5
+   Compiling connector-workflow-fixture v0.1.0 (<workspace>/examples/workflow-fixture)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.58s

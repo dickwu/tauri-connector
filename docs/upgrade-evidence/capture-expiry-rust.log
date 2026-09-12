@@ -1,0 +1,22 @@
+   Compiling tauri-plugin-connector v0.15.0 (<workspace>/plugin)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.20s
+     Running unittests src/lib.rs (target/debug/deps/tauri_plugin_connector-7506f1c7f230c652)
+
+running 15 tests
+test capture::store::tests::capture_preparation_cannot_restart_expired_lifetime_and_retention_releases_data ... ok
+test capture::store::tests::capture_duplicate_after_eviction_cannot_resurrect_completion ... ok
+test capture::store::tests::capture_reload_interrupts_old_source_and_follows_only_opt_in ... ok
+test capture::store::tests::capture_preview_is_metadata_default_and_host_redacted_before_storage ... ok
+test capture::store::tests::capture_monotonic_deadline_survives_follow_and_expires_pending ... ok
+test capture::store::tests::capture_out_of_order_duplicate_and_interrupted_pending ... ok
+test capture::service_tests::capture_retention_shares_workflow_budget_and_releases_on_revocation ... ok
+test capture::store::tests::capture_source_window_validation_and_resource_caps ... ok
+test capture::store::tests::capture_sessions_do_not_clear_each_other_and_require_domain ... ok
+test capture::store::tests::capture_cursor_expired_and_namespace_bound ... ok
+test capture::store::tests::capture_query_strict_utf8_byte_budget_and_preview_authority ... ok
+test capture::store::tests::capture_stopped_session_does_not_observe_other_sessions_late_completion ... ok
+test capture::service_tests::capture_anonymous_rejected_before_dispatch_and_legacy_clear_isolated ... ok
+test capture::service_tests::capture_diagnostics_never_release_quarantine_or_trust_correlation ... ok
+test capture::service_tests::capture_background_expiry_releases_budget_without_another_request ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 139 filtered out; finished in 0.05s

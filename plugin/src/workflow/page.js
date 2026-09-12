@@ -5,7 +5,10 @@
   const slot = '__TAURI_CONNECTOR_WORKFLOW_V1__';
   if (window[slot]) return window[slot];
 
-  const pageEpoch = crypto.randomUUID();
+  const semantic = window.__CONNECTOR_SEMANTIC__;
+  if (!semantic) throw new Error("Trusted semantic runtime is missing");
+  const semanticVersion = semantic.version;
+  const pageEpoch = window.__CONNECTOR_BOOTSTRAP__?.pageEpoch || crypto.randomUUID();
   const observations = new Map();
   const normalize = value => String(value || '').replace(/\s+/gu, ' ').trim();
   const fail = (code, message, stage = 'preparing') => {
@@ -25,69 +28,18 @@
     correlation: 'state_only', businessPersistence: 'unobserved',
     observation: 'document_dom_and_input_events', shadowDom: 'unsupported',
     iframe: 'unsupported', nativeInput: 'unsupported',
-    accessibleName: 'aria_labels_html_labels_and_text_subset'
+    accessibleName: semantic.coverage.name, semanticVersion
   };
   const description = element => element ? {
     tag: element.tagName.toLowerCase(), id: element.id || undefined,
     role: role(element), windowId: undefined, pageEpoch
   } : null;
   const text = element => normalize(element.textContent);
-  const labelTexts = element => {
-    const labels = Array.from(element.labels || []).map(text);
-    if (element.hasAttribute('aria-label')) labels.push(normalize(element.getAttribute('aria-label')));
-    const references = (element.getAttribute('aria-labelledby') || '').trim().split(/\s+/u).filter(Boolean);
-    if (references.length) labels.push(normalize(references.map(id => document.getElementById(id)?.textContent || '').join(' ')));
-    return labels;
-  };
-  const name = element => {
-    const references = (element.getAttribute('aria-labelledby') || '').trim().split(/\s+/u).filter(Boolean);
-    if (references.length) return normalize(references.map(id => document.getElementById(id)?.textContent || '').join(' '));
-    if (element.hasAttribute('aria-label')) return normalize(element.getAttribute('aria-label'));
-    if (element.labels?.length) return normalize(Array.from(element.labels).map(text).join(' '));
-    if (element.tagName === 'IMG') return normalize(element.getAttribute('alt'));
-    if (element.tagName === 'INPUT' && ['button', 'submit', 'reset'].includes(element.type)) return normalize(element.value);
-    return text(element);
-  };
-  function role(element) {
-    const explicit = (element.getAttribute('role') || '').trim().split(/\s+/u)[0];
-    if (explicit) return explicit;
-    const tag = element.tagName.toLowerCase();
-    if (tag === 'a' && element.hasAttribute('href')) return 'link';
-    if (tag === 'input') {
-      if (['button', 'submit', 'reset', 'image'].includes(element.type)) return 'button';
-      if (['checkbox', 'radio', 'range', 'number'].includes(element.type)) return { checkbox: 'checkbox', radio: 'radio', range: 'slider', number: 'spinbutton' }[element.type];
-      if (element.type === 'search') return 'searchbox';
-      if (!['hidden', 'password', 'file', 'color', 'date', 'datetime-local', 'month', 'time', 'week'].includes(element.type)) return 'textbox';
-    }
-    if (tag === 'select') return element.multiple || element.size > 1 ? 'listbox' : 'combobox';
-    return { button: 'button', textarea: 'textbox', dialog: 'dialog', option: 'option', img: 'img',
-      h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading', h5: 'heading', h6: 'heading',
-      ul: 'list', ol: 'list', li: 'listitem', table: 'table', tr: 'row', td: 'cell', th: 'columnheader',
-      nav: 'navigation', main: 'main', article: 'article', aside: 'complementary', progress: 'progressbar'
-    }[tag] || null;
-  }
-  function resolve(locator, allowMissing = false, depth = 0) {
-    if (!locator || typeof locator !== 'object') fail('invalid_spec', 'A structured locator is required');
-    if (depth > 4) fail('invalid_spec', 'Locator scope exceeds four levels');
-    const value = string(locator.value, 'target.value', true);
-    if (!['role', 'label', 'testId', 'css'].includes(locator.by)) fail('unsupported_feature', `Unsupported locator kind: ${locator.by}`);
-    const root = locator.scope ? resolve(locator.scope, allowMissing, depth + 1) : document;
-    if (!root) return null;
-    let candidates;
-    try { candidates = Array.from(root.querySelectorAll(locator.by === 'css' ? value : '*')); }
-    catch (_) { fail('invalid_spec', 'Invalid CSS locator'); }
-    if (locator.by === 'role') candidates = candidates.filter(element => role(element) === value);
-    if (locator.by === 'label') candidates = candidates.filter(element => labelTexts(element).includes(normalize(value)));
-    if (locator.by === 'testId') candidates = candidates.filter(element => element.getAttribute('data-testid') === value);
-    if (locator.name !== undefined) {
-      const expected = normalize(string(locator.name, 'target.name', true));
-      candidates = candidates.filter(element => name(element) === expected);
-    }
-    if (locator.entity) {
-      const attribute = string(locator.entity.attribute, 'target.entity.attribute', true);
-      const identity = string(locator.entity.value, 'target.entity.value', true);
-      candidates = candidates.filter(element => element.getAttribute(attribute) === identity);
-    }
+  const name = semantic.getAccessibleName;
+  const role = semantic.getRole;
+  function resolve(locator, allowMissing = false) {
+    // Strict workflow policy wraps the same semantic resolver used by inspection.
+    const candidates = semantic.resolveCandidates(locator);
     if (candidates.length > 1) fail('ambiguous_target', `Strict locator matched ${candidates.length} elements`, 'locating');
     if (!candidates.length) {
       if (allowMissing) return null;
@@ -95,40 +47,15 @@
     }
     return candidates[0];
   }
-  function visible(element) {
-    if (!element?.isConnected || !element.getClientRects().length) return false;
-    for (let current = element; current && current.nodeType === 1; current = current.parentElement) {
-      const style = getComputedStyle(current);
-      if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || Number(style.opacity) === 0) return false;
-    }
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
-  }
-  function enabled(element) {
-    return Boolean(element?.isConnected) && !element.matches(':disabled') && !element.closest('[inert], [aria-disabled="true"]');
-  }
-  function editable(element) {
-    if (!enabled(element) || element.readOnly || element.getAttribute('aria-readonly') === 'true') return false;
-    if (element instanceof HTMLTextAreaElement) return true;
-    if (element instanceof HTMLInputElement) return ['text', 'search', 'tel', 'url', 'email', 'password', 'number'].includes(element.type);
-    return element.isContentEditable && !element.closest('[contenteditable="false"]');
-  }
+  const visible = semantic.isVisible;
+  const enabled = semantic.isEnabled;
+  const editable = semantic.isEditable;
   function actionable(element, edit = false) {
-    if (!visible(element) || !enabled(element) || (edit && !editable(element))) fail('not_actionable', 'Target must be visible, enabled and editable for input', 'locating');
-    const rect = element.getBoundingClientRect();
-    const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
-    const top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
-    if (right <= left || bottom <= top) fail('not_actionable', 'Target lies outside the visible viewport', 'locating');
-    const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
-    if (!hit || (hit !== element && !element.contains(hit))) fail('not_actionable', 'Target is covered at its interaction point', 'locating');
+    if (!semantic.checkActionability(element, edit ? 'fill' : 'click').actionable)
+      fail('not_actionable', 'Target must be visible, enabled, unobstructed and editable for input', 'locating');
   }
   const valueOf = element => 'value' in element ? element.value : element.isContentEditable ? element.textContent : null;
-  const sensitiveName = value => /(?:^|[^a-z0-9])(?:password|passwd|secret|token|auth|authorization|authentication|cookie|credential|api[-_]?key|one[-_]?time[-_]?code)(?:$|[^a-z0-9])/iu.test(String(value || '').replace(/([a-z])([A-Z])/gu, '$1-$2'));
-  function sensitive(element, attribute) {
-    return (element instanceof HTMLInputElement && element.type === 'password') ||
-      Boolean(element.closest('[data-sensitive="true"],[data-connector-sensitive="true"]')) ||
-      ['id', 'name', 'autocomplete'].some(name => sensitiveName(element.getAttribute(name))) || sensitiveName(attribute);
-  }
+  const sensitive = semantic.isSensitive;
   function pointer(data, path) {
     if (path === '') return { exists: true, value: data };
     if (typeof path !== 'string' || !path.startsWith('/') || /~(?![01])/u.test(path)) fail('invalid_spec', 'Invalid JSON pointer');
@@ -199,6 +126,7 @@
   }
   function checkContext(args, observation) {
     const expected = args.context || {};
+    if (window.__CONNECTOR_SEMANTIC__ !== semantic || (expected.semanticVersion !== undefined && expected.semanticVersion !== semanticVersion)) fail('semantic_version_changed', 'Semantic runtime changed during workflow observation', 'preparing');
     if ((args.expectedPageEpoch !== undefined && args.expectedPageEpoch !== pageEpoch) || (expected.pageEpoch !== undefined && expected.pageEpoch !== pageEpoch)) fail('stale_ref', 'Page context has changed', 'preparing');
     if (expected.origin !== undefined && expected.origin !== location.origin) fail('target_changed', 'Page origin has changed', 'preparing');
     if (observation && ((expected.appInstanceId !== undefined && expected.appInstanceId !== observation.context.appInstanceId) || (expected.windowId !== undefined && expected.windowId !== observation.context.windowId))) fail('target_changed', 'Application or window identity has changed', 'preparing');
@@ -211,7 +139,7 @@
     const timeoutMs = args.timeoutMs ?? 10000;
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 300000) fail('invalid_spec', 'Observation budget must be between 1 and 300000 ms');
     const observation = {
-      context: { appInstanceId: string(args.context?.appInstanceId, 'context.appInstanceId', true), windowId: string(args.context?.windowId, 'context.windowId', true), pageEpoch, origin: location.origin },
+      context: { appInstanceId: string(args.context?.appInstanceId, 'context.appInstanceId', true), windowId: string(args.context?.windowId, 'context.windowId', true), pageEpoch, semanticVersion, origin: location.origin },
       deadline: performance.now() + timeoutMs, condition: args.condition || null, results: args.results || {},
       mutationCount: 0, sampleCount: 0, last: null, sampleError: null, trueSince: null, dispatched: new Map()
     };
@@ -419,7 +347,14 @@
       fail('unsupported_feature', 'Unknown DOM workflow command');
     } catch (error) { return errorResult(error, state.dispatched); }
   };
-  window.addEventListener('pagehide', () => { for (const id of observations.keys()) cleanup(id); });
-  Object.defineProperty(window, slot, { value: dispatcher, configurable: false, writable: false });
+  const dispose = () => {
+    for (const id of observations.keys()) cleanup(id);
+    window.removeEventListener('pagehide', dispose);
+    if (window[slot] === dispatcher) delete window[slot];
+  };
+  dispatcher.dispose = dispose;
+  dispatcher.activeObservers = () => observations.size;
+  window.addEventListener('pagehide', dispose);
+  Object.defineProperty(window, slot, { value: dispatcher, configurable: true, writable: false });
   return dispatcher;
 })()

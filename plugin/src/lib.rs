@@ -31,11 +31,18 @@ use tauri::plugin::{Builder as PluginBuilder, TauriPlugin};
 use tauri::{AppHandle, Listener, Manager, Wry};
 
 mod bridge;
+mod capabilities;
+pub(crate) mod capture;
 mod handlers;
+mod health;
+mod identity;
 mod mcp;
 mod mcp_tool_schema;
 mod mcp_tools;
+pub(crate) mod picker;
 mod protocol;
+mod runtime;
+pub(crate) mod screenshot;
 mod server;
 mod state;
 mod workflow;
@@ -47,6 +54,7 @@ use server::Server;
 /// the bridge starts; a single bridge exists per process (the plugin has a
 /// `links` key, so only one instance can be registered).
 static BRIDGE_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+static BRIDGE_HANDLE: std::sync::OnceLock<Bridge> = std::sync::OnceLock::new();
 use state::{DomEntry, EventEntry, IpcEvent, LogEntry, PluginState, RuntimeEntry};
 
 #[doc(hidden)]
@@ -189,6 +197,32 @@ async fn push_ipc_event(app: AppHandle, payload: PushIpcEventPayload) -> Result<
     Ok(())
 }
 
+/// Bounded diagnostic roundtrip. It has no business-state effect.
+#[tauri::command]
+fn capture_self_test(nonce: String) -> Result<String, String> {
+    if nonce.len() > 128 {
+        Err("Capture self-test nonce exceeds limit".into())
+    } else {
+        Ok(nonce)
+    }
+}
+
+/// Source labels come from Tauri's invoking WebView, never from page JSON.
+#[tauri::command]
+async fn push_capture_events(
+    app: AppHandle,
+    webview: tauri::Webview,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if payload.to_string().len() > 262144 {
+        return Err("Capture ingress payload limit exceeded".into());
+    }
+    let state = app.state::<PluginState>();
+    Ok(state
+        .capture
+        .ingest(webview.label(), payload, &state.workflow))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PushEventPayload {
@@ -252,6 +286,19 @@ pub struct ConnectorBuilder {
     mcp_port_range: (u16, u16),
     mcp_enabled: bool,
     workflow_token: Option<String>,
+    capture_preview_commands: Vec<String>,
+    capture_preview_paths: Vec<String>,
+}
+
+fn capture_setting(name: &str) -> Vec<String> {
+    std::env::var(name)
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .take(50)
+        .collect()
 }
 
 impl Default for ConnectorBuilder {
@@ -268,6 +315,8 @@ impl ConnectorBuilder {
             mcp_port_range: DEFAULT_MCP_PORT_RANGE,
             mcp_enabled: true,
             workflow_token: std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN").ok(),
+            capture_preview_commands: capture_setting("TAURI_CONNECTOR_CAPTURE_PREVIEW_COMMANDS"),
+            capture_preview_paths: capture_setting("TAURI_CONNECTOR_CAPTURE_PREVIEW_PATHS"),
         }
     }
 
@@ -311,6 +360,18 @@ impl ConnectorBuilder {
         self
     }
 
+    /// Host allowlist for IPC command names whose redacted result previews may be captured.
+    pub fn capture_preview_commands(mut self, commands: Vec<String>) -> Self {
+        self.capture_preview_commands = commands;
+        self
+    }
+
+    /// Host allowlist of JSON paths eligible for IPC preview extraction.
+    pub fn capture_preview_paths(mut self, paths: Vec<String>) -> Self {
+        self.capture_preview_paths = paths;
+        self
+    }
+
     /// Build the plugin.
     pub fn build(self) -> TauriPlugin<Wry> {
         let bind_address = self.bind_address;
@@ -318,18 +379,38 @@ impl ConnectorBuilder {
         let mcp_port_range = self.mcp_port_range;
         let mcp_enabled = self.mcp_enabled;
         let workflow_token = self.workflow_token;
+        let preview_commands = self.capture_preview_commands;
+        let preview_paths = self.capture_preview_paths;
 
         PluginBuilder::<Wry>::new("connector")
+            .js_init_script(runtime::initialization_script())
+            .on_webview_ready(|webview| { identity::window_instance_id(webview.label()); })
+            .on_event(|app, event| {
+                if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = event {
+                    identity::window_destroyed(label);
+                    if let Some(bridge)=BRIDGE_HANDLE.get() { bridge.window_destroyed(label); }
+                    if let Some(state)=app.try_state::<PluginState>() { state.capture.window_closed(label); state.picker.window_closed(label); }
+                }
+            })
             .invoke_handler(tauri::generate_handler![
                 push_dom,
                 push_logs,
                 set_pointed_element,
                 push_ipc_event,
+                push_capture_events,
+                capture_self_test,
                 push_event,
                 push_runtime,
             ])
-            .on_page_load(|webview, _payload| {
-                // Re-inject on every page load (Started and Finished): the
+            .on_page_load(|webview, payload| {
+                if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                    identity::page_navigation(webview.label());
+                    if let Some(state)=webview.app_handle().try_state::<PluginState>() {state.capture.window_closed(webview.label());state.picker.page_changed(webview.label());}
+                }
+                if matches!(payload.event(),tauri::webview::PageLoadEvent::Started) {return;}
+                identity::page_loaded(webview.label());
+                if !identity::origin_allowed(webview.app_handle(), payload.url()) { return; }
+                // Re-inject after each completed document load: the
                 // one-shot eval at setup/webview-created does not survive
                 // reloads or navigations (e.g. dev-server full reloads), which
                 // silently killed the bridge and snapshot engine until app
@@ -338,6 +419,11 @@ impl ConnectorBuilder {
                     let label = webview.label().to_string();
                     let _ = webview.eval(bridge::bridge_init_script(*port, &label));
                 }
+                if matches!(payload.event(),tauri::webview::PageLoadEvent::Finished)
+                    && let (Some(bridge),Some(state))=(BRIDGE_HANDLE.get(),webview.app_handle().try_state::<PluginState>()) {
+                        let bridge=bridge.clone();let state=(*state).clone();let label=webview.label().to_owned();
+                        tauri::async_runtime::spawn(async move {state.capture.page_changed(&label,&state,&bridge).await;});
+                }
             })
             .setup(move |app, _api| {
                 if bind_address == "0.0.0.0" || bind_address == "::" {
@@ -345,6 +431,8 @@ impl ConnectorBuilder {
                         "[connector][security] Remote debug exposed on {bind_address}; prefer 127.0.0.1 unless this is intentional"
                     );
                 }
+                identity::app_instance_id();
+                identity::started_at();
                 let application_directory = app.path().app_data_dir();
                 let workflow_storage_available = application_directory.is_ok();
                 let log_dir = application_directory
@@ -363,6 +451,8 @@ impl ConnectorBuilder {
                 plugin_state.workflow = std::sync::Arc::new(workflow::WorkflowService::new(log_dir.join("workflow")));
                 if !workflow_storage_available {plugin_state.workflow.disable_storage();}
                 plugin_state.workflow.set_token(workflow_token.clone());
+                plugin_state.capture.set_preview_commands(preview_commands);
+                plugin_state.capture.set_preview_paths(preview_paths);
                 app.manage(plugin_state.clone());
 
                 let handle = app.clone();
@@ -381,9 +471,11 @@ impl ConnectorBuilder {
                     // 1b. Set app handle on bridge for eval fallback
                     bridge.set_app_handle(handle.clone()).await;
                     let _ = BRIDGE_PORT.set(bridge.port());
+                    let _ = BRIDGE_HANDLE.set(bridge.clone());
 
                     // 2. Inject bridge JS into all current webviews
                     for (label, window) in handle.webview_windows() {
+                        if !window.url().is_ok_and(|url|identity::origin_allowed(&handle, &url)) { continue; }
                         let init_script = bridge::bridge_init_script(bridge.port(), &label);
                         if let Err(e) = window.eval(&init_script) {
                             eprintln!("[connector] Failed to inject bridge script: {e}");
@@ -395,6 +487,7 @@ impl ConnectorBuilder {
                     let handle_for_event = handle.clone();
                     handle.listen("tauri://webview-created", move |_event| {
                         for (label, window) in handle_for_event.webview_windows() {
+                            if !window.url().is_ok_and(|url|identity::origin_allowed(&handle_for_event, &url)) { continue; }
                             let script = bridge::bridge_init_script(bridge_port, &label);
                             let _ = window.eval(&script);
                         }
@@ -510,12 +603,10 @@ fn write_pid_file(
         "bridge_port": bridge_port,
         "app_name": app_name,
         "app_id": app_id,
+        "app_instance_id": identity::app_instance_id(),
         "log_dir": log_dir.to_string_lossy(),
         "exe": exe.to_string_lossy(),
-        "started_at": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        "started_at": identity::started_at(),
         "pid_file": pid_path.to_string_lossy(),
     });
 

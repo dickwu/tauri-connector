@@ -100,7 +100,7 @@ struct Inner {
     key: [u8; 32],
     max_record_bytes: usize,
     poisoned: Arc<AtomicBool>,
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fault: Arc<std::sync::atomic::AtomicU8>,
 }
 
@@ -206,7 +206,7 @@ impl Journal {
                 key,
                 max_record_bytes: options.max_record_bytes,
                 poisoned,
-                #[cfg(test)]
+                #[cfg(all(test, unix))]
                 fault,
             })),
             history,

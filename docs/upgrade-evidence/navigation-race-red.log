@@ -1,0 +1,32 @@
+    Blocking waiting for file lock on build directory
+   Compiling tauri-plugin-connector v0.16.0 (<workspace>/plugin)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.86s
+     Running unittests src/lib.rs (target/debug/deps/tauri_plugin_connector-0cc8be093a30583f)
+
+running 2 tests
+test picker::tests::up_pk031_late_page_report_cannot_downgrade_confirmed_page_destruction ... FAILED
+test picker::tests::up_pk031_late_bridge_failure_cannot_downgrade_confirmed_page_destruction ... FAILED
+
+failures:
+
+---- picker::tests::up_pk031_late_page_report_cannot_downgrade_confirmed_page_destruction stdout ----
+
+thread 'picker::tests::up_pk031_late_page_report_cannot_downgrade_confirmed_page_destruction' (177451045) panicked at plugin/src/picker/tests.rs:26:5:
+assertion failed: !entry.accept(&report)
+
+---- picker::tests::up_pk031_late_bridge_failure_cannot_downgrade_confirmed_page_destruction stdout ----
+
+thread 'picker::tests::up_pk031_late_bridge_failure_cannot_downgrade_confirmed_page_destruction' (177451044) panicked at plugin/src/picker/tests.rs:12:5:
+assertion `left == right` failed
+  left: "unconfirmed"
+ right: "context_destroyed"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    picker::tests::up_pk031_late_bridge_failure_cannot_downgrade_confirmed_page_destruction
+    picker::tests::up_pk031_late_page_report_cannot_downgrade_confirmed_page_destruction
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 164 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p tauri-plugin-connector --lib`

@@ -69,6 +69,10 @@ pub fn tool_definitions() -> serde_json::Value {
                     "windowId": { "type": "string" }
                 } })
             ),
+            tool_def("app_identity", "Read authenticated application-instance and canonical workspace identity before operating. A process restart cannot assume previous handles.", json!({"type":"object","additionalProperties":false,"properties":{"authToken":{"type":"string"}}})),
+            tool_def("runtime_health", "Bounded transport, bridge and runtime health diagnostics; never repairs, reloads or replays execution.", json!({"type":"object","additionalProperties":false,"properties":{"authToken":{"type":"string"},"windowId":{"type":"string","default":"main"},"depth":{"enum":["transport","bridge","runtime"],"default":"runtime"},"timeoutMs":{"type":"integer","minimum":100,"maximum":10000,"default":2000}}})),
+            tool_def("ipc_capture", "Manage authorized app-owned IPC capture v2 sessions. Start confirms hook readiness; stop does not stop other sessions. Invoke observations do not prove business persistence.", ipc_capture_schema()),
+            tool_def("ipc_query", "Read bounded, redacted IPC v2 event pages and pending invocation evidence from an authorized capture session.", json!({"type":"object","additionalProperties":false,"required":["captureSessionId"],"properties":{"authToken":{"type":"string"},"captureSessionId":{"type":"string","minLength":1},"cursor":{"type":"string","minLength":1,"maxLength":256,"description":"Opaque nextCursor returned by ipc_query; preserve it unchanged and use it only for the same session"},"invocationId":{"type":"string"},"phase":{"enum":["started","succeeded","failed"]},"limit":{"type":"integer","minimum":1,"maximum":500,"default":100},"maxBytes":{"type":"integer","minimum":1024,"maximum":65536,"default":32768}}})),
             tool_def("webview_execute_js",
                 "Execute JavaScript in the Tauri webview and return the JSON-serialized result. Use an IIFE for return values: \"(() => { return value; })()\"",
                 json!({ "type": "object", "properties": {
@@ -81,19 +85,8 @@ pub fn tool_definitions() -> serde_json::Value {
                 json!({ "type": "object", "properties": {} })
             ),
             tool_def("webview_screenshot",
-                "Take a screenshot of the Tauri window using native xcap capture (cross-platform)",
-                json!({ "type": "object", "properties": {
-                    "format": { "type": "string", "enum": ["png", "jpeg", "webp"] },
-                    "quality": { "type": "number", "minimum": 0, "maximum": 100 },
-                    "maxWidth": { "type": "number" },
-                    "save": { "type": "boolean" },
-                    "outputDir": { "type": "string" },
-                    "nameHint": { "type": "string" },
-                    "overwrite": { "type": "boolean" },
-                    "annotate": { "type": "boolean", "description": "Overlay numbered labels for @eN refs from the latest ai snapshot. Requires a prior webview_dom_snapshot(mode: ai); label [N] maps to ref @eN" },
-                    "selector": { "type": "string", "description": "CSS selector or @ref for future element captures" },
-                    "windowId": { "type": "string" }
-                } })
+                "Capture a WebView or window with explicit source metadata. Rich source/target/redaction fields require inspection authorization. Explicit source never silently falls back.",
+                screenshot_schema()
             ),
             tool_def("webview_dom_snapshot",
                 "Get structured DOM snapshot. Mode 'ai' (default) includes ref IDs for interaction, React component names, and stitches portals. Mode 'accessibility' shows ARIA roles/names. Mode 'structure' shows tags/classes. Full-document ai/accessibility snapshots also detect open overlays (modals, floating windows, dialogs, docks): a '# overlays:' header line and meta.overlays[] report each one's id, title, z-order, focused/modal state, and a CSS selector for rescoping; under a token budget, overlay sections render inline first so open modals never spill.",
@@ -199,8 +192,8 @@ pub fn tool_definitions() -> serde_json::Value {
                 json!({ "type": "object", "properties": { "windowId": { "type": "string" } } })
             ),
             tool_def("webview_select_element",
-                "Activate visual element picker in the webview",
-                json!({ "type": "object", "properties": { "windowId": { "type": "string" } } })
+                "Actively select an element without connector business-action dispatch. Omitted action starts and waits up to 10 seconds; start/get/cancel share the app-owned handle. Requires authToken. Selection, screenshot and cleanup have independent status; use get after a lost response, never resend with a new requestKey.",
+                connector_client::inspection::picker_schema()
             ),
             tool_def("manage_window",
                 "List windows, get window info, or resize a window. resize requires width and height",
@@ -315,6 +308,7 @@ pub fn tool_definitions() -> serde_json::Value {
             tool_def("artifact_list",
                 "List connector artifacts from the manifest registry.",
                 json!({ "type": "object", "properties": {
+                    "authToken":{"type":"string","description":"Select authenticated protected artifact storage; never reads private paths through legacy storage"},
                     "kind": { "type": "string", "description": "Filter by artifact kind, e.g. \"screenshot\"" },
                     "limit": { "type": "number" }
                 } })
@@ -322,21 +316,27 @@ pub fn tool_definitions() -> serde_json::Value {
             tool_def("artifact_read",
                 "Read an artifact by artifactId or path.",
                 json!({ "type": "object", "properties": {
+                    "authToken":{"type":"string","description":"Select authenticated protected artifact storage; never reads private paths through legacy storage"},
                     "artifact": { "type": "string" },
-                    "artifactId": { "type": "string" }
+                    "artifactId": { "type": "string" },
+                    "includeImage":{"type":"boolean","default":true}
                 } })
             ),
             tool_def("artifact_compare",
                 "Compare two screenshot artifacts or paths via raw byte diff (not perceptual). Returns pixelsDifferent, percentDifferent (0-1), and passed = percentDifferent <= threshold. Refuses same-path comparisons.",
                 json!({ "type": "object", "properties": {
+                    "authToken":{"type":"string","description":"Select authenticated protected artifact storage; never reads private paths through legacy storage"},
+                    "baselineId":{"type":"string"},
+                    "currentId":{"type":"string"},
                     "before": { "type": "string" },
                     "after": { "type": "string" },
                     "threshold": { "type": "number", "description": "Max allowed differing-byte fraction, 0-1 (default 0)" }
-                }, "required": ["before", "after"] })
+                }, "anyOf":[{"required":["before","after"]},{"required":["baselineId","currentId"]}] })
             ),
             tool_def("artifact_prune",
                 "Prune old artifact manifest entries, keeping the newest entries. Deletes pruned files from disk unless deleteFiles is false.",
                 json!({ "type": "object", "properties": {
+                    "authToken":{"type":"string","description":"Select authenticated protected artifact storage; never reads private paths through legacy storage"},
                     "keep": { "type": "number", "description": "Newest matching entries to keep (default 50)" },
                     "kind": { "type": "string", "description": "Only prune this kind; other kinds are untouched" },
                     "deleteFiles": { "type": "boolean", "description": "Also delete files from disk (default true)" }
@@ -521,8 +521,52 @@ pub fn server_instructions() -> &'static str {
         "Debugging shortcuts: debug_snapshot bundles state+DOM+logs+screenshot in one call; webview_act_and_verify performs an action, waits, and collects evidence.\n",
         "Known multi-step intent: prefer workflow_capabilities then workflow_run. Execution stays in the app; use workflow_get after timeout/disconnect and workflow_resume only at an allowed checkpoint. An uncertain write must not be replayed. Legacy batching: batch_actions runs tool calls from one JSON spec (mode sequential|parallel, dependsOn for DAG order), returns per-action logs, and can save a JSON report.\n",
         "Backend: ipc_monitor + ipc_get_captured trace invoke() calls; ipc_execute_command invokes app commands directly; ipc_listen + event_get_captured capture Tauri events; runtime_get_captured surfaces window errors, unhandled rejections, and network failures.\n",
-        "Artifacts: screenshots saved with save:true register in a manifest -- artifact_list/artifact_read/artifact_compare (byte diff) use them, artifact_prune cleans up.\n",
+        "Inspection v1: app_identity verifies an authorized application instance; runtime_health reports bounded transport/bridge/runtime checks without replay. webview_select_element starts real active selection; get/cancel use its same app-owned handle, requestKey deduplicates starts, and includeImage returns already-redacted image content beside metadata.\n",
+        "IPC v2: ipc_capture start/status/stop and ipc_query share application-owned sessions. Previews require host policy; an invoke completion is not database durability evidence.\n",
+        "Artifacts: legacy save:true uses its manifest; authorized rich screenshots use protected bounded storage. Read new artifact handles through artifact_read with authorization; compare checks source/geometry/mask compatibility.\n",
         "Multi-window: most tools take windowId (default 'main'); list labels with manage_window(action: 'list').\n",
         "Setup problems: get_setup_instructions, or run `tauri-connector doctor` in the project."
     )
+}
+
+fn ipc_capture_schema() -> serde_json::Value {
+    json!({"type":"object","oneOf":[
+        {"type":"object","additionalProperties":false,"required":["action"],"properties":{"action":{"const":"start"},"authToken":{"type":"string"},"windowId":{"type":"string","default":"main"},"options":{"type":"object","additionalProperties":false,"properties":{"resultPolicy":{"enum":["metadata","preview"],"default":"metadata"},"argumentPolicy":{"enum":["metadata","preview"],"default":"metadata"},"followPages":{"type":"boolean","default":false},"commands":{"type":"array","items":{"type":"string"}}}}}},
+        {"type":"object","additionalProperties":false,"required":["action","captureSessionId"],"properties":{"action":{"enum":["status","stop"]},"authToken":{"type":"string"},"captureSessionId":{"type":"string","minLength":1}}}
+    ]})
+}
+
+fn screenshot_schema() -> serde_json::Value {
+    let mut schema = json!({ "type": "object", "properties": {
+                    "authToken": {"type":"string"},
+                    "includeImage":{"type":"boolean","default":true},
+                    "timeoutMs":{"type":"integer","minimum":1,"maximum":30000,"default":10000},
+                    "source": {"enum":["auto","webview_native","window_native","dom_rendering"]},
+                    "target": {"$ref":"#/$defs/locator"},
+                    "redaction": {"enum":["required"]},
+                    "allowWindowPreparation": {"type":"boolean","default":false},
+                    "format": { "type": "string", "enum": ["png", "jpeg", "jpg", "webp"] },
+                    "quality": { "type": "number", "minimum": 0, "maximum": 100 },
+                    "maxWidth": { "type": "number" },
+                    "save": { "type": "boolean" },
+                    "outputDir": { "type": "string" },
+                    "nameHint": { "type": "string" },
+                    "overwrite": { "type": "boolean" },
+                    "annotate": { "type": "boolean", "description": "Overlay numbered labels for @eN refs from the latest ai snapshot. Requires a prior webview_dom_snapshot(mode: ai); label [N] maps to ref @eN" },
+                    "selector": { "type": "string", "description": "CSS selector for element capture; the legacy capture path also supports @ref" },
+                    "windowId": { "type": "string" }
+                } });
+    schema["not"] = json!({"required":["target","selector"]});
+    schema["$defs"] = json!({"locator":{"type":"object","additionalProperties":false,"required":["by","value"],"properties":{
+        "by":{"enum":["role","label","testId","css"]},"value":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"scope":{"$ref":"#/$defs/locator"},
+        "entity":{"type":"object","additionalProperties":false,"required":["attribute","value"],"properties":{"attribute":{"type":"string","minLength":1},"value":{"type":"string","minLength":1}}}
+    }}});
+    let mut rich = schema["properties"].clone();
+    rich["quality"] = json!({"type":"integer","minimum":1,"maximum":100});
+    rich["maxWidth"] = json!({"type":"integer","minimum":1,"maximum":4294967295u64});
+    rich["windowId"] = json!({"type":"string","minLength":1,"default":"main"});
+    rich["selector"] = json!({"type":"string","minLength":1});
+    schema["if"] = json!({"anyOf":connector_client::inspection::RICH_SCREENSHOT_FIELDS.iter().map(|field|json!({"required":[field]})).collect::<Vec<_>>()});
+    schema["then"] = json!({"type":"object","additionalProperties":false,"properties":rich});
+    schema
 }

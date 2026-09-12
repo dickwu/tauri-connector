@@ -1,0 +1,33 @@
+{
+  "recordedAt": "2026-09-12T21:50:45.587995+00:00",
+  "layer": "cross_type_check",
+  "target": "x86_64-pc-windows-msvc",
+  "nativeExecution": false,
+  "toolSession": 68057,
+  "checks": [
+    {
+      "features": "",
+      "command": "cargo check -p tauri-plugin-connector --target x86_64-pc-windows-msvc --no-default-features --features \"\" --tests --locked --target-dir <windows-check-output>",
+      "exitCode": 0,
+      "reportedDurationSeconds": 5.95
+    },
+    {
+      "features": "xcap",
+      "command": "cargo check -p tauri-plugin-connector --target x86_64-pc-windows-msvc --no-default-features --features \"xcap\" --tests --locked --target-dir <windows-check-output>",
+      "exitCode": 0,
+      "reportedDurationSeconds": 9.76
+    },
+    {
+      "features": "native-screenshot",
+      "command": "cargo check -p tauri-plugin-connector --target x86_64-pc-windows-msvc --no-default-features --features \"native-screenshot\" --tests --locked --target-dir <windows-check-output>",
+      "exitCode": 0,
+      "reportedDurationSeconds": 1.67
+    },
+    {
+      "features": "xcap,native-screenshot",
+      "command": "cargo check -p tauri-plugin-connector --target x86_64-pc-windows-msvc --no-default-features --features \"xcap,native-screenshot\" --tests --locked --target-dir <windows-check-output>",
+      "exitCode": 0,
+      "reportedDurationSeconds": 3.58
+    }
+  ]
+}

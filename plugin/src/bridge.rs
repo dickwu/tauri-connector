@@ -66,6 +66,7 @@ impl<F: FnOnce()> Drop for CleanupGuard<F> {
 struct DispatchRequest<'a> {
     id: &'a str,
     deadline: Instant,
+    authorize: Option<&'a (dyn Fn() -> bool + Send + Sync)>,
 }
 
 impl DispatchRequest<'_> {
@@ -84,6 +85,9 @@ impl DispatchRequest<'_> {
     }
 
     fn ensure_budget(&self) -> Result<(), BridgeError> {
+        if self.authorize.is_some_and(|check| !check()) {
+            return Err(self.not_dispatched("Host authorization was revoked before dispatch"));
+        }
         if Instant::now() >= self.deadline {
             Err(self.not_dispatched("Execution deadline expired before dispatch"))
         } else {
@@ -96,9 +100,8 @@ type ClientMap = Arc<Mutex<HashMap<String, BridgeClient>>>;
 #[derive(Clone)]
 pub struct BridgeClient {
     pub window_id: String,
-    pub url: Option<String>,
-    pub title: Option<String>,
     pub connected_at_ms: u64,
+    pub bridge_key: String,
     /// Identity of the underlying WS connection. A late disconnect of a stale
     /// socket must not remove a newer client registered under the same label.
     pub conn_id: String,
@@ -116,6 +119,7 @@ pub struct Bridge {
     pending: PendingMap,
     /// App handle for eval-based fallback execution
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+    runtime: Arc<crate::runtime::RuntimeManager>,
 }
 
 impl Bridge {
@@ -133,6 +137,7 @@ impl Bridge {
             clients,
             pending: pending.clone(),
             app_handle: Arc::new(Mutex::new(None)),
+            runtime: Arc::new(crate::runtime::RuntimeManager::default()),
         };
 
         let bridge_clone = bridge.clone();
@@ -211,9 +216,22 @@ impl Bridge {
         window_id: &str,
         request_id: &str,
     ) -> Result<serde_json::Value, BridgeError> {
+        self.execute_js_authorized(script, timeout_ms, window_id, request_id, None)
+            .await
+    }
+
+    pub async fn execute_js_authorized(
+        &self,
+        script: &str,
+        timeout_ms: u64,
+        window_id: &str,
+        request_id: &str,
+        authorize: Option<&(dyn Fn() -> bool + Send + Sync)>,
+    ) -> Result<serde_json::Value, BridgeError> {
         let request = DispatchRequest {
             id: request_id,
             deadline: Instant::now() + Duration::from_millis(timeout_ms),
+            authorize,
         };
         match self.execute_js_ws(script, window_id, &request).await {
             Err(BridgeError::NotDispatched { .. }) => {
@@ -242,6 +260,9 @@ impl Bridge {
                 "Bridge client for window '{window_id}' is not connected"
             ))
         })?;
+        if !crate::identity::verify_bridge_key(window_id, &client.bridge_key) {
+            return Err(request.not_dispatched("Bridge belongs to a previous document or window"));
+        }
         // Keep the registry lock through enqueue: disconnect cleanup cannot miss
         // a request inserted for a connection that it has already removed.
         let cmd = BridgeCommand {
@@ -277,10 +298,13 @@ impl Bridge {
             }
         }));
         // A rejected enqueue proves this command never entered the transport.
+        request.ensure_budget()?;
+        let transmitted_bytes = msg.len();
         client
             .tx
             .send(msg)
             .map_err(|_| request.not_dispatched("Bridge client channel closed"))?;
+        self.runtime.record_transmission(script, transmitted_bytes);
         drop(clients);
         // Once queued, even a socket send failure cannot safely trigger replay.
         match tokio::time::timeout_at(request.deadline, rx).await {
@@ -343,6 +367,7 @@ impl Bridge {
         request.ensure_budget()?;
         // The platform eval API may fail after handing work to the webview.
         // Conservatively retain uncertainty; never replay after this boundary.
+        self.runtime.record_transmission(script, js.len());
         window
             .eval(&js)
             .map_err(|error| request.unknown(format!("eval inject failed: {error}")))?;
@@ -353,17 +378,176 @@ impl Bridge {
         }
     }
 
+    async fn runtime_target(
+        &self,
+        window_id: &str,
+    ) -> Result<crate::runtime::RuntimeTarget, BridgeError> {
+        use tauri::Manager;
+        let failure = |reason: &str| BridgeError::NotDispatched {
+            request_id: "runtime_target".into(),
+            reason: reason.into(),
+        };
+        let app = self
+            .app_handle
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| failure("Host identity is unavailable"))?;
+        let window = app
+            .get_webview_window(window_id)
+            .ok_or_else(|| failure("Target window is unavailable"))?;
+        if crate::identity::page_loading(window_id) {
+            return Err(failure("Target document is navigating"));
+        }
+        let url = window
+            .url()
+            .map_err(|_| failure("Cannot validate current origin"))?;
+        if !crate::identity::origin_allowed(&app, &url) {
+            return Err(failure("Current origin is outside host configuration"));
+        }
+        Ok(crate::runtime::RuntimeTarget {
+            app_id: app.config().identifier.clone(),
+            window_id: window_id.into(),
+            window_instance_id: crate::identity::window_instance_id(window_id),
+            origin: url.origin().ascii_serialization(),
+            url: url.to_string(),
+        })
+    }
+
+    pub async fn execute_runtime(
+        &self,
+        window_id: &str,
+        module: &str,
+        args: serde_json::Value,
+        timeout_ms: u64,
+        request_id: &str,
+    ) -> Result<serde_json::Value, BridgeError> {
+        self.execute_runtime_authorized(window_id, module, args, timeout_ms, request_id, &|| true)
+            .await
+    }
+
+    pub async fn execute_runtime_authorized(
+        &self,
+        window_id: &str,
+        module: &str,
+        args: serde_json::Value,
+        timeout_ms: u64,
+        request_id: &str,
+        authorize: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<serde_json::Value, BridgeError> {
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let target = tokio::time::timeout_at(deadline, self.runtime_target(window_id))
+            .await
+            .map_err(|_| BridgeError::NotDispatched {
+                request_id: request_id.into(),
+                reason: "Host target lookup deadline expired".into(),
+            })??;
+        let remaining = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64;
+        self.runtime
+            .execute_authorized(
+                self,
+                &target,
+                module,
+                args,
+                remaining,
+                request_id,
+                Some(authorize),
+            )
+            .await
+    }
+
+    pub async fn runtime_context(
+        &self,
+        window_id: &str,
+        timeout_ms: u64,
+    ) -> Result<crate::identity::ExecutionContext, BridgeError> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let target = tokio::time::timeout_at(deadline, self.runtime_target(window_id))
+            .await
+            .map_err(|_| BridgeError::NotDispatched {
+                request_id: request_id.clone(),
+                reason: "Host target lookup deadline expired".into(),
+            })??;
+        self.runtime
+            .ensure(self, &target, deadline, &request_id)
+            .await
+    }
+
+    pub async fn probe_bridge(
+        &self,
+        window_id: &str,
+        timeout_ms: u64,
+    ) -> Result<serde_json::Value, BridgeError> {
+        self.probe_page(window_id,timeout_ms,"/*__CONNECTOR_RUNTIME_COMMAND__*/({responsive:window.top===window&&window.__CONNECTOR_BRIDGE__===true})").await
+    }
+
+    /// Does not install, repair, reload, or replay any business operation.
+    pub async fn probe_runtime(
+        &self,
+        window_id: &str,
+        timeout_ms: u64,
+    ) -> Result<serde_json::Value, BridgeError> {
+        self.probe_page(window_id, timeout_ms, crate::runtime::PROBE)
+            .await
+    }
+
+    async fn probe_page(
+        &self,
+        window_id: &str,
+        timeout_ms: u64,
+        script: &str,
+    ) -> Result<serde_json::Value, BridgeError> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        tokio::time::timeout_at(deadline, self.runtime_target(window_id))
+            .await
+            .map_err(|_| BridgeError::NotDispatched {
+                request_id: request_id.clone(),
+                reason: "Host probe lookup deadline expired".into(),
+            })??;
+        self.execute_js_for_window_with_request_id(
+            script,
+            crate::runtime::remaining(deadline, &request_id)?,
+            window_id,
+            &request_id,
+        )
+        .await
+    }
+
+    pub async fn bridge_connected(&self, window_id: &str) -> bool {
+        self.clients
+            .lock()
+            .await
+            .get(window_id)
+            .is_some_and(|client| {
+                !client.tx.is_closed()
+                    && crate::identity::verify_bridge_key(window_id, &client.bridge_key)
+            })
+    }
+
+    pub fn window_destroyed(&self, window_id: &str) {
+        self.runtime.window_destroyed(window_id);
+    }
+
+    pub fn runtime_diagnostics(&self) -> serde_json::Value {
+        self.runtime.diagnostics()
+    }
+
     pub async fn status(&self) -> serde_json::Value {
         let clients = self.clients.lock().await;
         let now = now_ms();
         let list: Vec<serde_json::Value> = clients
             .values()
+            .filter(|client| {
+                crate::identity::verify_bridge_key(&client.window_id, &client.bridge_key)
+            })
             .map(|client| {
                 serde_json::json!({
                     "windowId": client.window_id,
                     "connected": true,
-                    "url": client.url,
-                    "title": client.title,
                     "ageMs": now.saturating_sub(client.connected_at_ms),
                 })
             })
@@ -372,6 +556,8 @@ impl Bridge {
         serde_json::json!({
             "bridge_port": self.port,
             "workflowProtocolVersion": 1,
+            "inspectionProtocolVersion": 1,
+            "inspection": crate::capabilities::inspection(),
             "clients": list,
             "pending": pending,
             "fallbackAvailable": self.app_handle.lock().await.is_some(),
@@ -490,17 +676,19 @@ async fn handle_bridge_message(
             .and_then(|v| v.as_str())
             .unwrap_or("main")
             .to_string();
+        if !crate::identity::verify_bridge_key(
+            &window_id,
+            value
+                .get("bridgeKey")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default(),
+        ) {
+            return None;
+        }
         let client = BridgeClient {
             window_id: window_id.clone(),
-            url: value
-                .get("url")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            title: value
-                .get("title")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
             connected_at_ms: now_ms(),
+            bridge_key: value["bridgeKey"].as_str().unwrap_or_default().into(),
             conn_id: conn_id.to_string(),
             tx: tx.clone(),
         };
@@ -587,17 +775,26 @@ fn now_ms() -> u64 {
 
 /// Generate the JavaScript bridge client code that gets injected into the webview.
 pub fn bridge_init_script(port: u16, window_id: &str) -> String {
-    let window_id = window_id.replace('\\', "\\\\").replace('\'', "\\'");
+    let capture_source = include_str!("capture/page.js");
+    let bridge_key = serde_json::to_string(&crate::identity::bridge_key(window_id))
+        .expect("bridge key serializes");
+    let window_id = serde_json::to_string(window_id).expect("window label serializes");
+    let semantic_source = include_str!("semantic/core.js");
     format!(
         r#"(function() {{
-  if (window.__CONNECTOR_BRIDGE__) return;
+  if (window.top !== window) return;
+  if (window.__CONNECTOR_BRIDGE__) {{
+    window.__CONNECTOR_BRIDGE_REBIND__?.({bridge_key});
+    return;
+  }}
   window.__CONNECTOR_BRIDGE__ = true;
 
   // Capture native WebSocket before frameworks (Next.js/Turbopack HMR) can patch it
   const NativeWebSocket = window.WebSocket;
 
   const BRIDGE_PORT = {port};
-  const WINDOW_ID = '{window_id}';
+  const WINDOW_ID = {window_id};
+  let BRIDGE_KEY = {bridge_key};
   let ws = null;
   let reconnectTimer = null;
   const consoleLogs = [];
@@ -759,33 +956,8 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       history[name] = wrapped;
     }}
   }});
-  // === IPC Invoke Wrapper (for monitoring) ===
-  if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {{
-    const _origInvoke = window.__TAURI_INTERNALS__.invoke;
-    window.__CONNECTOR_ORIG_INVOKE__ = _origInvoke;
-    window.__TAURI_INTERNALS__.invoke = async function(cmd, args, options) {{
-      if (cmd.startsWith('plugin:connector|')) {{
-        return _origInvoke.call(this, cmd, args, options);
-      }}
-      const t0 = Date.now();
-      try {{
-        const result = await _origInvoke.call(this, cmd, args, options);
-        if (window.__CONNECTOR_IPC_MONITOR__) {{
-          _origInvoke.call(this, 'plugin:connector|push_ipc_event', {{
-            payload: {{ command: cmd, args: args || {{}}, timestamp: t0, durationMs: Date.now() - t0 }}
-          }}).catch(function(){{}});
-        }}
-        return result;
-      }} catch(e) {{
-        if (window.__CONNECTOR_IPC_MONITOR__) {{
-          _origInvoke.call(this, 'plugin:connector|push_ipc_event', {{
-            payload: {{ command: cmd, args: args || {{}}, timestamp: t0, durationMs: Date.now() - t0, error: e.message }}
-          }}).catch(function(){{}});
-        }}
-        throw e;
-      }}
-    }};
-  }}
+  // One shared transparent hook feeds protected v2 sessions and the legacy projection.
+  ({capture_source})(window);
 
   function connect() {{
     try {{
@@ -797,16 +969,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
 
     ws.onopen = function() {{
       origConsole.log('[connector] Bridge connected on port ' + BRIDGE_PORT);
-      try {{
-        ws.send(JSON.stringify({{
-          type: 'hello',
-          id: '__bridge_hello__',
-          windowId: WINDOW_ID,
-          url: String(location.href || ''),
-          title: String(document.title || ''),
-          result: 'connected'
-        }}));
-      }} catch (_) {{}}
+      sendHello();
     }};
 
     ws.onmessage = function(event) {{
@@ -829,6 +992,16 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       // onclose will fire after this
     }};
   }}
+
+  function sendHello() {{
+    try {{
+      ws.send(JSON.stringify({{type:'hello',bridgeKey:BRIDGE_KEY,id:'__bridge_hello__',windowId:WINDOW_ID}}));
+    }} catch (_) {{}}
+  }}
+  window.__CONNECTOR_BRIDGE_REBIND__ = function(key) {{
+    BRIDGE_KEY = key;
+    if (ws && ws.readyState === 1) sendHello();
+  }};
 
   function scheduleReconnect() {{
     if (reconnectTimer) return;
@@ -875,6 +1048,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
   }}
 
   // === Unified Snapshot Engine ===
+  const semantic = {semantic_source};
 
   // Outer-scope: cached React fiber key (undefined=not looked up, null=not React)
   let fiberKey;
@@ -885,7 +1059,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
   ]);
 
   function findFiberKey(el) {{
-    if (fiberKey !== undefined) return fiberKey;
+    if (fiberKey && el[fiberKey]) return fiberKey;
     const keys = Object.keys(el);
     for (let i = 0; i < keys.length; i++) {{
       if (keys[i].startsWith('__reactFiber$')) {{
@@ -912,115 +1086,8 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     return null;
   }}
 
-  function getRole(el) {{
-    const explicit = el.getAttribute('role');
-    if (explicit) return explicit;
-    const tag = el.tagName ? el.tagName.toLowerCase() : '';
-    if (tag === 'input') {{
-      const type = String(el.type || 'text').toLowerCase();
-      const inputMap = {{
-        'checkbox': 'checkbox',
-        'radio': 'radio',
-        'range': 'slider',
-        'search': 'searchbox',
-        'number': 'spinbutton'
-      }};
-      return inputMap[type] || 'textbox';
-    }}
-    if (tag === 'a' && el.hasAttribute('href')) return 'link';
-    const tagMap = {{
-      'button': 'button', 'select': 'combobox', 'textarea': 'textbox',
-      'img': 'img', 'nav': 'navigation', 'main': 'main',
-      'header': 'banner', 'footer': 'contentinfo', 'aside': 'complementary',
-      'form': 'form', 'table': 'table', 'ul': 'list', 'ol': 'list',
-      'li': 'listitem', 'h1': 'heading', 'h2': 'heading', 'h3': 'heading',
-      'h4': 'heading', 'h5': 'heading', 'h6': 'heading'
-    }};
-    return tagMap[tag] || null;
-  }}
-
-  function getName(el) {{
-    // 1. aria-label
-    const ariaLabel = el.getAttribute('aria-label');
-    if (ariaLabel) return ariaLabel;
-
-    // 2. aria-labelledby (multiple IDs)
-    const labelledBy = el.getAttribute('aria-labelledby');
-    if (labelledBy) {{
-      const parts = labelledBy.split(/\s+/);
-      const texts = [];
-      for (let i = 0; i < parts.length; i++) {{
-        const ref = document.getElementById(parts[i]);
-        if (ref) texts.push(ref.textContent.trim());
-      }}
-      if (texts.length > 0) return texts.join(' ');
-    }}
-
-    const tag = el.tagName;
-
-    // 3. IMG alt
-    if (tag === 'IMG') return el.getAttribute('alt') || '';
-
-    // 4. INPUT/SELECT/TEXTAREA: label[for], then placeholder
-    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {{
-      if (el.id) {{
-        const lbl = document.querySelector('label[for="' + el.id + '"]');
-        if (lbl) return lbl.textContent.trim();
-      }}
-      return el.getAttribute('placeholder') || '';
-    }}
-
-    // 5. BUTTON/A/H1-H6: visible textContent
-    if (tag === 'BUTTON' || tag === 'A' ||
-        tag === 'H1' || tag === 'H2' || tag === 'H3' ||
-        tag === 'H4' || tag === 'H5' || tag === 'H6') {{
-      return (el.textContent || '').trim().substring(0, 100);
-    }}
-
-    // 6. INPUT submit/reset: value attribute
-    if (tag === 'INPUT') {{
-      const itype = (el.type || '').toLowerCase();
-      if (itype === 'submit' || itype === 'reset') {{
-        return el.getAttribute('value') || '';
-      }}
-    }}
-
-    // 7. FIELDSET: first LEGEND child
-    if (tag === 'FIELDSET') {{
-      const legend = el.querySelector('legend');
-      if (legend) return legend.textContent.trim();
-    }}
-
-    // 8. FIGURE: first FIGCAPTION child
-    if (tag === 'FIGURE') {{
-      const cap = el.querySelector('figcaption');
-      if (cap) return cap.textContent.trim();
-    }}
-
-    // 9. TABLE: first CAPTION child
-    if (tag === 'TABLE') {{
-      const cap = el.querySelector('caption');
-      if (cap) return cap.textContent.trim();
-    }}
-
-    // 10. title attribute (last resort)
-    const title = el.getAttribute('title');
-    if (title) return title;
-
-    // 11. ::before / ::after content
-    try {{
-      const before = getComputedStyle(el, '::before').content;
-      if (before && before !== 'none' && before !== 'normal') {{
-        return before.replace(/^"|"$/g, '');
-      }}
-      const after = getComputedStyle(el, '::after').content;
-      if (after && after !== 'none' && after !== 'normal') {{
-        return after.replace(/^"|"$/g, '');
-      }}
-    }} catch (_) {{}}
-
-    return '';
-  }}
+  const getRole = element => window.__CONNECTOR_SEMANTIC__.getRole(element);
+  const getName = element => window.__CONNECTOR_SEMANTIC__.getAccessibleName(element);
 
   // Interactive roles that get ref= attributes in ai mode
   const INTERACTIVE_ROLES = new Set([
@@ -1030,10 +1097,13 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
   ]);
 
   window.__CONNECTOR_SNAPSHOT__ = function(options) {{
+    const semantic = window.__CONNECTOR_SEMANTIC__;
+    if (!semantic) throw new Error('Trusted semantic runtime is missing');
     const opts = options || {{}};
     const mode = opts.mode || 'ai';
-    const maxDepth = opts.maxDepth || 0;
-    const maxElements = opts.maxElements || 0;
+    const maxDepth = Math.min(64, opts.maxDepth || 64);
+    const maxElements = Math.min(20000, opts.maxElements || 20000);
+    const semanticDeadline = performance.now() + 250;
     const reactEnrich = opts.reactEnrich !== false;
     const followPortals = opts.followPortals !== false;
     const shadowDom = opts.shadowDom === true;
@@ -1042,7 +1112,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     const rootEl = opts.selector
       ? document.querySelector(opts.selector)
       : document.body;
-    if (!rootEl) return {{ snapshot: '', refs: {{}}, allRefs: null, subtrees: [], meta: {{ elementCount: 0, truncated: false, split: false, inlineComplete: true, portalCount: 0, virtualScrollContainers: 0, inlineTokens: 0, overlays: [] }} }};
+    if (!rootEl) return {{ snapshot: '', refs: {{}}, allRefs: null, subtrees: [], meta: {{ semanticVersion: semantic.version, semanticCoverage: semantic.coverage, elementCount: 0, truncated: false, split: false, inlineComplete: true, portalCount: 0, virtualScrollContainers: 0, inlineTokens: 0, overlays: [] }} }};
 
     // State
     let elementCount = 0;
@@ -1055,6 +1125,8 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     const claimedPortalIds = new Set();
     const depthMap = new WeakMap();
     const treeNodeMap = new WeakMap();
+    const treeParentMap = new WeakMap();
+    const stitchedPortals = new WeakSet();
     // Overlay detection runs only on full-document ai/accessibility snapshots;
     // a scoped snapshot means the caller already chose its focus.
     const overlayCandidates = [];
@@ -1065,14 +1137,15 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       const tag = node.tagName;
       if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEMPLATE')
         return NodeFilter.FILTER_REJECT;
-      if (node.getAttribute('aria-hidden') === 'true')
+      if (semantic.isConnectorOwned(node)) return NodeFilter.FILTER_REJECT;
+      if (mode !== 'structure' && !semantic.isAccessibilityExposed(node))
         return NodeFilter.FILTER_REJECT;
       try {{
         const cs = getComputedStyle(node);
         if (cs.display === 'none') return NodeFilter.FILTER_REJECT;
         if (cs.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
       }} catch (_) {{}}
-      const role = node.getAttribute('role');
+      const role = semantic.getRole(node);
       if (role === 'presentation' || role === 'none')
         return NodeFilter.FILTER_SKIP;
       return NodeFilter.FILTER_ACCEPT;
@@ -1081,7 +1154,9 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     // Build a tree node for one element
     function buildNode(el, depth) {{
       const role = getRole(el);
-      const name = getName(el);
+      const sensitive = semantic.isSensitive(el);
+      const name = sensitive ? '[redacted]' : getName(el);
+      const description = sensitive ? '[redacted]' : semantic.getAccessibleDescription(el);
       const tag = el.tagName.toLowerCase();
       const attrs = [];
       let refId = null;
@@ -1102,6 +1177,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
             name: (name || '').substring(0, 100),
             selector: buildSelector(el),
             nth: null,
+            ...semantic.rememberRef(el),
           }};
         }}
         // React component enrichment
@@ -1111,24 +1187,13 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         }}
       }}
 
-      // ARIA states
-      const checked = el.getAttribute('aria-checked') || (el.checked === true ? 'true' : null);
-      if (checked) attrs.push('checked=' + checked);
-      const disabled = el.getAttribute('aria-disabled') || (el.disabled === true ? 'true' : null);
-      if (disabled === 'true') attrs.push('disabled');
-      const expanded = el.getAttribute('aria-expanded');
-      if (expanded) attrs.push('expanded=' + expanded);
-      const selected = el.getAttribute('aria-selected');
-      if (selected) attrs.push('selected=' + selected);
-      const pressed = el.getAttribute('aria-pressed');
-      if (pressed) attrs.push('pressed=' + pressed);
-      const level = el.getAttribute('aria-level') ||
-        (/^H([1-6])$/.test(el.tagName) ? el.tagName.charAt(1) : null);
+      // Shared states preserve false and mixed; description never becomes name.
+      for (const [key, value] of Object.entries(semantic.getAriaStates(el))) {{
+        attrs.push(value === true ? key : key + '=' + String(value));
+      }}
+      const level = el.getAttribute('aria-level') || (/^H([1-6])$/.test(el.tagName) ? el.tagName.charAt(1) : null);
       if (level) attrs.push('level=' + level);
-      const required = el.getAttribute('aria-required') || (el.required === true ? 'true' : null);
-      if (required === 'true') attrs.push('required');
-      const readonly = el.getAttribute('aria-readonly') || (el.readOnly === true ? 'true' : null);
-      if (readonly === 'true') attrs.push('readonly');
+      if (description) attrs.push('description=' + JSON.stringify(description.slice(0, 512)));
 
       // Virtual scroll detection
       if (el.classList && el.classList.contains('rc-virtual-list-holder')) {{
@@ -1214,14 +1279,14 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
 
     // Build a minimal CSS selector for ref lookup
     function buildSelector(el) {{
-      if (el.id) return '#' + el.id;
+      if (el.id) return '#' + CSS.escape(el.id);
       var tag = el.tagName.toLowerCase();
       var sel = tag;
       var testId = el.getAttribute('data-testid');
-      if (testId) return tag + '[data-testid="' + testId + '"]';
+      if (testId) return tag + '[data-testid="' + CSS.escape(testId) + '"]';
       if (el.className && typeof el.className === 'string') {{
         var cls = el.className.trim().split(/\s+/).slice(0, 2).filter(Boolean);
-        if (cls.length > 0) sel += '.' + cls.join('.');
+        if (cls.length > 0) sel += '.' + cls.map(CSS.escape).join('.');
       }}
       // nth-child disambiguation
       if (el.parentElement) {{
@@ -1334,6 +1399,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       elementCount++;
       treeNodeMap.set(currentEl, rn);
       rootNode.children.push(rn);
+      treeParentMap.set(rn, rootNode);
       // Back-link portal links
       for (var pi = portalLinks.length - 1; pi >= 0; pi--) {{
         if (portalLinks[pi].treeNode === null && portalLinks[pi].depth === 0) {{
@@ -1346,7 +1412,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       currentEl = walker.nextNode();
       if (!currentEl) break;
 
-      if (maxElements > 0 && elementCount >= maxElements) {{
+      if (elementCount >= maxElements || performance.now() > semanticDeadline) {{
         truncated = true;
         break;
       }}
@@ -1366,6 +1432,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       // Attach to parent tree node
       var parentNode = treeNodeMap.has(parentEl) ? treeNodeMap.get(parentEl) : rootNode;
       parentNode.children.push(node);
+      treeParentMap.set(node, parentNode);
 
       // Back-link latest portal links to their treeNode
       for (var pj = portalLinks.length - 1; pj >= 0; pj--) {{
@@ -1383,7 +1450,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         }});
         var sEl = shadowWalker.nextNode();
         while (sEl) {{
-          if (maxElements > 0 && elementCount >= maxElements) {{ truncated = true; break; }}
+          if (elementCount >= maxElements || performance.now() > semanticDeadline) {{ truncated = true; break; }}
           var sDepth = myDepth + 1;
           depthMap.set(sEl, sDepth);
           if (maxDepth === 0 || sDepth <= maxDepth) {{
@@ -1392,6 +1459,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
             treeNodeMap.set(sEl, sNode);
             var sParent = treeNodeMap.has(sEl.parentElement) ? treeNodeMap.get(sEl.parentElement) : node;
             sParent.children.push(sNode);
+            treeParentMap.set(sNode, sParent);
           }}
           sEl = shadowWalker.nextNode();
         }}
@@ -1403,7 +1471,28 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       for (var pk = 0; pk < portalLinks.length; pk++) {{
         var link = portalLinks[pk];
         var targetEl = document.getElementById(link.targetId);
-        if (!targetEl || !link.treeNode) continue;
+        if (!targetEl || !link.treeNode || stitchedPortals.has(targetEl) || nodeFilter(targetEl) !== NodeFilter.FILTER_ACCEPT) continue;
+        if (elementCount >= maxElements || performance.now() > semanticDeadline) {{ truncated = true; break; }}
+        // An owned ancestor would form an accessibility cycle. Existing nodes
+        // move to their semantic owner rather than being counted a second time.
+        var existingTarget = treeNodeMap.get(targetEl);
+        var ownerAncestor = link.treeNode;
+        var cyclicPortal = false;
+        while (ownerAncestor) {{
+          if (ownerAncestor === existingTarget || ownerAncestor.el === targetEl) {{ cyclicPortal = true; break; }}
+          ownerAncestor = treeParentMap.get(ownerAncestor);
+        }}
+        if (cyclicPortal || targetEl.contains(link.treeNode.el)) continue;
+        stitchedPortals.add(targetEl);
+        if (existingTarget) {{
+          var oldParent = treeParentMap.get(existingTarget);
+          if (oldParent) oldParent.children = oldParent.children.filter(function(child) {{ return child !== existingTarget; }});
+          link.treeNode.children.push(existingTarget);
+          treeParentMap.set(existingTarget, link.treeNode);
+          existingTarget.attrs.push('portal');
+          portalCount++;
+          continue;
+        }}
 
         portalCount++;
         var baseDepth = link.depth + 1;
@@ -1418,10 +1507,12 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         targetNode.attrs.push('portal');
         elementCount++;
         link.treeNode.children.push(targetNode);
+        treeNodeMap.set(targetEl, targetNode);
+        treeParentMap.set(targetNode, link.treeNode);
 
         var pEl = portalWalker.nextNode();
         while (pEl) {{
-          if (maxElements > 0 && elementCount >= maxElements) {{ truncated = true; break; }}
+          if (elementCount >= maxElements || performance.now() > semanticDeadline) {{ truncated = true; break; }}
           var pParent = pEl.parentElement;
           var pParentDepth = portalDepthMap.has(pParent) ? portalDepthMap.get(pParent) : baseDepth;
           var pDepth = pParentDepth + 1;
@@ -1432,6 +1523,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
             // Attach to portal parent
             var pParentNode = treeNodeMap.has(pParent) ? treeNodeMap.get(pParent) : targetNode;
             pParentNode.children.push(pNode);
+            treeParentMap.set(pNode, pParentNode);
             treeNodeMap.set(pEl, pNode);
           }}
           pEl = portalWalker.nextNode();
@@ -1446,7 +1538,8 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       for (var oi = 0; oi < bodyChildren.length; oi++) {{
         var orphan = bodyChildren[oi];
         if (orphan.id && claimedPortalIds.has(orphan.id)) continue;
-        if (treeNodeMap.has(orphan)) continue;
+        if (treeNodeMap.has(orphan) || nodeFilter(orphan) !== NodeFilter.FILTER_ACCEPT) continue;
+        if (elementCount >= maxElements || performance.now() > semanticDeadline) {{ truncated = true; break; }}
         var oClass = typeof orphan.className === 'string' ? orphan.className : '';
         if (!/\b(ant-|rc-)/.test(oClass)) continue;
         // Treat as orphan portal
@@ -1455,6 +1548,8 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         oNode.attrs.push('orphan-portal');
         elementCount++;
         rootNode.children.push(oNode);
+        treeNodeMap.set(orphan, oNode);
+        treeParentMap.set(oNode, rootNode);
         // Walk children of orphan portal
         var orphanWalker = document.createTreeWalker(orphan, NodeFilter.SHOW_ELEMENT, {{
           acceptNode: nodeFilter
@@ -1463,7 +1558,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         oDepthMap.set(orphan, 1);
         var oEl = orphanWalker.nextNode();
         while (oEl) {{
-          if (maxElements > 0 && elementCount >= maxElements) {{ truncated = true; break; }}
+          if (elementCount >= maxElements || performance.now() > semanticDeadline) {{ truncated = true; break; }}
           var oParent = oEl.parentElement;
           var oParentD = oDepthMap.has(oParent) ? oDepthMap.get(oParent) : 1;
           var oDep = oParentD + 1;
@@ -1473,6 +1568,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
             elementCount++;
             var oParNode = treeNodeMap.has(oParent) ? treeNodeMap.get(oParent) : oNode;
             oParNode.children.push(oChild);
+            treeParentMap.set(oChild, oParNode);
             treeNodeMap.set(oEl, oChild);
           }}
           oEl = orphanWalker.nextNode();
@@ -1751,6 +1847,8 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       allRefs: split ? refs : null,
       subtrees: subtrees,
       meta: {{
+        semanticVersion: semantic.version,
+        semanticCoverage: semantic.coverage,
         elementCount: elementCount,
         truncated: truncated,
         split: split,
@@ -1765,6 +1863,9 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
 
   // === Auto-push DOM via Tauri IPC (when available) ===
   function autoPushDom() {{
+    // Active selection owns the interaction environment. Do not stamp refs or
+    // expose connector UI through the legacy raw-DOM cache during its lease.
+    if (window.__CONNECTOR_INPUT_GUARD__ && window.__CONNECTOR_INPUT_GUARD__.active) return;
     const ipc = window.__TAURI_INTERNALS__ || (window.__TAURI__ && window.__TAURI__.core);
     if (!ipc || !ipc.invoke) return;
 
@@ -1881,19 +1982,459 @@ mod transport_tests {
             clients: Arc::new(Mutex::new(HashMap::new())),
             pending: Arc::new(StdMutex::new(HashMap::new())),
             app_handle: Arc::new(Mutex::new(None)),
+            runtime: Arc::new(crate::runtime::RuntimeManager::default()),
         };
         bridge.clients.lock().await.insert(
             "main".into(),
             BridgeClient {
                 window_id: "main".into(),
-                url: None,
-                title: None,
                 connected_at_ms: 0,
+                bridge_key: crate::identity::bridge_key("main"),
                 conn_id: "connection-a".into(),
                 tx,
             },
         );
         (bridge, rx)
+    }
+
+    async fn simulated_runtime_bridge(
+        mode: &'static str,
+    ) -> (
+        Bridge,
+        Arc<StdMutex<Vec<String>>>,
+        tokio::task::JoinHandle<()>,
+        crate::runtime::RuntimeTarget,
+    ) {
+        let (bridge, mut rx) = queued_bridge().await;
+        let worker = bridge.clone();
+        let scripts = Arc::new(StdMutex::new(Vec::new()));
+        let recorded = scripts.clone();
+        let target = crate::runtime::RuntimeTarget {
+            app_id: "fixture".into(),
+            window_id: "main".into(),
+            window_instance_id: crate::identity::window_instance_id("main"),
+            origin: "https://fixture.invalid".into(),
+            url: "https://fixture.invalid/".into(),
+        };
+        let task = tokio::spawn(async move {
+            let mut installed = serde_json::Value::Null;
+            while let Some(message) = rx.recv().await {
+                let command: serde_json::Value = serde_json::from_str(&message).unwrap();
+                let script = command["script"].as_str().unwrap();
+                recorded.lock().unwrap().push(script.into());
+                let result = if script == crate::runtime::PROBE {
+                    json!({"available":true,"suspended":false,"origin":"https://fixture.invalid","url":"https://fixture.invalid/","pageEpoch":"page-a","runtime":installed})
+                } else if script.starts_with("/*__CONNECTOR_INSTALL_BUNDLE__*/") {
+                    let input = script
+                        .split("const c=")
+                        .nth(1)
+                        .unwrap()
+                        .split("; const b=")
+                        .next()
+                        .unwrap();
+                    let encoded = input
+                        .strip_prefix("JSON.parse(")
+                        .unwrap()
+                        .strip_suffix(')')
+                        .unwrap();
+                    let decoded: String = serde_json::from_str(encoded).unwrap();
+                    let configuration: serde_json::Value = serde_json::from_str(&decoded).unwrap();
+                    if mode == "install_failure" {
+                        json!({"ready":false,"error":"fixture install fault"})
+                    } else {
+                        installed = json!({"ready":true,"context":configuration["context"],"runtimeProtocolVersion":1});
+                        installed.clone()
+                    }
+                } else {
+                    json!({"ok":true,"dispatched":true})
+                };
+                let client = worker.clients.lock().await["main"].clone();
+                let response = if mode == "business_error"
+                    && script != crate::runtime::PROBE
+                    && !script.starts_with("/*__CONNECTOR_INSTALL_BUNDLE__*/")
+                {
+                    json!({"id":command["id"],"error":"runtime_missing helper exception after side effect"})
+                } else {
+                    json!({"id":command["id"],"result":result})
+                };
+                handle_bridge_message(
+                    &response.to_string(),
+                    &client.tx,
+                    &worker.clients,
+                    &worker.pending,
+                    &client.conn_id,
+                )
+                .await;
+            }
+        });
+        (bridge, scripts, task, target)
+    }
+
+    #[tokio::test]
+    async fn warm_runtime_transports_one_bundle_for_twenty_operations() {
+        let (bridge, scripts, task, target) = simulated_runtime_bridge("ready").await;
+        for index in 0..20 {
+            bridge
+                .runtime
+                .execute(
+                    &bridge,
+                    &target,
+                    "workflow",
+                    json!({"cmd":"execute"}),
+                    1000,
+                    &format!("operation-{index}"),
+                )
+                .await
+                .unwrap();
+        }
+        let scripts = scripts.lock().unwrap();
+        assert_eq!(
+            scripts
+                .iter()
+                .filter(|script| script.starts_with("/*__CONNECTOR_INSTALL_BUNDLE__*/"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            scripts.len(),
+            41,
+            "twenty probes, twenty short commands and one bundle"
+        );
+        assert!(
+            scripts
+                .iter()
+                .filter(|script| !script.starts_with("/*__CONNECTOR_INSTALL_BUNDLE__*/"))
+                .all(|script| script.len() < 4096)
+        );
+        let metrics = bridge.runtime.diagnostics();
+        assert_eq!(metrics["installSuccesses"], 1);
+        assert_eq!(metrics["runtimeReuses"], 19);
+        assert!(metrics["bundleBytesSent"].as_u64().unwrap() > 10000);
+        assert!(metrics["commandBytesSent"].as_u64().unwrap() > 0);
+        assert!(bridge.pending.lock().unwrap().is_empty());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn concurrent_runtime_preparation_is_single_flight() {
+        let (bridge, scripts, task, target) = simulated_runtime_bridge("ready").await;
+        let mut joins = Vec::new();
+        for index in 0..12 {
+            let bridge = bridge.clone();
+            let target = target.clone();
+            joins.push(tokio::spawn(async move {
+                bridge
+                    .runtime
+                    .ensure(
+                        &bridge,
+                        &target,
+                        Instant::now() + Duration::from_secs(2),
+                        &format!("prepare-{index}"),
+                    )
+                    .await
+                    .unwrap()
+            }));
+        }
+        let mut contexts = Vec::new();
+        for join in joins {
+            contexts.push(join.await.unwrap());
+        }
+        assert!(contexts.windows(2).all(|pair| pair[0] == pair[1]));
+        assert_eq!(
+            scripts
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|script| script.starts_with("/*__CONNECTOR_INSTALL_BUNDLE__*/"))
+                .count(),
+            1
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn stale_operation_context_never_enters_business_transport() {
+        let (bridge, scripts, task, target) = simulated_runtime_bridge("ready").await;
+        let error = bridge
+            .runtime
+            .execute(
+                &bridge,
+                &target,
+                "picker",
+                json!({"cmd":"status","context":{"pageEpoch":"obsolete"}}),
+                1000,
+                "old-picker",
+            )
+            .await
+            .unwrap_err();
+        assert!(!error.is_dispatched());
+        assert_eq!(
+            scripts.lock().unwrap().len(),
+            2,
+            "only probe and installer were sent"
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn stale_fully_bound_cleanup_never_installs_a_new_runtime() {
+        let (bridge, scripts, task, target) = simulated_runtime_bridge("ready").await;
+        for (module, field) in [
+            ("picker", "context"),
+            ("ipcCapture", "context"),
+            ("geometry", "expectedContext"),
+            ("workflow", "context"),
+        ] {
+            let mut args = json!({"cmd":"cleanup"});
+            args[field] = json!({"pageEpoch":"old-page","runtimeId":"old-runtime"});
+            let error = bridge
+                .runtime
+                .execute(
+                    &bridge,
+                    &target,
+                    module,
+                    args,
+                    1000,
+                    &format!("cleanup-{module}"),
+                )
+                .await
+                .unwrap_err();
+            assert!(!error.is_dispatched());
+        }
+        assert_eq!(bridge.runtime.diagnostics()["installAttempts"], 0);
+        assert_eq!(bridge.runtime.diagnostics()["bundleBytesSent"], 0);
+        assert_eq!(
+            scripts.lock().unwrap().len(),
+            4,
+            "one readonly probe per bound followup"
+        );
+        assert!(
+            scripts
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|script| script == crate::runtime::PROBE)
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn matching_fully_bound_operation_reuses_existing_runtime_without_install() {
+        let (bridge, scripts, task, target) = simulated_runtime_bridge("ready").await;
+        let context = bridge
+            .runtime
+            .ensure(
+                &bridge,
+                &target,
+                Instant::now() + Duration::from_secs(1),
+                "initial",
+            )
+            .await
+            .unwrap();
+        let result = bridge
+            .runtime
+            .execute(
+                &bridge,
+                &target,
+                "workflow",
+                json!({"cmd":"execute","context":context}),
+                1000,
+                "bound-operation",
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["ok"], true);
+        assert_eq!(bridge.runtime.diagnostics()["installAttempts"], 1);
+        assert_eq!(
+            scripts.lock().unwrap().len(),
+            4,
+            "cold probe+install then readonly probe+bound dispatch"
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn anonymous_capability_views_match_without_installation_or_private_state() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let directory = std::env::temp_dir().join(format!(
+            "connector-capability-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let state = crate::state::PluginState::new(directory.clone()).unwrap();
+        state
+            .set_pointed_element(
+                json!({"text":"private-capability-test-marker","pickerId":"private-handle"}),
+            )
+            .await;
+        let bridge_status = bridge.status().await;
+        let workflow =
+            crate::workflow::call("workflow_capabilities", &json!({}), &bridge, None, &state)
+                .await
+                .unwrap();
+        assert_eq!(bridge_status["inspection"], workflow["inspection"]);
+        assert_eq!(
+            bridge_status["inspection"],
+            crate::capabilities::inspection()
+        );
+        assert!(
+            !workflow["ops"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("webview_select_element"))
+        );
+        assert!(
+            !workflow
+                .to_string()
+                .contains("private-capability-test-marker")
+        );
+        assert!(!workflow.to_string().contains("private-handle"));
+        assert!(rx.try_recv().is_err());
+        assert_eq!(bridge.runtime.diagnostics()["installAttempts"], 0);
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_installation_is_shared_and_not_repeated_in_same_document() {
+        let (bridge, scripts, task, target) = simulated_runtime_bridge("install_failure").await;
+        for index in 0..8 {
+            let error = bridge
+                .runtime
+                .ensure(
+                    &bridge,
+                    &target,
+                    Instant::now() + Duration::from_secs(1),
+                    &format!("failed-{index}"),
+                )
+                .await
+                .unwrap_err();
+            assert!(!error.is_dispatched());
+        }
+        assert_eq!(
+            scripts
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|script| script.starts_with("/*__CONNECTOR_INSTALL_BUNDLE__*/"))
+                .count(),
+            1
+        );
+        assert_eq!(bridge.runtime.diagnostics()["installAttempts"], 1);
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn runtime_business_error_is_never_reprepared_or_replayed() {
+        let (bridge, scripts, task, target) = simulated_runtime_bridge("business_error").await;
+        let error = bridge
+            .runtime
+            .execute(
+                &bridge,
+                &target,
+                "workflow",
+                json!({"cmd":"execute"}),
+                1000,
+                "write",
+            )
+            .await
+            .unwrap_err();
+        assert!(error.is_dispatched());
+        assert!(error.to_string().contains("runtime_missing helper"));
+        assert_eq!(
+            scripts.lock().unwrap().len(),
+            3,
+            "probe, bundle, exactly one business dispatch"
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn revocation_during_install_prevents_final_business_dispatch() {
+        let (bridge, scripts, task, target) = simulated_runtime_bridge("ready").await;
+        let authorized = || bridge.runtime.diagnostics()["installSuccesses"] == 0;
+        let error = bridge
+            .runtime
+            .execute_authorized(
+                &bridge,
+                &target,
+                "workflow",
+                json!({"cmd":"execute"}),
+                1000,
+                "revoked-write",
+                Some(&authorized),
+            )
+            .await
+            .unwrap_err();
+        assert!(!error.is_dispatched());
+        assert!(error.to_string().contains("authorization"));
+        assert_eq!(
+            scripts.lock().unwrap().len(),
+            2,
+            "probe and preparation only"
+        );
+        assert!(bridge.pending.lock().unwrap().is_empty());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn health_separates_transport_from_unavailable_runtime_without_repair() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let health = crate::health::query(&bridge, &json!({"depth":"runtime","timeoutMs":100}))
+            .await
+            .unwrap();
+        assert_eq!(health["checks"]["transport"]["status"], "responsive");
+        assert_eq!(health["checks"]["runtime"]["status"], "unavailable");
+        assert_eq!(health["executionReplayed"], false);
+        assert!(rx.try_recv().is_err());
+        assert_eq!(bridge.runtime.diagnostics()["installAttempts"], 0);
+        for invalid in [
+            json!({"depth":"reload"}),
+            json!({"depth":42}),
+            json!({"timeoutMs":99}),
+            json!({"timeoutMs":10001}),
+            json!({"windowId":""}),
+            json!({"script":"business()"}),
+        ] {
+            assert!(crate::health::query(&bridge, &invalid).await.is_err());
+        }
+        let anonymous = bridge.status().await.to_string();
+        assert!(!anonymous.contains("title"));
+        assert!(!anonymous.contains("url"));
+        assert!(!anonymous.contains("workspace"));
+    }
+
+    #[tokio::test]
+    async fn bridge_hello_requires_host_window_binding() {
+        let clients = Arc::new(Mutex::new(HashMap::new()));
+        let pending = Arc::new(StdMutex::new(HashMap::new()));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let label = uuid::Uuid::new_v4().to_string();
+        let key = crate::identity::bridge_key(&label);
+        let invalid = json!({"type":"hello","windowId":label,"bridgeKey":"forged"});
+        assert!(
+            handle_bridge_message(&invalid.to_string(), &tx, &clients, &pending, "untrusted")
+                .await
+                .is_none()
+        );
+        let valid = json!({"type":"hello","windowId":label,"bridgeKey":key});
+        assert!(
+            handle_bridge_message(&valid.to_string(), &tx, &clients, &pending, "bound")
+                .await
+                .is_some()
+        );
+        crate::identity::page_navigation(&label);
+        assert!(
+            handle_bridge_message(
+                &valid.to_string(),
+                &tx,
+                &clients,
+                &pending,
+                "stale-document"
+            )
+            .await
+            .is_none()
+        );
+        crate::identity::window_destroyed(&label);
     }
 
     #[tokio::test]
@@ -1995,6 +2536,7 @@ mod transport_tests {
         let request = DispatchRequest {
             id: "logical-id",
             deadline: Instant::now() + Duration::from_secs(1),
+            authorize: None,
         };
         let error = bridge
             .execute_js_ws("write()", "main", &request)

@@ -1,6 +1,6 @@
 ---
 name: tauri-connector
-version: 0.15.0
+version: 0.16.0
 description: "Deep inspection, interaction, debugging, and code review for Tauri v2 desktop apps. Use this skill whenever: working with a Tauri app's UI (clicking, filling forms, reading DOM, screenshots, dragging elements); debugging console logs, IPC calls, or Tauri events; reviewing component trees, accessibility, or visual regressions; testing user flows or validating IPC contracts; setting up tauri-connector in a new project. Also triggers on: DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, Tauri app testing, visual regression, admin/ front/ or tool/ desktop apps, @eN ref syntax, or any mention of tauri-connector CLI or MCP tools. This is Claude's bridge to any running Tauri v2 desktop app -- if a Tauri app is involved, use this skill."
 allowed-tools:
   - Bash
@@ -135,6 +135,14 @@ ipc_monitor(action: "stop")
 tauri-connector ipc unmonitor
 ```
 
+### Protected inspection and active element selection
+
+For bounded IPC return previews, use authenticated `ipc_capture` sessions and `ipc_query`; keep the returned session ID and follow readiness, gaps and pending status. Legacy IPC logs do not expose these protected results. An invoke observation does not establish backend persistence or a causal relationship to a workflow step.
+
+For an ambiguous target, start `webview_select_element` (CLI `picker start` or `select-element`). The user hovers and confirms an actual element; use `get` / `cancel` with the returned handle across connections. Request-key retries preserve one picker and its deadline. Selection, screenshot and cleanup have independent status. Polling never repeats capture. The picker cannot edit an existing workflow spec or original verdict, and cannot release unknown-write quarantine. Review [the picker contract](references/mcp-tools.md#webview_select_element) before using candidates or requesting an image.
+
+New inspection tools require `inspectionProtocolVersion:1` and the host's existing workflow token in the envelope, outside the spec. Verify application instance and page context; a health response or new screenshot never permits replaying a possibly dispatched write.
+
 ### Event Debugging
 
 Monitor Tauri app-level events (not DOM events):
@@ -156,7 +164,7 @@ tauri-connector events stop
 ### Visual Debugging
 
 ```bash
-# Native pixel-accurate screenshot (xcap, falls back to snapdom)
+# Legacy window screenshot (xcap, with explicit DOM fallback provenance)
 webview_screenshot(format: "png", maxWidth: 1280, save: true, nameHint: "debug")
 tauri-connector screenshot --name-hint debug -m 1280
 
@@ -497,7 +505,7 @@ For a dependency upgrade or live smoke test, read [references/upgrade-and-smoke.
 
 For first-time setup in a Tauri v2 project, read [SETUP.md](SETUP.md). The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
 
-1. `tauri-plugin-connector = { version = "0.15", optional = true }` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = { version = "0.16", optional = true }` in `src-tauri/Cargo.toml`
 2. Declare the cargo feature: `[features] dev-connector = ["dep:tauri-plugin-connector"]`
 3. Register the plugin with `#[cfg(feature = "dev-connector")]` guard
 4. Drop the dev capability JSON at `src-tauri/capabilities-dev/dev-connector.json` (outside the default `capabilities/` glob), and register it at runtime via `app.add_capability(include_str!("../capabilities-dev/dev-connector.json"))` inside the same `cfg(feature = "dev-connector")`
@@ -506,7 +514,7 @@ For first-time setup in a Tauri v2 project, read [SETUP.md](SETUP.md). The skill
 7. Add `"tauri:dev": "tauri dev --features dev-connector"` to `package.json`
 8. Add `"url": "http://127.0.0.1:9556/mcp"` to `.mcp.json`
 
-For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.15"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
+For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.16"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 

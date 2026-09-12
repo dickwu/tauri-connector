@@ -163,6 +163,28 @@ Get computed CSS properties for a CSS-selected element.
 | `selector` | string | yes | CSS selector |
 | `properties` | string[] | | Specific properties to return (returns all if omitted) |
 
+### app_identity and runtime_health
+
+`app_identity` requires `authToken` and returns current application-instance/workspace identity. `runtime_health` accepts `authToken`, `windowId` (default `main`), `depth` (`transport`, `bridge`, `runtime`; default `runtime`) and `timeoutMs` (100–10000; default 2000). Transport, bridge and runtime results are separate; a reachable socket does not prove a ready page. Health is bounded observation: it does not reload a page, retry a write, change a workflow verdict or release quarantine. Anonymous base capabilities remain minimal and do not expose workspace paths or page/capture content.
+
+### ipc_capture and ipc_query
+
+These authenticated tools provide independent, application-owned capture sessions. They observe JavaScript invoke boundaries; they are not Rust tracing, backend task completeness or proof of durable business storage. Legacy anonymous `ipc_get_captured` and clear operations do not expose or delete these protected results.
+
+```json
+{"action":"start","windowId":"main","options":{"resultPolicy":"preview","argumentPolicy":"metadata","followPages":false,"commands":["fixture_save"]}}
+```
+
+Start confirms page hook readiness and returns `captureSessionId`; `status` and `stop` require that ID. Stopping one session leaves other sessions and the business invocation running. Result/argument policies are `metadata` (default) or bounded redacted `preview`; previews additionally require host-configured command and field-path allowlists (`TAURI_CONNECTOR_CAPTURE_PREVIEW_COMMANDS`, `TAURI_CONNECTOR_CAPTURE_PREVIEW_PATHS`). A client cannot broaden these host policies. Serialized previews never replace the original return value or rejection reason. Unsupported hook boundaries and observation gaps are reported.
+
+`ipc_query` requires `captureSessionId` and accepts `cursor` (the opaque string returned as `nextCursor`, passed unchanged), `invocationId`, `phase` (`started`, `succeeded`, `failed`), `limit` (1–500; default 100), and `maxBytes` (1024–65536; default 32768). Follow the returned cursor and coverage/gap indicators. A missing terminal event remains pending or observation-interrupted; an empty page does not prove that no IPC occurred. Buffer loss does not erase workflow history or relax unknown-write isolation.
+
+```json
+{"captureSessionId":"session-returned-by-start","limit":100,"maxBytes":32768}
+```
+
+All shown JSON requires envelope authorization from the host adapter; no credential belongs in a workflow spec or printed evidence.
+
 ### webview_execute_js
 
 Execute arbitrary JavaScript in the webview. Use IIFE for return values.
@@ -174,7 +196,9 @@ Execute arbitrary JavaScript in the webview. Use IIFE for return values.
 
 ### webview_screenshot
 
-Native window capture via `xcap`. Falls back to `@zumer/snapdom` if unavailable. Returns MCP image content.
+Legacy requests retain the window `xcap`/DOM renderer path. Rich inspection requests add authenticated `source`, strict `target`, `redaction:"required"` and `allowWindowPreparation` fields. `source` is `webview_native`, `window_native`, `dom_rendering`, or explicit `auto`; an explicit backend failure never silently changes source. Inspect actual source, fallback attempts, capture context, geometry and redaction metadata before comparing images. A WebView image, desktop window image and DOM-rendered reconstruction are distinct evidence sources. Native platform behavior must be checked against the application's advertised capability and current native evidence.
+
+`target` is a structured strict locator and conflicts with legacy `selector`. Required masks must be applied before image output or artifact registration. If geometry cannot safely map sensitive regions, image delivery fails closed. The default does not focus, restore or scroll the window; authorized preparation must be reported. A screenshot/artifact failure does not change an already executed workflow result or authorize a replay.
 
 | Param | Type | Default | Description |
 |---|---|---|---|
@@ -199,7 +223,44 @@ No parameters.
 
 ### webview_select_element
 
-Visual element picker (placeholder -- not yet implemented).
+Start a real, application-owned element picker, or read/cancel its retained handle. The user points at an element and confirms with the primary pointer button or Enter; Escape and a visible cancel control end the interaction. Starting selection installs input guards and an overlay. It does not ask the user to inject JavaScript or reuse the legacy pointed-element cache.
+
+All actions require `authToken` in the call envelope. The CLI and standalone MCP supply `TAURI_CONNECTOR_WORKFLOW_TOKEN` privately. The same token represents one authorization domain across connections; a connection ID is not a separate user identity.
+
+| Param | Actions | Default / contract |
+| --- | --- | --- |
+| `action` | all | `start`, `get`, `cancel`; omitted action starts and waits up to 10000 ms |
+| `windowId` | start / omitted | `main`; get/cancel use the retained context and reject retargeting |
+| `requestKey` | start / omitted | Optional 1–128 UTF-8 bytes; reuse the same key and options after a lost response |
+| `timeoutMs` | start / omitted | 60000; range 5000–120000; total lifetime, not renewed by polling |
+| `timeout` | start / omitted | Millisecond compatibility alias; must equal `timeoutMs` if both appear |
+| `waitMs` | start / get / omitted | 0–10000; explicit start/get default 0, omitted action default 10000 |
+| `pickerId` | get / cancel | Required retained handle; forbidden for start |
+| `captureScreenshot` | start / omitted | true; false schedules no screenshot task |
+| `screenshotSource` | start / omitted | `auto`, `webview_native`, `window_native`, `dom_rendering` |
+| `includeImage` | start / get / omitted | false; only includes an already captured, redacted image |
+
+`captureScreenshot:false` conflicts with an explicit `screenshotSource` or start-time `includeImage:true`. Unknown fields are rejected. `get` never repeats hit testing, selection or capture. A repeated request key returns the original object without refreshing its deadline; changing its window or capture options returns `request_key_conflict`. Keep the returned `retainedUntil` boundary: this is bounded in-process deduplication, not workflow journal history.
+
+The primary states are `created`, `installing`, `awaiting_selection`, `selected`, `cancelled`, `expired`, `target_changed`, and `failed`. Read `screenshot.status`, `cleanup.status`, and `resultComplete` separately. A selected element remains selected when its screenshot fails, with a warning. `includeImage:true` adds MCP image content only when redaction and output budgets permit; text/structured metadata is retained. Cancelling an already selected object cannot replace its selection with a cancelled state.
+
+```json
+{"action":"start","windowId":"main","requestKey":"isolated-picker-1","timeoutMs":60000,"waitMs":0,"captureScreenshot":true,"screenshotSource":"auto"}
+```
+
+```json
+{"action":"get","pickerId":"picker-returned-by-start","waitMs":10000,"includeImage":true}
+```
+
+```json
+{"action":"cancel","pickerId":"picker-returned-by-start"}
+```
+
+These examples omit credentials; an authorized adapter must insert the host token. Direct WS sends the same arguments in `{"id":"request-1","type":"inspection","operation":"webview_select_element","args":{...}}`. Embedded and standalone MCP call the same application-side object. After external client disconnect, get/cancel still address the retained picker. Internal page loss, navigation, window destruction and token revocation require invalidation and cleanup.
+
+Returned locator candidates carry their semantic version and were checked for uniqueness at capture time. Revalidate the application/window/page context and candidate before a later action: a selection is an observation, not permission to skip strict matching or actionability. Iframe/canvas/shadow hosts do not imply access to their internal objects. `businessActionDispatched:false` records that the connector did not dispatch a business action; it is not proof that earlier application-global listeners, CSS hover or background work had zero effect.
+
+Picker cannot modify an existing workflow spec, run key, original verdict, resume policy or unknown-write quarantine. An ambiguous failed workflow remains failed; the caller may separately prepare new undispatched work using a verified candidate.
 
 ---
 

@@ -20,6 +20,26 @@ pub struct Server {
     state: PluginState,
 }
 
+fn parse_request(text: &str) -> Result<Request, Box<Response>> {
+    let raw: serde_json::Value = serde_json::from_str(text).map_err(|error| {
+        Box::new(Response::error(
+            "unknown".into(),
+            format!("Invalid request: {error}"),
+        ))
+    })?;
+    let id = raw["id"].as_str().unwrap_or("unknown").to_owned();
+    // The legacy enum must not silently discard an explicit source, mask or
+    // authorization request and then capture through an anonymous old path.
+    if raw["type"] == "screenshot" && connector_client::inspection::is_rich_screenshot(&raw) {
+        return Err(Box::new(Response::error(
+            id,
+            "invalid_arguments: rich screenshot fields require type=inspection, operation=webview_screenshot and args",
+        )));
+    }
+    serde_json::from_value(raw)
+        .map_err(|error| Box::new(Response::error(id, format!("Invalid request: {error}"))))
+}
+
 impl Server {
     pub fn new(
         bind_address: &str,
@@ -85,13 +105,9 @@ impl Server {
                         while let Some(Ok(msg)) = ws_rx.next().await {
                             let Message::Text(text) = msg else { continue };
 
-                            let request: Request = match serde_json::from_str(&text) {
+                            let request = match parse_request(&text) {
                                 Ok(r) => r,
-                                Err(e) => {
-                                    let resp = Response::error(
-                                        "unknown".to_string(),
-                                        format!("Invalid request: {e}"),
-                                    );
+                                Err(resp) => {
                                     let _ = send_response(&ws_tx, &resp).await;
                                     continue;
                                 }
@@ -139,6 +155,33 @@ async fn handle_command(
     app: Option<&tauri::AppHandle>,
     state: &PluginState,
 ) -> Response {
+    if let Command::SelectElement { args } = command {
+        let mut args = args;
+        if let Some(fields) = args.as_object_mut()
+            && let Some(window) = fields.remove("window_id")
+        {
+            if fields
+                .get("windowId")
+                .is_some_and(|existing| existing != &window)
+            {
+                return Response::error(id,serde_json::json!({"code":"invalid_arguments","message":"window aliases conflict"}).to_string());
+            }
+            fields.insert("windowId".into(), window);
+        }
+        return crate::mcp_tools::inspection_response(
+            &id,
+            "webview_select_element",
+            &args,
+            bridge,
+            app,
+            state,
+        )
+        .await;
+    }
+    if let Command::Inspection { operation, args } = command {
+        return crate::mcp_tools::inspection_response(&id, &operation, &args, bridge, app, state)
+            .await;
+    }
     if let Command::Workflow { operation, args } = command {
         return match crate::workflow::call(&operation, &args, bridge, app, state).await {
             Ok(report) => Response::success(id, report),
@@ -188,7 +231,9 @@ async fn handle_command_unleased(
     state: &PluginState,
 ) -> Response {
     match command {
-        Command::Workflow { .. } => unreachable!("workflow is routed before legacy dispatch"),
+        Command::Workflow { .. } | Command::Inspection { .. } => {
+            unreachable!("lifecycle commands are routed before legacy dispatch")
+        }
         Command::Ping => Response::success(id, serde_json::json!("pong")),
 
         // JS Execution
@@ -302,7 +347,7 @@ async fn handle_command_unleased(
             .await
         }
         Command::SelectElement { .. } => {
-            Response::error(id, "Select element (visual picker) not yet implemented")
+            unreachable!("picker alias is routed before legacy dispatch")
         }
         Command::GetPointedElement { .. } => handlers::get_pointed_element(&id, state).await,
 
@@ -681,6 +726,43 @@ fn find_available_port(addr: &str, start: u16, end: u16) -> Option<u16> {
 }
 
 #[cfg(test)]
+mod rich_screenshot_envelope_tests {
+    use super::*;
+
+    #[test]
+    fn rich_privacy_or_source_fields_cannot_be_discarded_by_legacy_ws_parsing() {
+        for field in [
+            "source",
+            "target",
+            "redaction",
+            "allowWindowPreparation",
+            "includeImage",
+            "authToken",
+            "timeoutMs",
+        ] {
+            for value in [serde_json::json!("webview_native"), serde_json::Value::Null] {
+                let mut raw = serde_json::json!({"id":"requested-image","type":"screenshot"});
+                raw[field] = value;
+                let failure = parse_request(&raw.to_string())
+                    .expect_err("rich request must not reach legacy screenshot dispatch");
+                assert_eq!(failure.id, "requested-image");
+                let crate::protocol::ResponsePayload::Error { error } = failure.payload else {
+                    panic!("expected rejected response")
+                };
+                assert!(error.contains("inspection"));
+            }
+        }
+        assert!(matches!(
+            parse_request(r##"{"id":"legacy","type":"screenshot","selector":"#button"}"##)
+                .unwrap()
+                .command,
+            Command::Screenshot { .. }
+        ));
+        assert!(matches!(parse_request(r#"{"id":"rich","type":"inspection","operation":"webview_screenshot","args":{"source":"webview_native"}}"#).unwrap().command, Command::Inspection { .. }));
+    }
+}
+
+#[cfg(test)]
 mod workflow_adapter_tests {
     use super::*;
     use serde_json::json;
@@ -770,6 +852,91 @@ mod workflow_adapter_tests {
             "resource_busy"
         );
         drop(lease);
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[tokio::test]
+    async fn picker_inspection_alias_and_embedded_mcp_share_validation_and_authorization() {
+        let directory =
+            std::env::temp_dir().join(format!("inspection-adapters-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let state = PluginState::new(directory.clone()).unwrap();
+        let token = "isolated-picker-adapter-token-32-bytes";
+        state.workflow.set_token(Some(token.into()));
+        let bridge = Bridge::start().unwrap();
+        for (args, expected) in [
+            (json!({"action":"get","pickerId":"unknown"}), "unauthorized"),
+            (
+                json!({"action":"get","pickerId":"unknown","authToken":token,"windowId":"other"}),
+                "invalid_arguments",
+            ),
+            (
+                json!({"action":"get","pickerId":"unknown","authToken":token}),
+                "picker_not_found",
+            ),
+        ] {
+            let direct = handle_command(
+                "ws".into(),
+                Command::Inspection {
+                    operation: "webview_select_element".into(),
+                    args: args.clone(),
+                },
+                &bridge,
+                None,
+                &state,
+            )
+            .await;
+            let crate::protocol::ResponsePayload::Error { error } = direct.payload else {
+                panic!("invalid picker request succeeded")
+            };
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&error).unwrap()["code"],
+                expected
+            );
+            let embedded =
+                crate::mcp_tools::call_tool("webview_select_element", &args, &bridge, None, &state)
+                    .await;
+            assert_eq!(embedded["isError"], true);
+            assert_eq!(embedded["structuredContent"]["code"], expected);
+            let mut alias = args;
+            alias["type"] = json!("select_element");
+            let alias = serde_json::from_value::<Command>(alias).unwrap();
+            let alias = handle_command("alias".into(), alias, &bridge, None, &state).await;
+            let crate::protocol::ResponsePayload::Error { error } = alias.payload else {
+                panic!("picker alias accepted invalid request")
+            };
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&error).unwrap()["code"],
+                expected
+            );
+        }
+        for operation in [
+            "app_identity",
+            "runtime_health",
+            "ipc_capture",
+            "ipc_query",
+            "artifact_read",
+            "webview_screenshot",
+        ] {
+            let denied = handle_command(
+                "auth".into(),
+                Command::Inspection {
+                    operation: operation.into(),
+                    args: json!({}),
+                },
+                &bridge,
+                None,
+                &state,
+            )
+            .await;
+            let crate::protocol::ResponsePayload::Error { error } = denied.payload else {
+                panic!("inspection auth bypass")
+            };
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&error).unwrap()["code"],
+                "unauthorized"
+            );
+        }
         drop(state);
         std::fs::remove_dir_all(directory).unwrap();
     }

@@ -1,0 +1,344 @@
+
+> tauri-connector-verification@0.0.0 test
+> npm run test:helpers && npm run test:browser && npm run test:contracts
+
+
+> tauri-connector-verification@0.0.0 test:helpers
+> node --test plugin/tests/*.test.cjs
+
+✔ UP-T081/082/084 one pair preserves this, all arguments and resolved object (7.964458ms)
+✔ UP-T083 synchronous throw stays synchronous and preserves exception (0.653667ms)
+✔ UP-T084 rejection reason identity survives telemetry (0.499166ms)
+✔ UP-T085 ignored rejection remains unhandled (32.079666ms)
+✔ UP-T086 serialization never calls getters/toJSON or fails business (0.700167ms)
+✔ UP-T087 binary and streams summarized without consuming data (0.790458ms)
+✔ UP-T088/089 sensitive keys removed before transport and UTF8 bounded (0.825917ms)
+✔ UP-T090 saturated telemetry queue leaves calls successful and counts drops (10.585416ms)
+✔ UP-T096 cleanup never overwrites a later wrapper (0.585333ms)
+✔ UP-T081 exact connector namespace excluded, similarly named business retained (0.449625ms)
+✔ UP-T097 controlled readiness self-test uses only connector namespace (0.427833ms)
+✔ UP-T096 stopped owned hook restores invoke and legacy can reactivate it (0.311833ms)
+✔ UP-T081 module and global forwarding paths produce one pair each (0.6835ms)
+✔ UP-T087 typed array overridden getter is never touched (0.435958ms)
+✔ UP-T093 stop never cancels the business promise or reports a terminal event (0.388959ms)
+✔ UP-T091/093 stop barrier delivers already queued evidence before acknowledgement (0.4255ms)
+✔ UP-T102/107 host revocation acknowledgement releases owned hook and queue (0.393708ms)
+✔ UP-T081/082/084 readonly native invoke observed through transport and exact callbacks (9.790167ms)
+✔ UP-T084 native rejected callback preserves exact reason (0.567166ms)
+✔ UP-T081/092 native fetch to postMessage fallback deduplicates callback pair (0.497292ms)
+✔ UP-T096 later callback wrappers survive capture cleanup (0.400834ms)
+✔ UP-T085 readonly native callback path preserves unhandled rejection (42.503041ms)
+✔ UP-T093/107 page watchdog expires only its lease without polling or cancelling invoke (0.618959ms)
+✔ UP-T091/107 shared watchdog leaves later lease active and configure cannot refresh deadline (0.380917ms)
+✔ UP-T081/093/107 immutable transport watchdog restores callbacks and original business promise (0.623042ms)
+✔ UP-T091/107 late rejected batch cannot stop a newer session (new source) (0.416ms)
+✔ UP-T091/107 late rejected batch cannot stop a newer session (same source) (0.329292ms)
+✔ UP-T096/097 readiness observes current writable invoke path (peer bypasses connector hook) (0.365667ms)
+✔ UP-T096/097 readiness observes current writable invoke path (peer delegates connector hook) (0.331834ms)
+✔ UP-T096/097 readiness observes immutable invoke current fetch path (peer bypasses connector hook) (0.434792ms)
+✔ UP-T096/097 readiness observes immutable invoke current fetch path (peer delegates connector hook) (0.543625ms)
+✔ UP-T091/107 queued-before-reconfigure batches retain their old generation (new source) (0.415291ms)
+✔ UP-T091/107 queued-before-reconfigure batches retain their old generation (same source) (0.382333ms)
+✔ T04 fill addresses target even when a different field has focus (4.91925ms)
+✔ T05 fill replaces rather than appends and type appends (2.276ms)
+✔ T06 input events update controlled application state before submission (2.251708ms)
+✔ T07 quotes, newlines, backslash, unicode and interpolation remain data (1.623292ms)
+✔ readonly input is rejected before any value change (0.408375ms)
+✔ cancelled beforeinput does not change the input value (0.439958ms)
+✔ B09 role and text constraints intersect (8.163334ms)
+✔ B09 all provided attributes intersect rather than union (0.478792ms)
+✔ B09 text in a child does not discard the parent matching an explicit role (1.278333ms)
+✔ T14 monitor refuses wrong window before altering flags (1.640208ms)
+✔ T14 monitor acknowledges actual window, page epoch and applied state (0.375083ms)
+✔ UP-T037 UP-PK021 selected metadata uses strict actionability when the center is covered (490.032334ms)
+▶ shipped picker input, lifecycle and privacy
+  ✔ UP-PK001 active UI and UP-PK014 click isolation (546.6425ms)
+  ✔ UP-PK018 double-click tail is swallowed (299.169583ms)
+  ✔ UP-PK019 Escape and keyup consumed; no focus restoration (25.017084ms)
+  ✔ UP-PK017 drag gesture does not select (94.357208ms)
+  ✔ UP-PK023 virtual node identity change rejects confirmation (43.950125ms)
+  ✔ UP-PK016 modal top layer and UP-PK021 actual span target (493.574ms)
+  ✔ UP-PK025 sensitive element has no value or executable candidate (29.941792ms)
+  ✔ UP-PK028 get freezes observation and UP-PK032 cancel preserves selected (28.419833ms)
+  ✔ UP-PK023 Enter revalidates a covered stale hover without pointer movement (45.820416ms)
+  ✔ UP-PK020 visible cancel button cancels without business click or focus restoration (501.80875ms)
+  ✔ UP-PK020 toolbar text does not select the business element behind it (73.851334ms)
+  ✔ UP-PK019 unsupported modifiers, repeat, IME and empty hover never confirm (88.789583ms)
+  ✔ UP-PK021 disabled button, span, SVG and SVG child preserve exact hit targets (249.241792ms)
+  ✔ UP-PK017 synthetic pointer mismatch, multi-touch, cancel and lost capture do not select (292.27325ms)
+  ✔ UP-PK018 actual browser touch selects once without compatibility click-through (496.084666ms)
+  ✔ UP-PK025 nested and chained sensitive ARIA refs never appear in hover or candidates (93.062125ms)
+  ✔ UP-PK028 screenshots-off page polling never re-observes selection or invokes capture (505.470916ms)
+  ✔ UP-PK023 long same-prefix text mutation cannot reuse a truncated identity (43.767625ms)
+  ✔ UP-PK029 100 start/cancel cycles return real resources to baseline (46479.996917ms)
+✔ shipped picker input, lifecycle and privacy (50831.285958ms)
+▶ picker selected-reference retention
+  ✔ UP-PK029 missing host release expires references at the original picker deadline (5113.138334ms)
+  ✔ UP-PK029 successful release removes the retention timer without changing the result (498.138042ms)
+  ✔ UP-PK031 dispose and pagehide clear selected-reference timers and lifecycle hooks (992.520708ms)
+✔ picker selected-reference retention (6759.921166ms)
+✔ UP-T021 bootstrap rejects child frames (5.021791ms)
+✔ UP-T012 UP-T013 same document bootstrap once, new document new epoch (2.362ms)
+✔ UP-PK008 early idle guard has no effects; active guard suppresses before handlers (0.519334ms)
+✔ UP-PK011 UP-PK022 cleanup drains delayed click and then returns to idle (33.239667ms)
+✔ UP-T022 pagehide invalidates modules and bfcache restores a fresh epoch without sessions (0.617541ms)
+✔ UP-PK018 start refuses a held gesture, drain waits for release and a quiet interval (65.398458ms)
+✔ UP-PK029 hover without a held gesture cannot starve cleanup (80.660709ms)
+✔ UP-T015 ready-to-dispatch context race is rejected before handler (1.0735ms)
+✔ UP-T016 helper name in business exception does not replay (0.531625ms)
+✔ UP-T023 dangerous strings and prototype keys remain data (0.670917ms)
+✔ UP-T019 UP-T020 disposal prevents further dispatch and clears module resources (0.399166ms)
+✔ UP-T024 expired deadline and unknown module never enter handler (0.288ms)
+✔ UP-PK031 old operation context is not rebound to a new runtime (0.268792ms)
+✔ UP-T001 legacy frontend runtime event array cannot collide with inspection dispatcher (0.24125ms)
+✔ UP-PK018 pressed pointer entering drain remains held until actual release (58.715625ms)
+✔ UP-PK018 losing pointer capture while pressed is not a release (60.03425ms)
+✔ UP-PK008 idle pressed-buttons observations reject activation until released (1.319917ms)
+✔ UP-PK018 mouse buttons zero cannot release touch contacts or held keys (84.329625ms)
+✔ UP-PK029 only explicit zero-buttons hover skips quiet timer extension (72.253958ms)
+✔ UP-PK022 pressed buttons retain the hard cleanup deadline and unconfirmed result (0.725833ms)
+✔ UP-PK018 mouse zero does not clear legacy touch-event contacts (51.830125ms)
+✔ wait condition timeout records final observation and releases timers (7.159458ms)
+✔ navigation stops polling and removes listeners (0.480667ms)
+✔ a hanging async predicate cannot outlive the wait deadline (6.370459ms)
+(node:4590) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file://<workspace>/skill/scripts/workflow.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to <workspace>/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ workflow helper keeps host credentials outside the spec (1.201417ms)
+✔ workflow helper rejects unknown operations and missing credentials (0.304834ms)
+✔ workflow helper preserves failed and incomplete exit statuses (0.404ms)
+ℹ tests 96
+ℹ suites 0
+ℹ pass 96
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 57773.044208
+
+> tauri-connector-verification@0.0.0 test:browser
+> node plugin/tests/workflow/page.test.cjs && node plugin/tests/semantic/core.test.cjs && node plugin/src/screenshot/geometry.test.cjs
+
+{
+  "layer": "browser",
+  "browser": "153.0.8010.12",
+  "tests": 27,
+  "failures": 0,
+  "reactCoverage": "verified",
+  "results": [
+    {
+      "name": "scope, role, name and entity intersect, with normalized exact names",
+      "passed": true
+    },
+    {
+      "name": "ambiguous targets and ambiguous scopes never choose first",
+      "passed": true
+    },
+    {
+      "name": "missing entity cannot degrade to the locator without entity",
+      "passed": true
+    },
+    {
+      "name": "entity is rechecked after virtual-list node reuse",
+      "passed": true
+    },
+    {
+      "name": "associated and nested labels locate inputs exactly",
+      "passed": true
+    },
+    {
+      "name": "fill replaces and type appends through native setter, with controlled event state",
+      "passed": true
+    },
+    {
+      "name": "React controlled textarea submits application state after fill and type",
+      "passed": true
+    },
+    {
+      "name": "number in a string slot is rejected without mutation",
+      "passed": true
+    },
+    {
+      "name": "hidden, disabled, readonly, covered and inert controls fail before dispatch",
+      "passed": true
+    },
+    {
+      "name": "press targets and reports the actual focused object",
+      "passed": true
+    },
+    {
+      "name": "duplicate in-flight step identity dispatches a click only once",
+      "passed": true
+    },
+    {
+      "name": "unsupported key chords fail before focus or keyboard effects",
+      "passed": true
+    },
+    {
+      "name": "application prevention and focus-time replacement never become successful fills",
+      "passed": true
+    },
+    {
+      "name": "input cannot succeed when focus is redirected or the rendered target rejects its value",
+      "passed": true
+    },
+    {
+      "name": "fresh current-state observation does not latch a vanished element",
+      "passed": true
+    },
+    {
+      "name": "conditions use current values, nullable attributes and any branch evidence",
+      "passed": true
+    },
+    {
+      "name": "result conditions preserve JSON pointer escapes and legitimate null",
+      "passed": true
+    },
+    {
+      "name": "negative conditions are state only and unsupported transition semantics fail closed",
+      "passed": true
+    },
+    {
+      "name": "stale page identity and unsupported bare refs cannot dispatch",
+      "passed": true
+    },
+    {
+      "name": "observer registration failure blocks subsequent dispatch",
+      "passed": true
+    },
+    {
+      "name": "UP-T020 semantic replacement cannot silently change active workflow meaning",
+      "passed": true
+    },
+    {
+      "name": "cleanup is idempotent and prevents action after cancellation",
+      "passed": true
+    },
+    {
+      "name": "expired observation cannot dispatch and releases resources",
+      "passed": true
+    },
+    {
+      "name": "evidence excludes user values and arbitrary data attributes",
+      "passed": true
+    },
+    {
+      "name": "sensitive field extraction fails closed before values enter result bindings",
+      "passed": true
+    },
+    {
+      "name": "scoped evidence stays within the requested dialog",
+      "passed": true
+    },
+    {
+      "name": "evidence does not echo unrecognized custom tag or role strings",
+      "passed": true
+    }
+  ]
+}
+{
+  "tests": 19,
+  "failures": 0,
+  "evidenceKind": "browser_chromium",
+  "results": [
+    {
+      "name": "UP-T037 UP-T038 ordered IDREF, hidden references, missing IDs and label precedence",
+      "passed": true
+    },
+    {
+      "name": "UP-T039 form labels, input defaults, icon alt and valid role fallback",
+      "passed": true
+    },
+    {
+      "name": "UP-T040 description remains separate from locator name",
+      "passed": true
+    },
+    {
+      "name": "U3.3 required ARIA states preserve false and mixed",
+      "passed": true
+    },
+    {
+      "name": "UP-T041 presentation wrappers preserve accessible descendants",
+      "passed": true
+    },
+    {
+      "name": "UP-T042 aria-owns prevents cycles and duplicate nodes",
+      "passed": true
+    },
+    {
+      "name": "UP-T043 visual exposure and enabled/editable remain distinct",
+      "passed": true
+    },
+    {
+      "name": "UP-T044 UP-T045 legacy action rejects ambiguity and intersections remain strict",
+      "passed": true
+    },
+    {
+      "name": "UP-T043 legacy wait uses shared inherited visibility and enabled/editable",
+      "passed": true
+    },
+    {
+      "name": "UP-T049 unsupported tree boundaries fail explicitly",
+      "passed": true
+    },
+    {
+      "name": "UP-T050 traversal budget exits without returning incomplete candidates",
+      "passed": true
+    },
+    {
+      "name": "UP-PK024 verified candidates handle CSS specials and current entity identity",
+      "passed": true
+    },
+    {
+      "name": "UP-T073 UP-PK025 sensitive metadata and locator values never escape",
+      "passed": true
+    },
+    {
+      "name": "UP-PK025 UTF-8 output bounds, sensitive references and huge text remain safe",
+      "passed": true
+    },
+    {
+      "name": "UP-PK025 nested and chained sensitive naming references are redacted cycle-safely",
+      "passed": true
+    },
+    {
+      "name": "UP-T042 snapshot ownership cycles terminate and count each node once",
+      "passed": true
+    },
+    {
+      "name": "UP-T071 picker-owned UI excluded from semantic and snapshot output",
+      "passed": true
+    },
+    {
+      "name": "UP-T046 modern refs reject reused entity, replaced node, page and semantic changes",
+      "passed": true
+    },
+    {
+      "name": "UP-T048 AI budget split, refs, React, portal and overlays preserved",
+      "passed": true
+    }
+  ],
+  "browser": "153.0.8010.12"
+}
+{"status":"passed","checks":10,"layer":"chromium_contract","native":false}
+
+> tauri-connector-verification@0.0.0 test:contracts
+> node --test scripts/upgrade-contracts.test.mjs scripts/feature-off-harness.test.mjs
+
+✔ UP-T005 signalled surrogate must not produce a native-running success claim (2039.522458ms)
+✔ UP-T005 early clean child exit is also rejected (2039.830583ms)
+✔ UP-T005 live surrogate validates harness liveness mechanics only (2048.2155ms)
+✔ UP-T002 a behavioral mutation of the shipped input helper fails real regression assertions (153.586042ms)
+✔ UP-T003 test dependencies are exact, locked and developer-path independent (1.461625ms)
+✔ UP-T004 UP-T055 plugin checks declare all desktop platforms and feature combinations (0.387542ms)
+✔ UP-T008 aggregate rejects failed, skipped, cancelled and absent required jobs (0.268583ms)
+✔ UP-T081 native capture declares only its bounded diagnostic and ingress permissions (0.512833ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6165.674042

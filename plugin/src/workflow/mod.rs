@@ -1,6 +1,6 @@
 //! Durable application-side workflows. Transport sessions never own logical runs.
 
-mod budget;
+pub(crate) mod budget;
 mod dom;
 mod journal;
 mod output;

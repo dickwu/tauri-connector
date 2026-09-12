@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "sourceCommand": "node examples/workflow-fixture/scripts/upgrade-native-test.mjs",
+  "sourcePath": "/tmp/tauri-upgrade-native-selection/upgrade-native-results.json",
+  "sourceSha256": "9118e326295f06f681040bb3cdd85500ce43719b79b09a527c5e22e235025357",
+  "platform": "macos",
+  "layer": "native_webview_with_Quartz_input",
+  "overallPassed": false,
+  "passedScenarios": [
+    {
+      "ids": [],
+      "name": "OS input driver reaches independent native fixture counter",
+      "passed": true,
+      "durationMs": 281.0557920000001,
+      "nativeWriteDelta": 1,
+      "reset": true
+    },
+    {
+      "ids": [
+        "UP-T036",
+        "UP-T102",
+        "UP-PK012"
+      ],
+      "name": "anonymous rich request fails before picker creation",
+      "passed": true,
+      "durationMs": 0.5083749999998872
+    },
+    {
+      "ids": [
+        "UP-T033"
+      ],
+      "name": "native identity and layered health expose cold state",
+      "passed": true,
+      "durationMs": 1.9832920000001195,
+      "appInstanceId": "298f6c0a-d2df-4496-bacc-a70014988481"
+    }
+  ],
+  "failedScenario": {
+    "name": "native save selection deduplicates, captures and never invokes save",
+    "assertion": "screenshot.status must be captured",
+    "actual": "failed",
+    "errorCode": "geometry_unknown"
+  },
+  "observedPickerReport": {
+    "businessActionDispatched": false,
+    "cleanup": {
+      "leaseReleased": true,
+      "status": "confirmed"
+    },
+    "context": {
+      "appId": "dev.connector.workflow-fixture.50b17bcd-2a7e-4bd9-a804-e5927031a71f",
+      "appInstanceId": "298f6c0a-d2df-4496-bacc-a70014988481",
+      "bundleHash": "fnv1a64:697f4949f8edb9b6",
+      "origin": "tauri://localhost",
+      "pageEpoch": "add3da4e-edae-4f56-acc5-72a7531d88b4",
+      "runtimeId": "ef39e522-151f-4aee-8322-fe93ad1acd2c",
+      "runtimeVersion": "1",
+      "semanticVersion": "1",
+      "windowId": "main",
+      "windowInstanceId": "027dcc7e-9fe9-431c-9c4e-b7f426736e43"
+    },
+    "deadlineAtMs": 1789235727041,
+    "limitations": [
+      "No isolation guarantee against earlier page-global listeners",
+      "Light DOM element boundaries only",
+      "Selection does not authorize workflow spec mutation",
+      "Screenshot and selection are separate observations"
+    ],
+    "pickerId": "298f6c0a-d2df-4496-bacc-a70014988481:picker:025d8164-ab5b-4025-9076-e69cbfcce5f9",
+    "requestKey": "ea456b7e-0113-484a-9204-bab922627a36",
+    "resultComplete": true,
+    "retainedUntil": 1789235967228,
+    "revision": 7,
+    "screenshot": {
+      "error": {
+        "code": "geometry_unknown"
+      },
+      "status": "failed"
+    },
+    "selection": {
+      "actionable": true,
+      "capturedAtMs": 1789235667182,
+      "context": {
+        "appId": "dev.connector.workflow-fixture.50b17bcd-2a7e-4bd9-a804-e5927031a71f",
+        "appInstanceId": "298f6c0a-d2df-4496-bacc-a70014988481",
+        "bundleHash": "fnv1a64:697f4949f8edb9b6",
+        "origin": "tauri://localhost",
+        "pageEpoch": "add3da4e-edae-4f56-acc5-72a7531d88b4",
+        "runtimeId": "ef39e522-151f-4aee-8322-fe93ad1acd2c",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "027dcc7e-9fe9-431c-9c4e-b7f426736e43"
+      },
+      "coordinateSpace": "layout_viewport_css",
+      "description": "",
+      "locatorCandidates": [
+        {
+          "locator": {
+            "by": "testId",
+            "value": "pick-save"
+          },
+          "matchCount": 1,
+          "reason": "unique_same_element",
+          "semanticVersion": "1",
+          "stability": "current_document_only",
+          "target": {
+            "by": "testId",
+            "value": "pick-save"
+          },
+          "validatedAtMs": 1789235667182,
+          "validatedInPageEpoch": "add3da4e-edae-4f56-acc5-72a7531d88b4",
+          "validity": "observed_context_only",
+          "verified": true
+        },
+        {
+          "locator": {
+            "by": "css",
+            "value": "#pick-save"
+          },
+          "matchCount": 1,
+          "reason": "unique_same_element",
+          "semanticVersion": "1",
+          "stability": "current_document_only",
+          "target": {
+            "by": "css",
+            "value": "#pick-save"
+          },
+          "validatedAtMs": 1789235667182,
+          "validatedInPageEpoch": "add3da4e-edae-4f56-acc5-72a7531d88b4",
+          "validity": "observed_context_only",
+          "verified": true
+        },
+        {
+          "locator": {
+            "by": "css",
+            "value": "html > body > section > button:nth-of-type(1)"
+          },
+          "matchCount": 1,
+          "reason": "unique_same_element",
+          "semanticVersion": "1",
+          "stability": "current_document_only",
+          "target": {
+            "by": "css",
+            "value": "html > body > section > button:nth-of-type(1)"
+          },
+          "validatedAtMs": 1789235667182,
+          "validatedInPageEpoch": "add3da4e-edae-4f56-acc5-72a7531d88b4",
+          "validity": "observed_context_only",
+          "verified": true
+        }
+      ],
+      "name": "Save",
+      "rect": {
+        "height": 38,
+        "width": 62.96875,
+        "x": 30,
+        "y": 66
+      },
+      "redaction": {
+        "omittedFields": [
+          "value",
+          "outerHTML",
+          "attributes"
+        ],
+        "status": "applied"
+      },
+      "role": "button",
+      "selectionId": "66f71105-22d0-47a2-809e-3232229c02fd",
+      "semanticVersion": "1",
+      "states": {},
+      "tag": "button",
+      "visible": true,
+      "warnings": []
+    },
+    "sideEffects": [],
+    "status": "selected",
+    "warnings": [
+      "geometry_unknown"
+    ]
+  },
+  "coverageBoundary": [
+    "Actual OS input selected the fixture button, and cleanup was confirmed.",
+    "The screenshot assertion failed before subsequent independent zero-save/click counters and repeated-get assertions executed.",
+    "Broad IDs in the original failing test are not counted as passed.",
+    "The reported 32-pixel macOS safe-area geometry discrepancy remains under repair at this mapping checkpoint.",
+    "No successful image, Windows/Linux native run, or remote CI run is established by this evidence."
+  ]
+}

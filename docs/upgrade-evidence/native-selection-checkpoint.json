@@ -1,0 +1,335 @@
+{
+  "platform": "darwin",
+  "layer": "native_webview",
+  "input": "Quartz",
+  "display": "desktop",
+  "tests": [
+    {
+      "ids": [],
+      "name": "OS input driver reaches independent native fixture counter",
+      "passed": true,
+      "durationMs": 277.0467920000001,
+      "nativeWriteDelta": 1,
+      "reset": true
+    },
+    {
+      "ids": [
+        "UP-T036",
+        "UP-T102",
+        "UP-PK012"
+      ],
+      "name": "anonymous rich request fails before picker creation",
+      "passed": true,
+      "durationMs": 0.39637500000026193
+    },
+    {
+      "ids": [
+        "UP-T033"
+      ],
+      "name": "native identity and layered health expose cold state",
+      "passed": true,
+      "durationMs": 1.7576669999998558,
+      "appInstanceId": "d2d005e2-8d2e-4bc0-983e-89792601de43"
+    },
+    {
+      "ids": [
+        "UP-PK001",
+        "UP-PK004",
+        "UP-PK007",
+        "UP-PK014",
+        "UP-PK026",
+        "UP-PK028",
+        "UP-PK029",
+        "UP-T067",
+        "UP-T068",
+        "UP-T074"
+      ],
+      "name": "native save selection deduplicates, captures and never invokes save",
+      "passed": true,
+      "durationMs": 924.5590419999999,
+      "nativeSaveDelta": 0,
+      "screenshot": "webview_native",
+      "dimensions": [
+        126,
+        76
+      ]
+    },
+    {
+      "ids": [
+        "UP-PK014",
+        "UP-PK018"
+      ],
+      "name": "native checkbox gesture has no business default effect",
+      "passed": true,
+      "durationMs": 850.6314579999998
+    },
+    {
+      "ids": [
+        "UP-PK014",
+        "UP-PK018"
+      ],
+      "name": "native link gesture has no business default effect",
+      "passed": true,
+      "durationMs": 802.3157499999998
+    },
+    {
+      "ids": [
+        "UP-PK014",
+        "UP-PK018"
+      ],
+      "name": "native form gesture has no business default effect",
+      "passed": true,
+      "durationMs": 812.5530829999998
+    },
+    {
+      "ids": [
+        "UP-PK019",
+        "UP-PK020",
+        "UP-T069"
+      ],
+      "name": "native Escape cancels and releases guard",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'awaiting_selection'\n- 'cancelled'\n"
+    }
+  ],
+  "inputPoint": {
+    "x": 3469.484375,
+    "y": 699
+  },
+  "health": {
+    "checks": {
+      "bridge": {
+        "connected": true,
+        "durationMs": 0,
+        "status": "responsive"
+      },
+      "runtime": {
+        "durationMs": 0,
+        "status": "unavailable"
+      },
+      "transport": {
+        "durationMs": 0,
+        "status": "responsive"
+      }
+    },
+    "conclusion": "runtime_missing",
+    "context": {
+      "appInstanceId": "d2d005e2-8d2e-4bc0-983e-89792601de43",
+      "windowId": "main"
+    },
+    "diagnostics": {
+      "activeObservers": null,
+      "bundleBytesSent": 0,
+      "commandBytesSent": 546,
+      "installAttempts": 0,
+      "installSuccesses": 0,
+      "runtimeReuses": 0,
+      "staleContextRejects": 0
+    },
+    "executionReplayed": false,
+    "limitations": [
+      "Probe success or timeout does not establish the original operation outcome or a deadlock"
+    ]
+  },
+  "selection": {
+    "businessActionDispatched": false,
+    "cleanup": {
+      "leaseReleased": true,
+      "status": "confirmed"
+    },
+    "context": {
+      "appId": "dev.connector.workflow-fixture.1eac51ba-606e-4c44-8414-c5b2b468a79c",
+      "appInstanceId": "d2d005e2-8d2e-4bc0-983e-89792601de43",
+      "bundleHash": "fnv1a64:966f4f42a10889bb",
+      "origin": "tauri://localhost",
+      "pageEpoch": "10a2cc83-5c41-461f-b62c-c25f9b712a71",
+      "runtimeId": "1d3a2be7-1b4d-473a-987f-2b5c8c7dc53b",
+      "runtimeVersion": "1",
+      "semanticVersion": "1",
+      "windowId": "main",
+      "windowInstanceId": "1b5d266c-6f94-4803-bc74-56a7bd39b0ed"
+    },
+    "deadlineAtMs": 1789236536731,
+    "error": null,
+    "limitations": [
+      "No isolation guarantee against earlier page-global listeners",
+      "Light DOM element boundaries only",
+      "Selection does not authorize workflow spec mutation",
+      "Screenshot and selection are separate observations"
+    ],
+    "pickerId": "d2d005e2-8d2e-4bc0-983e-89792601de43:picker:852c8cbd-3c7b-4f8e-b6cd-2c6e1e183657",
+    "requestKey": "2732fb5f-496f-4f5a-b7bc-244c94194894",
+    "resultComplete": true,
+    "retainedUntil": 1789236776903,
+    "revision": 7,
+    "screenshot": {
+      "artifactId": "d2d005e2-8d2e-4bc0-983e-89792601de43:picker:852c8cbd-3c7b-4f8e-b6cd-2c6e1e183657:image",
+      "captureSource": "webview_native",
+      "capturedAt": 1789236477085,
+      "consistency": {
+        "atomic": false,
+        "status": "stable_context"
+      },
+      "context": {
+        "appId": "dev.connector.workflow-fixture.1eac51ba-606e-4c44-8414-c5b2b468a79c",
+        "appInstanceId": "d2d005e2-8d2e-4bc0-983e-89792601de43",
+        "bundleHash": "fnv1a64:966f4f42a10889bb",
+        "origin": "tauri://localhost",
+        "pageEpoch": "10a2cc83-5c41-461f-b62c-c25f9b712a71",
+        "runtimeId": "1d3a2be7-1b4d-473a-987f-2b5c8c7dc53b",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "1b5d266c-6f94-4803-bc74-56a7bd39b0ed"
+      },
+      "fallbacks": [],
+      "geometry": {
+        "clipped": false,
+        "coordinateSpace": "layout_viewport_css",
+        "cropPx": [
+          60,
+          132,
+          126,
+          76
+        ],
+        "cssToImage": [
+          2,
+          0,
+          0,
+          2,
+          -60,
+          -132
+        ],
+        "status": "known"
+      },
+      "heightPx": 76,
+      "mimeType": "image/png",
+      "redaction": {
+        "coverage": "declared_regions_and_field_heuristics",
+        "maskFingerprint": "fnv1a64:0553fcbcaa2fa5a4",
+        "maskedRegions": 1,
+        "policy": "required",
+        "policyVersion": "1",
+        "status": "applied",
+        "uncoveredReasons": []
+      },
+      "retainedUntil": 1789236776903,
+      "sideEffects": [],
+      "status": "captured",
+      "viewport": {
+        "devicePixelRatio": 2,
+        "heightCss": 788,
+        "offsetLeft": 0,
+        "offsetTop": 0,
+        "visualScale": 1,
+        "widthCss": 1120
+      },
+      "widthPx": 126
+    },
+    "selection": {
+      "actionable": true,
+      "capturedAtMs": 1789236476873,
+      "context": {
+        "appId": "dev.connector.workflow-fixture.1eac51ba-606e-4c44-8414-c5b2b468a79c",
+        "appInstanceId": "d2d005e2-8d2e-4bc0-983e-89792601de43",
+        "bundleHash": "fnv1a64:966f4f42a10889bb",
+        "origin": "tauri://localhost",
+        "pageEpoch": "10a2cc83-5c41-461f-b62c-c25f9b712a71",
+        "runtimeId": "1d3a2be7-1b4d-473a-987f-2b5c8c7dc53b",
+        "runtimeVersion": "1",
+        "semanticVersion": "1",
+        "windowId": "main",
+        "windowInstanceId": "1b5d266c-6f94-4803-bc74-56a7bd39b0ed"
+      },
+      "coordinateSpace": "layout_viewport_css",
+      "description": "",
+      "locatorCandidates": [
+        {
+          "locator": {
+            "by": "testId",
+            "value": "pick-save"
+          },
+          "matchCount": 1,
+          "reason": "unique_same_element",
+          "semanticVersion": "1",
+          "stability": "current_document_only",
+          "target": {
+            "by": "testId",
+            "value": "pick-save"
+          },
+          "validatedAtMs": 1789236476873,
+          "validatedInPageEpoch": "10a2cc83-5c41-461f-b62c-c25f9b712a71",
+          "validity": "observed_context_only",
+          "verified": true
+        },
+        {
+          "locator": {
+            "by": "css",
+            "value": "#pick-save"
+          },
+          "matchCount": 1,
+          "reason": "unique_same_element",
+          "semanticVersion": "1",
+          "stability": "current_document_only",
+          "target": {
+            "by": "css",
+            "value": "#pick-save"
+          },
+          "validatedAtMs": 1789236476873,
+          "validatedInPageEpoch": "10a2cc83-5c41-461f-b62c-c25f9b712a71",
+          "validity": "observed_context_only",
+          "verified": true
+        },
+        {
+          "locator": {
+            "by": "css",
+            "value": "html > body > section > button:nth-of-type(1)"
+          },
+          "matchCount": 1,
+          "reason": "unique_same_element",
+          "semanticVersion": "1",
+          "stability": "current_document_only",
+          "target": {
+            "by": "css",
+            "value": "html > body > section > button:nth-of-type(1)"
+          },
+          "validatedAtMs": 1789236476873,
+          "validatedInPageEpoch": "10a2cc83-5c41-461f-b62c-c25f9b712a71",
+          "validity": "observed_context_only",
+          "verified": true
+        }
+      ],
+      "name": "Save",
+      "rect": {
+        "height": 38,
+        "width": 62.96875,
+        "x": 30,
+        "y": 66
+      },
+      "redaction": {
+        "omittedFields": [
+          "value",
+          "outerHTML",
+          "attributes"
+        ],
+        "status": "applied"
+      },
+      "role": "button",
+      "selectionId": "4cf241d3-8751-4996-8a6d-10e11ba23ac5",
+      "semanticVersion": "1",
+      "states": {},
+      "tag": "button",
+      "visible": true,
+      "warnings": []
+    },
+    "sideEffects": [],
+    "status": "selected",
+    "warnings": []
+  },
+  "passed": false,
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'awaiting_selection'\n- 'cancelled'\n\n    at file://<repository>/examples/workflow-fixture/scripts/upgrade-native-test.mjs:82:196\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async test (file://<repository>/examples/workflow-fixture/scripts/upgrade-native-test.mjs:31:86)\n    at async file://<repository>/examples/workflow-fixture/scripts/upgrade-native-test.mjs:81:3",
+  "sourcePath": "/tmp/tauri-upgrade-native-final/upgrade-native-results.json",
+  "sourceSha256": "180f34db0fff5ea826dd7b6e3e735eb60084c0dd79835ec60af0f7d6f60f7566",
+  "sourceCommand": "node examples/workflow-fixture/scripts/upgrade-native-test.mjs",
+  "checkpointNote": "Newer native run passes Save selection/captured PNG/independent zero save counters and checkbox/link/form gestures; later Escape assertion failed. Original geometry-failure history remains in native-selection-incomplete.json."
+}

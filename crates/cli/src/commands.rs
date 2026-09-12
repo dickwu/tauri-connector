@@ -1138,7 +1138,7 @@ fn uuid8() -> String {
     format!("{:08x}", (nanos as u64) ^ u64::from(std::process::id()))[0..8].to_string()
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
         0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
@@ -1506,9 +1506,15 @@ pub async fn artifact_show(
     artifact: &str,
     include_base64: bool,
 ) -> Result<(), String> {
-    let mut result = client
-        .send(json!({ "type": "artifact_read", "artifact": artifact }))
-        .await?;
+    let args = json!({"artifactId":artifact,"includeImage":include_base64});
+    let mut result =
+        if connector_client::inspection::protected_artifact_request("artifact_read", &args) {
+            client.inspect("artifact_read", &args).await?
+        } else {
+            client
+                .send(json!({"type":"artifact_read","artifact":artifact}))
+                .await?
+        };
     if !include_base64 {
         if let Some(obj) = result.as_object_mut() {
             obj.remove("base64");
@@ -1544,6 +1550,13 @@ pub async fn artifact_compare(
     after: &str,
     threshold: f64,
 ) -> Result<(), String> {
+    let args = json!({"baselineId":before,"currentId":after});
+    if connector_client::inspection::protected_artifact_request("artifact_compare", &args) {
+        if threshold != 0.0 {
+            return Err("invalid_arguments: protected comparison reports contract compatibility and byte equality; nonzero threshold is unsupported".into());
+        }
+        return print_json_result(client.inspect("artifact_compare", &args).await);
+    }
     print_json_result(
         client
             .send(json!({
@@ -1661,6 +1674,7 @@ pub async fn workflow(
     port: u16,
     command: crate::WorkflowCommand,
     selected_window: &str,
+    app_instance_id: Option<&str>,
 ) -> Result<i32, String> {
     let (operation, args) = match command {
         crate::WorkflowCommand::Run { spec, wait_ms } => {
@@ -1707,6 +1721,20 @@ pub async fn workflow(
     };
     let report =
         connector_mcp_server::tools::dispatch_tool(client, host, port, operation, &args).await?;
+    if let (Some(run_id), Some(instance)) =
+        (report.get("runId").and_then(Value::as_str), app_instance_id)
+    {
+        if let Err(error) = crate::identity_binding::save(
+            run_id,
+            &crate::identity_binding::Binding {
+                app_instance_id: instance.into(),
+                host: host.into(),
+                port,
+            },
+        ) {
+            eprintln!("Warning: could not retain instance binding: {error}; recover with --app-instance-id {instance}");
+        }
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
@@ -1848,7 +1876,7 @@ fn print_json_result(result: Result<Value, String>) -> Result<(), String> {
     Ok(())
 }
 
-fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut lookup = [255u8; 256];
     for (i, &c) in TABLE.iter().enumerate() {

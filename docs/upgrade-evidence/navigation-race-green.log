@@ -1,0 +1,19 @@
+   Compiling tauri-plugin-connector v0.16.0 (<workspace>/plugin)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.82s
+     Running unittests src/lib.rs (target/debug/deps/tauri_plugin_connector-0cc8be093a30583f)
+
+running 12 tests
+test picker::tests::up_pk013_revocation_discards_capture_and_cannot_accept_late_selection ... ok
+test picker::tests::up_pk032_first_terminal_wins_revision_monotonic ... ok
+test picker::tests::up_pk031_late_bridge_failure_cannot_downgrade_confirmed_page_destruction ... ok
+test picker::tests::up_pk007_dedup_keeps_handle_deadline_and_lease ... ok
+test picker::tests::up_pk031_navigation_cancels_image_after_input_lease_released ... ok
+test picker::tests::up_pk011_stale_and_duplicate_page_reports_are_rejected ... ok
+test picker::tests::up_pk031_late_page_report_cannot_downgrade_confirmed_page_destruction ... ok
+test picker::tests::up_pk033_late_capture_never_registers_after_monotonic_deadline ... ok
+test picker::tests::up_pk009_quota_and_quarantine_do_not_displace_active_pickers ... ok
+test picker::tests::up_pk035_unreadable_prior_history_fails_before_picker_admission ... ok
+test picker::tests::up_pk034_retained_results_not_evicted_to_make_room ... ok
+test picker::tests::up_pk035_persisted_unknown_write_is_recovered_before_picker_reservation ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 154 filtered out; finished in 0.01s

@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-12T21:15:33.117310+00:00",
+  "layer": "native_webview_single_capture",
+  "platform": "darwin",
+  "sourceEvidence": "docs/upgrade-evidence/macos-upgrade-native.json",
+  "sourceEvidenceSha256": "10fdc486ee3e8067bf65d0b448c8192923caeb91c46422789d6198f9dc0f71bd",
+  "selectionId": "198d0c12-9bc9-402c-a627-26f87c374dc7",
+  "artifactId": "14162934-48f6-4226-bd56-6f4ea376c6cb:picker:f59b5994-8ef3-4e9c-b3a8-1521257639d7:image",
+  "captureSource": "webview_native",
+  "capturedAt": 1789247348891,
+  "context": {
+    "appId": "dev.connector.workflow-fixture.6d0a49bd-8f3a-4353-a938-adfb7c991e26",
+    "appInstanceId": "14162934-48f6-4226-bd56-6f4ea376c6cb",
+    "bundleHash": "fnv1a64:0ca54740d91d0491",
+    "origin": "tauri://localhost",
+    "pageEpoch": "0db1d441-b65b-4651-a7a4-b0221d2ea469",
+    "runtimeId": "3c67804a-4d8a-4b73-8f39-94b8c123c590",
+    "runtimeVersion": "1",
+    "semanticVersion": "1",
+    "windowId": "main",
+    "windowInstanceId": "8cfdc881-cdf9-4836-8178-d2364ca25f5f"
+  },
+  "image": {
+    "widthPx": 126,
+    "heightPx": 76,
+    "mimeType": "image/png"
+  },
+  "redaction": {
+    "coverage": "declared_regions_and_field_heuristics",
+    "maskFingerprint": "fnv1a64:0553fcbcaa2fa5a4",
+    "maskedRegions": 1,
+    "policy": "required",
+    "policyVersion": "1",
+    "status": "applied",
+    "uncoveredReasons": []
+  },
+  "timings": {
+    "capture": {
+      "elapsedMs": 4.635208,
+      "elapsedNs": 4635208,
+      "status": "measured"
+    },
+    "clock": "monotonic",
+    "cropResize": {
+      "elapsedMs": 0.355292,
+      "elapsedNs": 355292,
+      "status": "measured"
+    },
+    "decode": {
+      "elapsedMs": 100.905125,
+      "elapsedNs": 100905125,
+      "status": "measured"
+    },
+    "diskSave": {
+      "reason": "protected_memory_only",
+      "status": "not_applicable"
+    },
+    "encode": {
+      "elapsedMs": 2.833166,
+      "elapsedNs": 2833166,
+      "status": "measured"
+    },
+    "formatConversion": {
+      "reason": "png_output",
+      "status": "not_applicable"
+    },
+    "mask": {
+      "elapsedMs": 0.742333,
+      "elapsedNs": 742333,
+      "status": "measured"
+    },
+    "protectedMemoryStore": {
+      "elapsedMs": 0.008124999999999999,
+      "elapsedNs": 8125,
+      "status": "measured"
+    }
+  },
+  "limitations": [
+    "One observed selected-element capture; no distribution or production latency guarantee.",
+    "These measured stages do not sum to full picker latency: installation, user waiting, validation and input drain have separate scope.",
+    "Disk save is not applicable under protected-memory-only policy, not a measured zero."
+  ]
+}

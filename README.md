@@ -5,7 +5,9 @@
 
 A Tauri v2 plugin with **embedded MCP server** + Rust CLI for deep inspection and interaction with Tauri desktop applications. Drop-in replacement for `tauri-plugin-mcp-bridge` that **fixes the `__TAURI__ not available` bug** on macOS.
 
-**New in v0.15:** [application-owned workflows](#application-owned-workflows) execute a known sequence in one submission, bind results between steps, and retain progress for reconnects. Available through the CLI, WebSocket API, and both MCP servers.
+**New in v0.16:** authenticated active element selection, native WebView screenshots, shared semantic locators, runtime identity/health, and bounded IPC capture are available through the CLI, WebSocket API, and both MCP servers. See the [inspection guide](docs/inspection-design.md) and [verification status](docs/upgrade-implementation-status.md).
+
+**Introduced in v0.15:** [application-owned workflows](#application-owned-workflows) execute a known sequence in one submission, bind results between steps, and retain progress for reconnects. Available through the CLI, WebSocket API, and both MCP servers.
 
 ## The Problem
 
@@ -113,7 +115,7 @@ Submit a known sequence of locating, filling, clicking, waiting and querying wit
 
 #### Enable and discover
 
-Use matching v0.15 plugin and client versions. In a running app, `workflow_capabilities` is available without authentication and reports supported operations and recovery limits:
+Use matching v0.16 plugin and client versions. In a running app, `workflow_capabilities` is available without authentication and reports supported operations and recovery limits:
 
 ```bash
 tauri-connector status
@@ -188,6 +190,31 @@ Workflows and legacy tools share application-owned resource leases; conflicting 
 
 See the [CLI reference](skill/references/cli-commands.md#application-owned-workflows), [MCP reference](skill/references/mcp-tools.md#workflow-tools), [WebSocket envelope](#workflow-requests), [workflow design and migration notes](docs/workflow-design.md), and [implementation evidence](docs/workflow-implementation-status.md). P0–P2 are implemented; P3 features, including business receipt providers and general restart continuation, remain deferred.
 
+### Inspection upgrade (unreleased)
+
+Inspection protocol v1 adds authenticated application identity and health, app-owned active element selection, protected screenshots, and IPC capture v2. Package versions remain unchanged. The CLI, direct WS and both MCP entry points share the same host services. [Migration notes](docs/upgrade-migration.md) describe deliberate discovery and authorization changes; [implementation status](docs/upgrade-implementation-status.md) separates unit, integration, native platform and CI evidence.
+
+Configure the existing host token and provide it through `TAURI_CONNECTOR_WORKFLOW_TOKEN` for CLI/standalone MCP. Select the intended instance with `--app-instance-id`, or discover a unique authenticated application for the current canonical workspace. Explicit identity constraints never fall back to another process.
+
+```bash
+tauri-connector identity
+tauri-connector runtime-health --depth runtime --timeout-ms 2000
+tauri-connector picker start --window main --request-key fixture-pick-001 --timeout-ms 60000
+tauri-connector picker get PICKER_ID --wait-ms 10000
+tauri-connector picker cancel PICKER_ID
+tauri-connector select-element --window main --timeout-ms 60000
+tauri-connector screenshot --source webview_native --redaction required
+tauri-connector ipc capture start
+tauri-connector ipc query CAPTURE_SESSION_ID --limit 100
+tauri-connector ipc capture stop CAPTURE_SESSION_ID
+```
+
+Picker start/convenience actually activates the page selection UI; the user confirms the highlighted element or cancels with Escape/the visible button. The report distinguishes selection, screenshot and cleanup. Its verified locator candidates describe only the observed context and must be resolved again before a subsequent action. `get` reads retained evidence without selecting or capturing again. CLI JSON uses stdout and recovery identifiers use stderr; waiting exits 2. `includeImage:true` on MCP adds a redacted image alongside structured metadata. See [full picker usage](docs/webview-select-element.md).
+
+New direct WS calls use `{"id":"request-1","type":"inspection","operation":"webview_select_element","args":{"action":"start","requestKey":"fixture-pick-001"}}`; trusted caller code adds `authToken` to `args`. The same tool and action arguments are exposed by both MCP servers. An older plugin without `inspectionProtocolVersion:1` reports unsupported instead of falling back to injected JavaScript.
+
+These features preserve original workflow specs, verdicts, runKey deduplication and unknown-write quarantine. Native code availability does not establish native runtime verification on every desktop platform; consult the evidence matrix for actual coverage.
+
 ### MCP + CLI Tools with Drag and Drop, Artifacts, and Runtime Capture
 
 Every tool is available via both the embedded MCP server (for Claude Code) and the Rust CLI (for terminal use). The CLI uses ref-based element addressing inspired by [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser).
@@ -200,7 +227,7 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Elements | `webview_find_element` | `find <selector> [-s css\|xpath\|text]` |
 | Styles | `webview_get_styles` | `get styles <@ref\|selector>` |
 | Picker | `webview_get_pointed_element` | `pointed` |
-| Select | `webview_select_element` | *(visual picker, not yet implemented)* |
+| Active selection | `webview_select_element` | `picker start\|get\|cancel`, `select-element` |
 | Interact | `webview_interact` | `click`, `dblclick`, `hover`, `drag`, `focus`, `fill`, `type`, `check`, `uncheck`, `select`, `scroll`, `scrollintoview` |
 | Keyboard | `webview_keyboard` | `press <key>` |
 | Wait | `webview_wait_for` | `wait <selector> [--text] [--url] [--load-state] [--fn] [--state] [--timeout]` |
@@ -213,6 +240,9 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Windows | `manage_window` | `windows`, `resize <w> <h>` |
 | State | `ipc_get_backend_state` | `state` |
 | IPC | `ipc_execute_command` | `ipc exec <cmd> [-a '{...}']` |
+| Identity | `app_identity` | `identity`, global `--app-instance-id` |
+| Health | `runtime_health` | `runtime-health [--depth runtime]` |
+| IPC v2 capture | `ipc_capture` / `ipc_query` | `ipc capture start\|status\|stop`, `ipc query` |
 | Monitor | `ipc_monitor` | `ipc monitor` / `ipc unmonitor` |
 | Captured | `ipc_get_captured` | `ipc captured [-f filter]` |
 | Events | `ipc_emit_event` | `emit <event> [-p '{...}']` |
@@ -302,7 +332,7 @@ The recommended pattern keeps `tauri-plugin-connector` and its transitive deps (
 # ...
 
 # Optional dep — only pulled when --features dev-connector is set.
-tauri-plugin-connector = { version = "0.15", optional = true }
+tauri-plugin-connector = { version = "0.16", optional = true }
 
 [features]
 default = []
@@ -383,7 +413,7 @@ If you don't want a separate dev script and don't mind the plugin (and its trans
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.15"
+tauri-plugin-connector = "0.16"
 ```
 
 ```rust
@@ -474,10 +504,10 @@ Sections reported:
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.15.0
+tauri-connector doctor v0.16.0
 
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.15" (optional, feature-gated)
+  ✓ Cargo dependency: tauri-plugin-connector = "0.16" (optional, feature-gated)
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(feature = "dev-connector"))
   ✓ Permission "connector:default" in src-tauri/capabilities-dev/dev-connector.json
   ✓ app.withGlobalTauri: true
@@ -492,14 +522,14 @@ Example output for a legacy setup (passes, with the migration nudge):
 
 ```
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.15"
+  ✓ Cargo dependency: tauri-plugin-connector = "0.16"
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(debug_assertions))
   ✓ Permission "connector:default" in src-tauri/capabilities/default.json
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
   ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
   ! Using legacy debug_assertions gate — consider migrating to --features dev-connector
-      Fix: 1. tauri-plugin-connector = { version = "0.15", optional = true }
+      Fix: 1. tauri-plugin-connector = { version = "0.16", optional = true }
            2. [features] dev-connector = ["dep:tauri-plugin-connector"]
            3. replace cfg(debug_assertions) with cfg(feature = "dev-connector")
            4. move connector:default to capabilities-dev/dev-connector.json
@@ -685,7 +715,7 @@ A Rust CLI with ref-based element addressing is also available:
 brew install dickwu/tap/tauri-connector
 
 # Or install the version-matched CLI from crates.io
-cargo install connector-cli --version 0.15.0 --locked
+cargo install connector-cli --version 0.16.0 --locked
 
 # Or build from source
 cargo build -p connector-cli --release
@@ -923,7 +953,31 @@ The bridge intercepts `console.log/warn/error/info/debug`, storing entries in fi
 
 ### Ref System
 
-The unified snapshot engine assigns sequential ref IDs (`e0`, `e1`, ...) to interactive elements (buttons, links, inputs, checkboxes, etc.) and elements with `onclick`, `tabindex`, or `cursor:pointer`. Three ref formats are accepted: `@e1`, `ref=e1`, or `e1`. Refs are persisted to disk and used across subsequent CLI invocations until the next `snapshot` refreshes them. The ref resolution uses a three-strategy fallback: CSS selector, then role+name text matching, then `[role="..."]` attribute matching.
+Modern reference caches bind the host, application instance, window, page, and semantic version. A stale modern reference is rejected without a fuzzy fallback. Snapshot references retain the familiar `@e1`, `ref=e1`, and `e1` forms. Older plugins keep the legacy CSS/role/name fallback behavior; their caches are not imported into a modern application context.
+
+## Development verification
+
+Use the committed lockfiles. Browser helper tests and native desktop tests are separate evidence layers.
+
+```sh
+npm ci
+npx playwright install chromium
+npm test
+cargo fmt --all -- --check
+cargo test --workspace --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+npm run acceptance:check
+npm run fixture:prepare
+cargo build -p connector-cli -p connector-mcp-server --locked
+cargo clean -p tauri-plugin-connector --manifest-path examples/workflow-fixture/Cargo.toml --target-dir target
+cargo build --manifest-path examples/workflow-fixture/Cargo.toml --locked --target-dir target
+CONNECTOR_NATIVE_BENCHMARK=1 node examples/workflow-fixture/scripts/upgrade-native-test.mjs
+CONNECTOR_NATIVE_PICKER_CYCLES=100 node examples/workflow-fixture/scripts/runtime-native-smoke.mjs
+```
+
+Run the native harnesses sequentially on an unlocked desktop. They reserve fixture ports 19555/19556, use isolated native stores, and terminate only their own app. macOS uses Quartz; Linux CI uses Xvfb/WebKitGTK and XTest; Windows uses user32 and retains its private-journal restrictions. The [fixture guide](examples/workflow-fixture/README.md) covers the legacy workflow and feature-off suites. CI also checks all four screenshot feature combinations on each desktop OS.
+
+A macOS host can additionally type-check Linux adapters against checksum-pinned real development headers with `python3 scripts/prepare-linux-check.py /tmp/connector-linux` followed by `bash scripts/check-linux-sysroot.sh /tmp/connector-linux/root`. This supplies headers and pkg-config metadata; it does not run Linux or link an ELF binary. Actual commands, measurements, and unexecuted scenarios are recorded in the [144-item acceptance report](docs/upgrade-implementation-status.md).
 
 ## Requirements
 

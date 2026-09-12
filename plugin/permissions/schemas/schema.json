@@ -295,10 +295,106 @@
       "type": "string",
       "oneOf": [
         {
-          "description": "Default permissions for the Connector plugin",
+          "description": "Enables the capture_self_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-capture-self-test",
+          "markdownDescription": "Enables the capture_self_test command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the capture_self_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-capture-self-test",
+          "markdownDescription": "Denies the capture_self_test command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the push_capture_events command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-push-capture-events",
+          "markdownDescription": "Enables the push_capture_events command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the push_capture_events command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-push-capture-events",
+          "markdownDescription": "Denies the push_capture_events command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the push_dom command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-push-dom",
+          "markdownDescription": "Enables the push_dom command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the push_dom command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-push-dom",
+          "markdownDescription": "Denies the push_dom command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the push_event command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-push-event",
+          "markdownDescription": "Enables the push_event command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the push_event command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-push-event",
+          "markdownDescription": "Denies the push_event command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the push_ipc_event command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-push-ipc-event",
+          "markdownDescription": "Enables the push_ipc_event command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the push_ipc_event command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-push-ipc-event",
+          "markdownDescription": "Denies the push_ipc_event command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the push_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-push-logs",
+          "markdownDescription": "Enables the push_logs command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the push_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-push-logs",
+          "markdownDescription": "Denies the push_logs command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the push_runtime command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-push-runtime",
+          "markdownDescription": "Enables the push_runtime command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the push_runtime command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-push-runtime",
+          "markdownDescription": "Denies the push_runtime command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_pointed_element command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-pointed-element",
+          "markdownDescription": "Enables the set_pointed_element command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_pointed_element command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-pointed-element",
+          "markdownDescription": "Denies the set_pointed_element command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for the Connector plugin\n#### This default permission set includes:\n\n- `allow-push-dom`\n- `allow-push-logs`\n- `allow-set-pointed-element`\n- `allow-push-ipc-event`\n- `allow-push-capture-events`\n- `allow-capture-self-test`\n- `allow-push-event`\n- `allow-push-runtime`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the Connector plugin"
+          "markdownDescription": "Default permissions for the Connector plugin\n#### This default permission set includes:\n\n- `allow-push-dom`\n- `allow-push-logs`\n- `allow-set-pointed-element`\n- `allow-push-ipc-event`\n- `allow-push-capture-events`\n- `allow-capture-self-test`\n- `allow-push-event`\n- `allow-push-runtime`"
         }
       ]
     }

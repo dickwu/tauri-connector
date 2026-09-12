@@ -1,0 +1,56 @@
+{
+  "platform": "darwin",
+  "layer": "native_webview",
+  "input": "none",
+  "tests": [
+    {
+      "id": "UP-T036",
+      "name": "anonymous rich health rejected",
+      "passed": true
+    },
+    {
+      "id": "UP-T033",
+      "name": "native read-only probe does not install missing runtime",
+      "passed": true
+    },
+    {
+      "id": "UP-T009",
+      "name": "native cold runtime handshake confirms complete context",
+      "passed": true
+    },
+    {
+      "id": "UP-PK029",
+      "name": "native explicit cancel confirms guard cleanup",
+      "passed": true
+    }
+  ],
+  "passed": false,
+  "context": {
+    "appId": "dev.connector.workflow-fixture.runtime.8e6b5d28-d2a0-49fd-a3cb-0d2f334016a0",
+    "appInstanceId": "c05ceac4-fc92-4bc8-aaaf-cacdafd699d8",
+    "bundleHash": "fnv1a64:a8900766a426704c",
+    "origin": "tauri://localhost",
+    "pageEpoch": "67a475ce-f824-4a68-8a61-fb6ebc346f32",
+    "runtimeId": "5bf54f4a-9214-40a2-9957-654e7aae6651",
+    "runtimeVersion": "1",
+    "semanticVersion": "1",
+    "windowId": "main",
+    "windowInstanceId": "9956d950-ce10-43e9-94e1-16b2d6a2b3cb"
+  },
+  "diagnostics": {
+    "activeObservers": 1,
+    "bundleBytesSent": 100883,
+    "commandBytesSent": 6042,
+    "inputGuard": {
+      "active": true,
+      "draining": false,
+      "early": true,
+      "heldInputs": 0
+    },
+    "installAttempts": 1,
+    "installSuccesses": 1,
+    "runtimeReuses": 2,
+    "staleContextRejects": 0
+  },
+  "error": "Error: fixture RPC deadline\n    at Timeout._onTimeout (file://<workspace>/examples/workflow-fixture/scripts/runtime-native-smoke.mjs:19:141)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)"
+}

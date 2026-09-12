@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,8 +9,9 @@ import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
-const output = mkdtempSync(resolve(tmpdir(), 'connector-feature-off-'));
-const binary = process.env.CONNECTOR_FIXTURE_BINARY || resolve(root, 'target/debug/connector-workflow-fixture');
+const output = process.env.CONNECTOR_FIXTURE_OUTPUT || mkdtempSync(resolve(tmpdir(), 'connector-feature-off-'));
+mkdirSync(output, { recursive: true, mode: 0o700 });
+const binary = process.env.CONNECTOR_FIXTURE_BINARY || resolve(root, `target/debug/connector-workflow-fixture${process.platform === 'win32' ? '.exe' : ''}`);
 async function listening(port) {
   return new Promise(resolveResult => {
     const socket = net.createConnection({ host: '127.0.0.1', port });
@@ -25,18 +26,39 @@ const env = { ...process.env, CONNECTOR_FIXTURE_ID: `dev.connector.workflow-fixt
 delete env.TAURI_CONNECTOR_WORKFLOW_TOKEN;
 let log = '';
 const child = spawn(binary, [], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+let exited = false;
+let spawnError;
+child.once('exit', () => { exited = true; });
+child.once('error', error => { spawnError = error; });
+function assertRunning() {
+  assert.equal(spawnError, undefined, 'Feature-off Wry app must start successfully');
+  assert.equal(child.exitCode, null, 'Feature-off Wry app must remain running');
+  // A process terminated by a signal also has exitCode === null.
+  assert.equal(child.signalCode, null, 'Feature-off Wry app must remain running without a terminating signal');
+  assert.equal(exited, false, 'Feature-off Wry app must remain running');
+  assert.equal(child.killed, false, 'Feature-off Wry app must not already be stopping');
+  assert.ok(Number.isInteger(child.pid) && child.pid > 0, 'Feature-off Wry app must have a process identity');
+  assert.doesNotThrow(() => process.kill(child.pid, 0), 'Feature-off Wry app is no longer alive');
+}
 child.stdout.on('data', data => { log += data; });
 child.stderr.on('data', data => { log += data; });
 try {
   await delay(2000);
-  assert.equal(child.exitCode, null, 'Feature-off Wry app must remain running');
+  assertRunning();
   for (const port of [19555, 19556]) assert.equal(await listening(port), false, `Feature-off app opened connector port ${port}`);
   assert.ok(!log.includes('[connector]'), 'Feature-off app must not initialize connector');
-  writeFileSync(resolve(output, 'result.json'), JSON.stringify({ platform: process.platform, nativeAppRunning: true, connectorFeature: false,
+  assertRunning();
+  writeFileSync(resolve(output, 'result.json'), JSON.stringify({ platform: process.platform, layer: 'native-webview',
+    display: process.platform === 'linux' ? (process.env.DISPLAY || 'unavailable') : 'desktop-session', nativeAppRunning: true, connectorFeature: false,
     listeningPorts: [], checkedPorts: [19555, 19556], passed: true }, null, 2));
   console.log(`PASS native feature-off app opens no connector listeners: ${output}/result.json`);
 } finally {
-  child.kill('SIGTERM');
-  await Promise.race([new Promise(resolveExit => child.once('exit', resolveExit)), delay(2000)]);
-  if (child.exitCode === null) child.kill('SIGKILL');
+  if (!exited && child.pid && child.exitCode === null && child.signalCode === null) {
+    child.kill('SIGTERM');
+    await new Promise(resolveExit => {
+      const timeout = setTimeout(resolveExit, 2000);
+      child.once('exit', () => { clearTimeout(timeout); resolveExit(); });
+    });
+    if (!exited && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  }
 }
