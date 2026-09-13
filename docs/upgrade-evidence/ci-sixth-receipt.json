@@ -1,0 +1,723 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "sixth_hosted_ci",
+  "runId": "34764517708",
+  "headSha": "c58d27620daea269133d26fb3ae6c7450edad21b",
+  "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708",
+  "conclusion": "failure",
+  "completedAt": "2026-09-13T15:11:04Z",
+  "scope": "Actual reached assertions at this commit only. Full native jobs fail at the common signed-zero assertion before marker/password pixel sampling. Later cases and steps are not credited; the144-row acceptance report is unchanged by this receipt.",
+  "jobs": [
+    {
+      "name": "core-contracts",
+      "jobId": 103742999178,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999178"
+    },
+    {
+      "name": "Fixture windows-latest / connector off",
+      "jobId": 103742999265,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999265"
+    },
+    {
+      "name": "page-runtime",
+      "jobId": 103742999271,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999271"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector off",
+      "jobId": 103742999277,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999277"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector on",
+      "jobId": 103742999279,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999279"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap",
+      "jobId": 103742999285,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999285"
+    },
+    {
+      "name": "docs-and-skills",
+      "jobId": 103742999295,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999295"
+    },
+    {
+      "name": "Fixture macos-latest / connector on",
+      "jobId": 103742999297,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999297"
+    },
+    {
+      "name": "Fixture macos-latest / connector off",
+      "jobId": 103742999301,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999301"
+    },
+    {
+      "name": "Plugin macos-latest / no features",
+      "jobId": 103742999360,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999360"
+    },
+    {
+      "name": "Plugin macos-latest / xcap",
+      "jobId": 103742999368,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999368"
+    },
+    {
+      "name": "Plugin windows-latest / xcap,native-screenshot",
+      "jobId": 103742999379,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999379"
+    },
+    {
+      "name": "Fixture windows-latest / connector on",
+      "jobId": 103742999406,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999406"
+    },
+    {
+      "name": "Plugin macos-latest / xcap,native-screenshot",
+      "jobId": 103742999409,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999409"
+    },
+    {
+      "name": "Plugin macos-latest / native-screenshot",
+      "jobId": 103742999411,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999411"
+    },
+    {
+      "name": "Plugin windows-latest / xcap",
+      "jobId": 103742999425,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999425"
+    },
+    {
+      "name": "Plugin windows-latest / native-screenshot",
+      "jobId": 103742999429,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999429"
+    },
+    {
+      "name": "Plugin ubuntu-latest / native-screenshot",
+      "jobId": 103742999433,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999433"
+    },
+    {
+      "name": "Plugin ubuntu-latest / no features",
+      "jobId": 103742999481,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999481"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap,native-screenshot",
+      "jobId": 103742999493,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999493"
+    },
+    {
+      "name": "Plugin windows-latest / no features",
+      "jobId": 103742999519,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103742999519"
+    },
+    {
+      "name": "Build x86_64-unknown-linux-gnu",
+      "jobId": 103743073774,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103743073774"
+    },
+    {
+      "name": "Build x86_64-apple-darwin",
+      "jobId": 103743073775,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103743073775"
+    },
+    {
+      "name": "Build aarch64-unknown-linux-gnu",
+      "jobId": 103743073778,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103743073778"
+    },
+    {
+      "name": "Build aarch64-apple-darwin",
+      "jobId": 103743073782,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103743073782"
+    },
+    {
+      "name": "Build x86_64-pc-windows-msvc",
+      "jobId": 103743073868,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103743073868"
+    },
+    {
+      "name": "Native WebView windows-latest",
+      "jobId": 103743598276,
+      "conclusion": "failure",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103743598276"
+    },
+    {
+      "name": "Native WebView ubuntu-latest",
+      "jobId": 103743598335,
+      "conclusion": "failure",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103743598335"
+    },
+    {
+      "name": "Native WebView macos-latest",
+      "jobId": 103743598350,
+      "conclusion": "failure",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103743598350"
+    },
+    {
+      "name": "aggregate",
+      "jobId": 103743817383,
+      "conclusion": "failure",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34764517708/job/103743817383"
+    }
+  ],
+  "artifacts": [
+    {
+      "artifactName": "native-evidence-macos-latest",
+      "file": "feature-off/result.json",
+      "sha256": "f2eec01a5813a85e3bda308ae7f3d55dc52abad54b387ed82dcad66134d7577a",
+      "bytes": 449,
+      "platform": "darwin",
+      "layer": "native-webview",
+      "passed": true,
+      "reachedAssertions": {
+        "nativeAppRunning": true,
+        "connectorFeature": false,
+        "checkedPorts": [
+          19555,
+          19556
+        ],
+        "listeningPorts": [],
+        "frontendBoot": {
+          "connectorFeature": false,
+          "connectorGlobals": [],
+          "documentReadyState": "complete",
+          "fixtureReady": true,
+          "hookMarkers": [],
+          "windowId": "main"
+        },
+        "frontendProcessMatchesLaunchedFixture": true
+      }
+    },
+    {
+      "artifactName": "native-evidence-macos-latest",
+      "file": "upgrade/upgrade-native-results.json",
+      "sha256": "fc8f1c2a500fd47474ac262c6f357b201a88f4916671c62909d29452fc785373",
+      "bytes": 13231,
+      "platform": "darwin",
+      "layer": "native_webview",
+      "passed": false,
+      "tests": [
+        {
+          "name": "OS input driver reaches independent native fixture counter",
+          "passed": true,
+          "durationMs": 672.9773750000004,
+          "nativeWriteDelta": 1
+        },
+        {
+          "name": "unguarded native Escape reaches independent keydown and keyup counters",
+          "passed": true,
+          "durationMs": 527.644542,
+          "escapeKeydownDelta": 1,
+          "escapeKeyupDelta": 1
+        },
+        {
+          "name": "legacy WS cannot discard requested native source or required masks",
+          "passed": true,
+          "durationMs": 1.8117089999996097,
+          "rejectedBeforeCapture": true
+        },
+        {
+          "name": "anonymous rich request fails before picker creation",
+          "passed": true,
+          "durationMs": 1.1247920000005251
+        },
+        {
+          "name": "native identity and layered health expose cold state",
+          "passed": true,
+          "durationMs": 8.310084000000643
+        },
+        {
+          "name": "native save selection deduplicates, captures and never invokes save",
+          "passed": true,
+          "durationMs": 1054.4947090000005,
+          "nativeSaveDelta": 0,
+          "dimensions": [
+            63,
+            38
+          ],
+          "screenshot": "webview_native"
+        },
+        {
+          "name": "omitted-action call waits for a real native user selection",
+          "passed": true,
+          "durationMs": 1020.7945419999996
+        },
+        {
+          "name": "same-page native picker survives a one-second main-thread stall within its original deadline",
+          "passed": true,
+          "durationMs": 2872.2357079999983,
+          "businessEffectsChanged": false,
+          "stallElapsedMs": 1000,
+          "nativeSelectionClicks": 1
+        },
+        {
+          "name": "explicit screenshot backend failure keeps the native selection",
+          "passed": true,
+          "durationMs": 1037.999499999998
+        },
+        {
+          "name": "native checkbox gesture has no business default effect",
+          "passed": true,
+          "durationMs": 1037.2445000000007
+        },
+        {
+          "name": "native link gesture has no business default effect",
+          "passed": true,
+          "durationMs": 1079.4420409999984
+        },
+        {
+          "name": "native form gesture has no business default effect",
+          "passed": true,
+          "durationMs": 1359.9695830000019
+        },
+        {
+          "name": "native Escape cancels and releases guard",
+          "passed": true,
+          "durationMs": 1022.8795829999981,
+          "escapeKeydownDelta": 0,
+          "escapeKeyupDelta": 0,
+          "businessEffectsChanged": false
+        },
+        {
+          "name": "native PNG pixels prove viewport corner geometry and required password masks",
+          "passed": false,
+          "failureCode": "strict_deep_equal_distinguishes_negative_zero",
+          "source": "examples/workflow-fixture/scripts/native-evidence.mjs:61",
+          "assertion": "assert.deepEqual([b,c,e,f],[0,0,0,0])",
+          "actualSignedValues": [
+            "0",
+            "0",
+            "-0",
+            "-0"
+          ],
+          "expectedSignedValues": [
+            "0",
+            "0",
+            "0",
+            "0"
+          ],
+          "numericMeaning": "All four components are numerically zero; strict deep equality distinguishes the sign of zero.",
+          "reachedBeforeFailure": [
+            "Source is webview_native with no fallback.",
+            "Required redaction reports applied,positive masked-region count and no uncovered reasons.",
+            "PNG bytes pass bounded signature/chunk/CRC/RGBA8 decoding; encoded dimensions equal image metadata.",
+            "Viewport dimensions and coordinate space pass; crop is not clipped and affine matrix has6finite values."
+          ],
+          "notReached": [
+            "Positive scale/PNG-extent comparison after the zero-component check.",
+            "4independent corner-marker pixel comparisons.",
+            "9independent password-mask pixel comparisons.",
+            "Post-verifier assertions and later native cases/steps."
+          ]
+        }
+      ],
+      "testCounts": {
+        "passed": 13,
+        "failed": 1
+      },
+      "laterNativeCases": "Reload,capture benchmark,legacy callbacks,capture result/rejection/binary/pending checks,integrated workflow/image,4entry verification,transport benchmark and unknown-outcome diagnosis not reached."
+    },
+    {
+      "artifactName": "native-evidence-ubuntu-latest",
+      "file": "feature-off/result.json",
+      "sha256": "03874494779633ea95f3f5122b4704ac1ff64793d4e2c6c587d17ff38f032e52",
+      "bytes": 436,
+      "platform": "linux",
+      "layer": "native-webview",
+      "passed": true,
+      "reachedAssertions": {
+        "nativeAppRunning": true,
+        "connectorFeature": false,
+        "checkedPorts": [
+          19555,
+          19556
+        ],
+        "listeningPorts": [],
+        "frontendBoot": {
+          "connectorFeature": false,
+          "connectorGlobals": [],
+          "documentReadyState": "complete",
+          "fixtureReady": true,
+          "hookMarkers": [],
+          "windowId": "main"
+        },
+        "frontendProcessMatchesLaunchedFixture": true
+      }
+    },
+    {
+      "artifactName": "native-evidence-ubuntu-latest",
+      "file": "upgrade/upgrade-native-results.json",
+      "sha256": "e00337702e61081b6d12a83041e3557ee5d1007c07e6b2b94915e007fc668664",
+      "bytes": 13203,
+      "platform": "linux",
+      "layer": "native_webview",
+      "passed": false,
+      "tests": [
+        {
+          "name": "OS input driver reaches independent native fixture counter",
+          "passed": true,
+          "durationMs": 128.05502699999988,
+          "nativeWriteDelta": 1
+        },
+        {
+          "name": "unguarded native Escape reaches independent keydown and keyup counters",
+          "passed": true,
+          "durationMs": 19.732414000000063,
+          "escapeKeydownDelta": 1,
+          "escapeKeyupDelta": 1
+        },
+        {
+          "name": "legacy WS cannot discard requested native source or required masks",
+          "passed": true,
+          "durationMs": 1.1283960000000661,
+          "rejectedBeforeCapture": true
+        },
+        {
+          "name": "anonymous rich request fails before picker creation",
+          "passed": true,
+          "durationMs": 0.4520749999999225
+        },
+        {
+          "name": "native identity and layered health expose cold state",
+          "passed": true,
+          "durationMs": 2.3307130000000598
+        },
+        {
+          "name": "native save selection deduplicates, captures and never invokes save",
+          "passed": true,
+          "durationMs": 564.206226,
+          "nativeSaveDelta": 0,
+          "dimensions": [
+            67,
+            39
+          ],
+          "screenshot": "webview_native"
+        },
+        {
+          "name": "omitted-action call waits for a real native user selection",
+          "passed": true,
+          "durationMs": 547.7903920000001
+        },
+        {
+          "name": "same-page native picker survives a one-second main-thread stall within its original deadline",
+          "passed": true,
+          "durationMs": 1816.970042,
+          "businessEffectsChanged": false,
+          "stallElapsedMs": 1000.9999999999998,
+          "nativeSelectionClicks": 1
+        },
+        {
+          "name": "explicit screenshot backend failure keeps the native selection",
+          "passed": true,
+          "durationMs": 549.7670200000002
+        },
+        {
+          "name": "native checkbox gesture has no business default effect",
+          "passed": true,
+          "durationMs": 544.1612580000001
+        },
+        {
+          "name": "native link gesture has no business default effect",
+          "passed": true,
+          "durationMs": 545.4362460000002
+        },
+        {
+          "name": "native form gesture has no business default effect",
+          "passed": true,
+          "durationMs": 652.2870489999996
+        },
+        {
+          "name": "native Escape cancels and releases guard",
+          "passed": true,
+          "durationMs": 691.6344039999994,
+          "escapeKeydownDelta": 0,
+          "escapeKeyupDelta": 0,
+          "businessEffectsChanged": false
+        },
+        {
+          "name": "native PNG pixels prove viewport corner geometry and required password masks",
+          "passed": false,
+          "failureCode": "strict_deep_equal_distinguishes_negative_zero",
+          "source": "examples/workflow-fixture/scripts/native-evidence.mjs:61",
+          "assertion": "assert.deepEqual([b,c,e,f],[0,0,0,0])",
+          "actualSignedValues": [
+            "0",
+            "0",
+            "-0",
+            "-0"
+          ],
+          "expectedSignedValues": [
+            "0",
+            "0",
+            "0",
+            "0"
+          ],
+          "numericMeaning": "All four components are numerically zero; strict deep equality distinguishes the sign of zero.",
+          "reachedBeforeFailure": [
+            "Source is webview_native with no fallback.",
+            "Required redaction reports applied,positive masked-region count and no uncovered reasons.",
+            "PNG bytes pass bounded signature/chunk/CRC/RGBA8 decoding; encoded dimensions equal image metadata.",
+            "Viewport dimensions and coordinate space pass; crop is not clipped and affine matrix has6finite values."
+          ],
+          "notReached": [
+            "Positive scale/PNG-extent comparison after the zero-component check.",
+            "4independent corner-marker pixel comparisons.",
+            "9independent password-mask pixel comparisons.",
+            "Post-verifier assertions and later native cases/steps."
+          ]
+        }
+      ],
+      "testCounts": {
+        "passed": 13,
+        "failed": 1
+      },
+      "laterNativeCases": "Reload,capture benchmark,legacy callbacks,capture result/rejection/binary/pending checks,integrated workflow/image,4entry verification,transport benchmark and unknown-outcome diagnosis not reached."
+    },
+    {
+      "artifactName": "native-evidence-windows-latest",
+      "file": "feature-off/result.json",
+      "sha256": "d33094d6df25a334f5c35286f022df177f4f0b7d3acf919601934fa90ae23c03",
+      "bytes": 448,
+      "platform": "win32",
+      "layer": "native-webview",
+      "passed": true,
+      "reachedAssertions": {
+        "nativeAppRunning": true,
+        "connectorFeature": false,
+        "checkedPorts": [
+          19555,
+          19556
+        ],
+        "listeningPorts": [],
+        "frontendBoot": {
+          "connectorFeature": false,
+          "connectorGlobals": [],
+          "documentReadyState": "complete",
+          "fixtureReady": true,
+          "hookMarkers": [],
+          "windowId": "main"
+        },
+        "frontendProcessMatchesLaunchedFixture": true
+      }
+    },
+    {
+      "artifactName": "native-evidence-windows-latest",
+      "file": "upgrade/upgrade-native-results.json",
+      "sha256": "06f3145efeaa6f55ded48ceab845ba357a10871a34302af22778782e66512fa7",
+      "bytes": 10634,
+      "platform": "win32",
+      "layer": "native_webview",
+      "passed": false,
+      "tests": [
+        {
+          "name": "Windows strict identity and original workflow storage boundary",
+          "passed": true,
+          "durationMs": 2.6669999999999163
+        },
+        {
+          "name": "Windows native input sanity and immutable-invoke observation",
+          "passed": true,
+          "durationMs": 2279.4553,
+          "nativeSaveDelta": 1
+        },
+        {
+          "name": "Windows unguarded native Escape reaches keydown and keyup counters",
+          "passed": true,
+          "durationMs": 1010.5700999999999,
+          "escapeKeydownDelta": 1,
+          "escapeKeyupDelta": 1
+        },
+        {
+          "name": "Windows picker owns native input and captures selected WebView content",
+          "passed": true,
+          "durationMs": 1529.9589000000005
+        },
+        {
+          "name": "Windows native Escape cancels without workflow storage",
+          "passed": true,
+          "durationMs": 1717.2482,
+          "escapeKeydownDelta": 0,
+          "escapeKeyupDelta": 0,
+          "businessEffectsChanged": false
+        },
+        {
+          "name": "Windows active native picker survives a one-second main-thread stall",
+          "passed": true,
+          "durationMs": 3702.2386000000006,
+          "businessEffectsChanged": false,
+          "stallElapsedMs": 1000,
+          "nativeSelectionClicks": 1
+        },
+        {
+          "name": "Windows native PNG pixels prove viewport geometry and required password masks",
+          "passed": false,
+          "failureCode": "strict_deep_equal_distinguishes_negative_zero",
+          "source": "examples/workflow-fixture/scripts/native-evidence.mjs:61",
+          "assertion": "assert.deepEqual([b,c,e,f],[0,0,0,0])",
+          "actualSignedValues": [
+            "0",
+            "0",
+            "-0",
+            "-0"
+          ],
+          "expectedSignedValues": [
+            "0",
+            "0",
+            "0",
+            "0"
+          ],
+          "numericMeaning": "All four components are numerically zero; strict deep equality distinguishes the sign of zero.",
+          "reachedBeforeFailure": [
+            "Source is webview_native with no fallback.",
+            "Required redaction reports applied,positive masked-region count and no uncovered reasons.",
+            "PNG bytes pass bounded signature/chunk/CRC/RGBA8 decoding; encoded dimensions equal image metadata.",
+            "Viewport dimensions and coordinate space pass; crop is not clipped and affine matrix has6finite values."
+          ],
+          "notReached": [
+            "Positive scale/PNG-extent comparison after the zero-component check.",
+            "4independent corner-marker pixel comparisons.",
+            "9independent password-mask pixel comparisons.",
+            "Post-verifier assertions and later native cases/steps."
+          ]
+        }
+      ],
+      "testCounts": {
+        "passed": 6,
+        "failed": 1
+      },
+      "laterNativeCases": "Windows4entry verification not reached."
+    }
+  ],
+  "sourceHashes": {
+    "examples/workflow-fixture/scripts/native-evidence.mjs": "c411f30299bef8a0fafbe86ff12349830fc09c026fd290bfb26b6246a520f25b",
+    "examples/workflow-fixture/scripts/feature-off-test.mjs": "1417400a7f5b93e40b7b01f86323a58be9e0868616aec794b9a148780f57ad38",
+    "examples/workflow-fixture/scripts/upgrade-native-test.mjs": "3fb91b2185d58be37c2721e35bbe85f6759975367810cea06b777a4d9354ad1e",
+    "examples/workflow-fixture/scripts/windows-native.mjs": "aa0577b3a259824ea3ca8b8be799f0e17cafa8d068721594e7e2dd01d11a5547"
+  },
+  "assertionSummary": {
+    "featureOff": "All3actual native frontend boot receipts match the launched fixture PID and main window,report complete/ready frontend,connectorFeature=false,connectorGlobals=[] and hookMarkers=[]; both expected connector ports remain closed. This extends the prior ports-only proof.",
+    "activeSelection": "All3platforms reach real OS Save selection,retained metadata,native image and independent unchanged business-store assertions. macOS/Linux also reach same-key dedup,omitted-action wait,screenshot-failure partial result,and checkbox/link/double-click form isolation.",
+    "escape": "All3unguarded native Escape sanity checks increment independent keydown and keyup counters once. During active picker cancellation,both counter deltas are0,the full independent store stays unchanged,and cleanup is confirmed.",
+    "samePageStall": "All3native active pickers survive an independently measured1second main-thread stall,retain original pickerId/context/deadline,and subsequently accept1OS selection with confirmed cleanup,unchanged selected revision on get,and no business effect. These reached assertions supersede the fifth-run macOS target_changed regression for this path.",
+    "pixelFailure": "All3suites fail only the same signed-zero strict comparison at the recorded point. Numeric translation is zero; decoded marker/password pixel assertions are not reached and cannot be claimed passed. This receipt does not relabel the failed job as successful.",
+    "builds": "All26non-native jobs pass:12plugin feature/platform checks,6fixture builds,5CLI/MCP target builds,and core,page-runtime,docs/skills.",
+    "aggregate": "All3native jobs fail at the common validator assertion and aggregate correctly fails."
+  },
+  "pendingGates": [
+    "Validator numeric-zero equality correction and regression are not part of this CI checkpoint.",
+    "New same-head CI must reach marker/password pixel assertions and all later native cases/steps.",
+    "Publication and local installation are separate release gates."
+  ],
+  "counts": {
+    "jobs": 30,
+    "nonnativeJobsPassed": 26,
+    "nativeJobsFailed": 3,
+    "featureOffPlatformsPassed": 3,
+    "upgradeCasesByPlatform": {
+      "darwin": {
+        "passed": 13,
+        "failed": 1
+      },
+      "linux": {
+        "passed": 13,
+        "failed": 1
+      },
+      "win32": {
+        "passed": 6,
+        "failed": 1
+      }
+    },
+    "hashedArtifacts": 6
+  },
+  "unreachedLaterSteps": [
+    {
+      "job": "Native WebView windows-latest",
+      "step": "Native picker lifecycle stress (macOS)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView windows-latest",
+      "step": "Native picker lifecycle stress (Xvfb WebKitGTK)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView windows-latest",
+      "step": "Legacy workflow smoke (macOS)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView windows-latest",
+      "step": "Legacy workflow smoke (Xvfb WebKitGTK)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView ubuntu-latest",
+      "step": "Native picker lifecycle stress (macOS)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView ubuntu-latest",
+      "step": "Native picker lifecycle stress (Xvfb WebKitGTK)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView ubuntu-latest",
+      "step": "Legacy workflow smoke (macOS)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView ubuntu-latest",
+      "step": "Legacy workflow smoke (Xvfb WebKitGTK)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView macos-latest",
+      "step": "Native picker lifecycle stress (macOS)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView macos-latest",
+      "step": "Native picker lifecycle stress (Xvfb WebKitGTK)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView macos-latest",
+      "step": "Legacy workflow smoke (macOS)",
+      "conclusion": "skipped"
+    },
+    {
+      "job": "Native WebView macos-latest",
+      "step": "Legacy workflow smoke (Xvfb WebKitGTK)",
+      "conclusion": "skipped"
+    }
+  ]
+}

@@ -58,7 +58,8 @@ export function verifyNativePixels(shot) {
   const matrix=shot.geometry.cssToImage;
   assert.ok(Array.isArray(matrix)&&matrix.length===6&&matrix.every(Number.isFinite),'Finite CSS mapping required');
   const [a,b,c,d,e,f]=matrix;
-  assert.deepEqual([b,c,e,f],[0,0,0,0],'Full viewport mapping must have no crop or translation');
+  // Affine zero offsets may serialize as -0.0; both signs represent zero.
+  assert.ok([b,c,e,f].every(value=>value===0),'Full viewport mapping must have no crop or translation');
   assert.ok(a>0&&d>0&&Math.abs(a*width-image.width)<=1&&Math.abs(d*height-image.height)<=1,'CSS scale must match PNG extent');
   const pixel=(x,y)=>image.pixel(Math.floor(a*x+c*y+e),Math.floor(b*x+d*y+f));
   // Coordinates and colors are fixed by frontend/index.html, independently of

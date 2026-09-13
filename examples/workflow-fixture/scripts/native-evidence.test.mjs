@@ -55,6 +55,15 @@ test('native pixel proof verifies scaled corner geometry and password mask witho
     assert.equal(JSON.stringify(result).includes('base64'),false);
   }
 });
+test('native pixel geometry accepts signed zero but rejects any actual translation or skew',()=>{
+  const shot=syntheticShot();
+  shot.geometry.cssToImage=JSON.parse('[1,0,0,1,-0.0,-0.0]');
+  assert.equal(verifyNativePixels(shot).cornerMarkers,4);
+  for(const offset of [Number.EPSILON,-Number.EPSILON,1,-1])for(const index of [1,2,4,5]) {
+    const changed=structuredClone(shot);changed.geometry.cssToImage[index]=offset;
+    assert.throws(()=>verifyNativePixels(changed),/no crop or translation/);
+  }
+});
 test('native pixel proof rejects unmasked images, false geometry, wrong source and metadata-only success',()=>{
   assert.throws(()=>verifyNativePixels(syntheticShot({mask:false})),/password mask/);
   assert.throws(()=>verifyNativePixels(syntheticShot({marker:false})),/corner marker/);
