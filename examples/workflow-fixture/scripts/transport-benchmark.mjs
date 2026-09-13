@@ -6,6 +6,19 @@ import {resolve} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 
+export async function waitForColdDocument(rpc,oldEpoch) {
+  assert.equal(typeof oldEpoch,'string','the previous document identity must be known before reload');
+  for(let attempt=0;attempt<100;attempt++) {
+    const health=await rpc.inspect('runtime_health',{timeoutMs:1000});
+    if(health.checks.bridge.status==='responsive'&&health.conclusion==='runtime_missing') {
+      const page=await rpc.js("({epoch:window.__CONNECTOR_BOOTSTRAP__?.pageEpoch,ready:document.readyState==='complete',fixture:!!window.__WORKFLOW_FIXTURE__&&!!document.querySelector('#upgrade-fixture')})");
+      if(page.epoch&&page.epoch!==oldEpoch&&page.ready&&page.fixture)return {health,epoch:page.epoch};
+    }
+    await delay(30);
+  }
+  throw new Error('Cold benchmark requires a new, fully loaded native document without runtime');
+}
+
 export async function runTransportBenchmark({rpc,root,output,store}) {
   const source=readFileSync(resolve(root,'plugin/src/workflow/page.js'),'utf8');
   const rows=[];
@@ -14,16 +27,11 @@ export async function runTransportBenchmark({rpc,root,output,store}) {
   const setupInput=()=>rpc.js("(()=>{document.querySelector('#upgrade-fixture').insertAdjacentHTML('beforeend','<label for=transport-bench>Transport benchmark</label><input id=transport-bench>');window.__BENCH_INPUT_EVENTS__=0;document.querySelector('#transport-bench').addEventListener('input',()=>window.__BENCH_INPUT_EVENTS__++);return true;})()");
   const cold=[];
   for(const steps of [2,10,20]) {
-    const oldEpoch=(await rpc.inspect('runtime_health',{timeoutMs:2000})).context.pageEpoch;
+    const oldEpoch=await rpc.js('window.__CONNECTOR_BOOTSTRAP__.pageEpoch');
     await rpc.js('(()=>{setTimeout(()=>location.reload(),50);return true;})()');
-    let before;
-    for(let attempt=0;attempt<100;attempt++) {
-      before=await rpc.inspect('runtime_health',{timeoutMs:1000});
-      if(before.checks.bridge.connected && before.conclusion==='runtime_missing')break;
-      await delay(30);
-    }
-    assert.equal(before.conclusion,'runtime_missing','cold sample must start on a fresh document without runtime');
+    const {health:before,epoch}=await waitForColdDocument(rpc,oldEpoch);
     await setupInput();
+    assert.equal(await rpc.js('window.__CONNECTOR_BOOTSTRAP__.pageEpoch'),epoch);
     const target={by:'css',value:'#transport-bench'};const plan=[];
     for(let step=0;step<steps;step+=2){const value=`cold-${steps}-${step}-中文`;plan.push({id:'fill'+step,op:'fill',target,value,expect:{kind:'valueEquals',target,expected:value}},{id:'read'+step,op:'query',target,query:{kind:'value'},expect:{kind:'result',stepId:'read'+step,pointer:'/value',operator:'eq',expected:value}});}
     const spec={schemaVersion:1,runKey:randomUUID(),windowId:'main',mode:'strict',schedule:'sequential',deadlineMs:30000,steps:plan};

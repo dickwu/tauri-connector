@@ -9,6 +9,7 @@ import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import net from 'node:net';
+import {sendLinuxInput} from './native-input-linux.mjs';
 const exec=promisify(execFile);
 const root=fileURLToPath(new URL('../../../',import.meta.url));
 const output=process.env.CONNECTOR_FIXTURE_OUTPUT||mkdtempSync(resolve(tmpdir(),'connector-upgrade-native-'));
@@ -35,8 +36,7 @@ async function occupied(port){return new Promise(resolve=>{const s=net.createCon
 async function input(action,x=0,y=0){
   if(process.platform==='darwin')await exec(inputBinary,[action,String(x),String(y)]);
   else if(process.platform==='win32')await exec('powershell',['-NoProfile','-ExecutionPolicy','Bypass','-File',resolve(root,'examples/workflow-fixture/scripts/native-input.ps1'),action,String(Math.round(x)),String(Math.round(y))]);
-  else if(action==='escape')await exec('xdotool',['key','Escape']);
-  else {await exec('xdotool',['mousemove','--sync',String(Math.round(x)),String(Math.round(y))]);await exec('xdotool',action==='double'?['click','--repeat','2','--delay','100','1']:['click','1']);}
+  else await sendLinuxInput({action,x,y,exec});
 }
 async function settled(rpc,report){const until=Date.now()+12000;while(!report.resultComplete&&Date.now()<until){report=await rpc.pick({action:'get',pickerId:report.pickerId,waitMs:1000,includeImage:true});}return report;}
 async function awaiting(rpc,report){const until=Date.now()+6000;while(['created','installing'].includes(report.status)&&Date.now()<until){report=await rpc.pick({action:'get',pickerId:report.pickerId,waitMs:1000});}assert.equal(report.status,'awaiting_selection',JSON.stringify(report));return report;}

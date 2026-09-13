@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 
 // This helper controls only the already-running isolated fixture. It does not
 // launch a second app, synthesize a selection, or keep a picker state machine.
-export async function verifyEntryPoints({ rpc, token, root, output, selectedPickerId, partialPickerId }) {
+export async function verifyEntryPoints({ rpc, token, root, output, selectedPickerId, partialPickerId, cursorCaptureSessionId }) {
   const host = '127.0.0.1';
   const port = '19555';
   const mcpUrl = `http://${host}:19556/mcp`;
@@ -139,9 +139,15 @@ export async function verifyEntryPoints({ rpc, token, root, output, selectedPick
     assert.equal(initialized.protocolVersion, '2025-06-18'); assert.ok(embeddedSession);
     const stdio = startStdio(true);
     assert.equal((await stdio.request('initialize', { protocolVersion: '2025-06-18' })).protocolVersion, '2025-06-18');
-    const capture = await rpc.inspect('ipc_capture',{action:'start',options:{commands:['fixture_binary_result']}});
+    // Windows lends a stopped session produced by real OS input. Querying it
+    // needs no new invocation or legacy JS permission; the caller retains ownership.
+    const ownsCursorCapture = cursorCaptureSessionId === undefined;
+    if (!ownsCursorCapture) assert.ok(typeof cursorCaptureSessionId === 'string' && cursorCaptureSessionId.length > 0,'cursorCaptureSessionId must be a retained capture handle');
+    const capture = ownsCursorCapture
+      ? await rpc.inspect('ipc_capture',{action:'start',options:{commands:['fixture_binary_result']}})
+      : {captureSessionId:cursorCaptureSessionId};
     try {
-      await rpc.js("window.__TAURI_INTERNALS__.invoke('fixture_binary_result').then(value=>value.byteLength)");
+      if (ownsCursorCapture) await rpc.js("window.__TAURI_INTERNALS__.invoke('fixture_binary_result').then(value=>value.byteLength)");
       let observed;
       const until=Date.now()+5000;
       do {observed=await rpc.inspect('ipc_query',{captureSessionId:capture.captureSessionId,limit:2});if(observed.events.length===2)break;await new Promise(resolve=>setTimeout(resolve,30));} while(Date.now()<until);
@@ -151,12 +157,14 @@ export async function verifyEntryPoints({ rpc, token, root, output, selectedPick
       const second=await runCli(['ipc','query',capture.captureSessionId,'--cursor',first.nextCursor,'--limit','1']);
       assert.equal(second.code,0);assert.equal(second.report.events.length,1);
       assert.notEqual(second.report.events[0].phase,first.events[0].phase);
+      assert.equal(second.report.events[0].invocationId,first.events[0].invocationId);
       for(const call of [params=>embedded('tools/call',params),params=>stdio.request('tools/call',params)]) {
         const result=parseReport(await call({name:'ipc_query',arguments:{captureSessionId:capture.captureSessionId,cursor:first.nextCursor,limit:1,authToken:token}}));
         assert.deepEqual(result.events,second.report.events);
       }
-      cases.push({name:'Opaque IPC cursor round-trips unchanged through WS, CLI and both MCP servers',passed:true});
-    } finally {await rpc.inspect('ipc_capture',{action:'stop',captureSessionId:capture.captureSessionId});}
+      cases.push({name:'Opaque IPC cursor round-trips unchanged through WS, CLI and both MCP servers',passed:true,
+        captureSessionId:capture.captureSessionId,captureOrigin:ownsCursorCapture?'entry_point_fixture_binary':'retained_native_input'});
+    } finally {if (ownsCursorCapture) await rpc.inspect('ipc_capture',{action:'stop',captureSessionId:capture.captureSessionId});}
     if (selectedPickerId) {
       const saved=await rpc.pick({action:'get',pickerId:selectedPickerId,includeImage:true});
       const expected=saved.screenshot.image.base64;

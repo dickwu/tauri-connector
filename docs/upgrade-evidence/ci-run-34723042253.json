@@ -1,0 +1,202 @@
+{
+  "runId": 34723042253,
+  "commit": "13334b3a5022072eca7dbe31755395133c28ebde",
+  "url": "https://github.com/dickwu/tauri-connector/actions/runs/34723042253",
+  "status": "completed",
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "name": "page-runtime",
+      "id": 103632263557,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "docs-and-skills",
+      "id": 103632263595,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / no features",
+      "id": 103632263599,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector off",
+      "id": 103632263612,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture macos-latest / connector off",
+      "id": 103632263618,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture macos-latest / connector on",
+      "id": 103632263625,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture windows-latest / connector off",
+      "id": 103632263627,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "core-contracts",
+      "id": 103632263629,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector on",
+      "id": 103632263630,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture windows-latest / connector on",
+      "id": 103632263675,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap,native-screenshot",
+      "id": 103632263677,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / xcap",
+      "id": 103632263684,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / no features",
+      "id": 103632263692,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin ubuntu-latest / no features",
+      "id": 103632263698,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / native-screenshot",
+      "id": 103632263708,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin ubuntu-latest / native-screenshot",
+      "id": 103632263714,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / xcap,native-screenshot",
+      "id": 103632263730,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin macos-latest / native-screenshot",
+      "id": 103632263739,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / xcap,native-screenshot",
+      "id": 103632263748,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / xcap",
+      "id": 103632263753,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap",
+      "id": 103632263816,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build aarch64-unknown-linux-gnu",
+      "id": 103632345365,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-apple-darwin",
+      "id": 103632345369,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-pc-windows-msvc",
+      "id": 103632345389,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build aarch64-apple-darwin",
+      "id": 103632345394,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-unknown-linux-gnu",
+      "id": 103632345413,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Native WebView windows-latest",
+      "id": 103632744640,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Native WebView ubuntu-latest",
+      "id": 103632744650,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "Native WebView macos-latest",
+      "id": 103632744667,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "aggregate",
+      "id": 103633077894,
+      "status": "completed",
+      "conclusion": "failure"
+    }
+  ],
+  "confirmedProgress": [
+    "Windows fixture resources built successfully on/off.",
+    "Windows plugin test executables now loaded and ran their test bodies; one test expected Unix resource_busy instead of Windows persistence_unavailable.",
+    "Windows native identity, original storage boundary, real input/invoke, active picker image and Escape passed.",
+    "macOS active input, native screenshot, capture and four adapters passed before cold benchmark setup raced navigation."
+  ],
+  "repairs": [
+    "Keep platform-specific fail-closed expectations and strengthen no-dispatch/quarantine assertions.",
+    "Reuse the Windows native-input capture session for four-adapter cursor queries without legacy execute_js.",
+    "Replace old xdotool no-op --sync waiting with bounded cursor observation; never repeat clicks.",
+    "Require a different page epoch, completed document and ready fixture before cold workflow dispatch."
+  ],
+  "verificationBoundary": "These harness fixes preserve business assertions, masks and operation deadlines. Normal CI execution of the repaired paths remains required."
+}

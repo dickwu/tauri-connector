@@ -796,6 +796,7 @@ mod workflow_adapter_tests {
             crate::mcp_tools::call_tool("workflow_capabilities", &json!({}), &bridge, None, &state)
                 .await;
         assert_eq!(embedded["structuredContent"], result);
+        assert_eq!(result["journal"]["privateStorage"], cfg!(unix));
 
         let denied = handle_command(
             "ws".into(),
@@ -826,15 +827,24 @@ mod workflow_adapter_tests {
             .resources
             .try_acquire(vec!["ui".into(), "backend".into()])
             .unwrap();
+        lease.quarantine("outcome_unknown");
+        // Durable-history recovery precedes resource acquisition. Non-Unix
+        // hosts must retain the earlier fail-closed storage rejection instead
+        // of bypassing it just to reach the in-memory lease check.
+        let rejection_code = if cfg!(unix) {
+            "resource_busy"
+        } else {
+            "persistence_unavailable"
+        };
         let command: Command = serde_json::from_value(
             json!({"type":"interact","action":"click","selector":"#isolated"}),
         )
         .unwrap();
         let blocked = handle_command("ws".into(), command, &bridge, None, &state).await;
-        assert_eq!(
-            blocked.outcome.unwrap().error.unwrap().code,
-            "resource_busy"
-        );
+        let blocked = serde_json::to_value(blocked.outcome.unwrap()).unwrap();
+        assert_eq!(blocked["error"]["code"], rejection_code);
+        assert_eq!(blocked["execution"], "not_dispatched");
+        assert_eq!(blocked["effect"], "none");
         let embedded = crate::mcp_tools::call_tool(
             "webview_interact",
             &json!({"action":"click","selector":"#isolated"}),
@@ -849,9 +859,24 @@ mod workflow_adapter_tests {
         );
         assert_eq!(
             embedded["structuredContent"]["outcome"]["error"]["code"],
-            "resource_busy"
+            rejection_code
         );
+        assert_eq!(embedded["structuredContent"]["outcome"]["effect"], "none");
+        assert_eq!(bridge.runtime_diagnostics()["installAttempts"], 0);
+        assert_eq!(bridge.runtime_diagnostics()["commandBytesSent"], 0);
         drop(lease);
+        // Both entry points must leave the original quarantine intact on every
+        // platform, even when storage refuses the operation before arbitration.
+        let Err(conflict) = state
+            .workflow
+            .resources
+            .try_acquire(vec!["ui/window/main".into()])
+        else {
+            panic!("A rejected adapter call released unknown-write quarantine");
+        };
+        assert_eq!(conflict["code"], "resource_busy");
+        assert_eq!(conflict["quarantined"], true);
+        assert_eq!(state.workflow.resources.quarantined(), 1);
         drop(state);
         std::fs::remove_dir_all(directory).unwrap();
     }

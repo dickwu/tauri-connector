@@ -6,6 +6,7 @@ import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 export async function verifyWindowsNative({rpc,token,root,output,fixtureId,child,input,exec,store,test,results}) {
+  let cursorCaptureSessionId;
   const geometry=async()=>JSON.parse((await exec('powershell',['-NoProfile','-ExecutionPolicy','Bypass','-File',resolve(root,'examples/workflow-fixture/scripts/native-input.ps1'),'window',String(child.pid),'0'])).stdout);
   const wait=async(report,ready=false)=>{const until=Date.now()+12000;while((ready?['created','installing'].includes(report.status):!report.resultComplete)&&Date.now()<until){report=await rpc.pick({action:'get',pickerId:report.pickerId,waitMs:1000,includeImage:true});}return report;};
   await test([], 'Windows strict identity and original workflow storage boundary',async()=>{
@@ -24,8 +25,10 @@ export async function verifyWindowsNative({rpc,token,root,output,fixtureId,child
     await delay(150);const query=await rpc.inspect('ipc_query',{captureSessionId:capture.captureSessionId});
     const starts=query.events.filter(e=>e.phase==='started'),ends=query.events.filter(e=>e.phase==='succeeded');
     assert.equal(starts.length,1);assert.equal(ends.length,1);assert.equal(starts[0].invocationId,ends[0].invocationId);
-    await rpc.inspect('ipc_capture',{action:'stop',captureSessionId:capture.captureSessionId});
-    return{nativeSaveDelta:1};
+    const stopped=await rpc.inspect('ipc_capture',{action:'stop',captureSessionId:capture.captureSessionId});
+    assert.equal(stopped.status,'stopped');
+    cursorCaptureSessionId=capture.captureSessionId;
+    return{nativeSaveDelta:1,captureSessionId:cursorCaptureSessionId};
   });
   await test(['UP-PK001','UP-PK014','UP-PK026'], 'Windows picker owns native input and captures selected WebView content',async()=>{
     const before=store();const key=randomUUID();let report=await rpc.pick({requestKey:key,waitMs:0,screenshotSource:'webview_native'});
@@ -40,7 +43,8 @@ export async function verifyWindowsNative({rpc,token,root,output,fixtureId,child
     await input('escape');report=await wait(report);assert.equal(report.status,'cancelled');assert.equal(report.cleanup.status,'confirmed');
   });
   await test(['UP-T101','UP-PK004'], 'Windows four-entry state remains shared under memory-only inspection',async()=>{
-    const {verifyEntryPoints}=await import('./entry-points.mjs');return verifyEntryPoints({rpc,token,root,output,selectedPickerId:results.selection?.pickerId});
+    assert.ok(cursorCaptureSessionId,'The native-input capture session must remain available for cursor verification');
+    const {verifyEntryPoints}=await import('./entry-points.mjs');return verifyEntryPoints({rpc,token,root,output,selectedPickerId:results.selection?.pickerId,cursorCaptureSessionId});
   });
   results.windowsBoundary='Durable workflow rejected with no dispatch; protected in-memory inspection/native input/IPC tested independently.';
 }
