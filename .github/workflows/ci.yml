@@ -113,6 +113,11 @@ jobs:
       - name: Install Linux desktop libraries and display
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-0 libayatana-appindicator3-1 libxdo3 xvfb dbus-x11 xdotool
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build real CLI and stdio entry points for the native contract test
+        run: cargo build -p connector-cli -p connector-mcp-server --locked
       - uses: actions/download-artifact@v4
         with:
           name: fixture-${{ matrix.os }}-off
@@ -137,11 +142,6 @@ jobs:
       - name: Restore executable bit
         if: runner.os != 'Windows'
         run: chmod +x target/debug/connector-workflow-fixture
-      - run: npm ci
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build real CLI and stdio entry points for the native contract test
-        run: cargo build -p connector-cli -p connector-mcp-server --locked
       - name: Native upgrade smoke (desktop session)
         if: runner.os != 'Linux'
         run: node examples/workflow-fixture/scripts/upgrade-native-test.mjs
