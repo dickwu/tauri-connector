@@ -70,38 +70,7 @@ enum Commands {
         command: WorkflowCommand,
     },
     /// Take DOM snapshot with ref IDs
-    Snapshot {
-        /// Interactive only (elements with refs)
-        #[arg(short, long)]
-        interactive: bool,
-        /// Compact (remove structural wrappers)
-        #[arg(short, long)]
-        compact: bool,
-        /// Max depth (0 = unlimited)
-        #[arg(short, long, default_value_t = 0)]
-        depth: usize,
-        /// Max elements (0 = unlimited)
-        #[arg(long, default_value_t = 0)]
-        max_elements: usize,
-        /// Scope to CSS selector
-        #[arg(short, long)]
-        selector: Option<String>,
-        /// Snapshot mode: ai, accessibility, structure
-        #[arg(long)]
-        mode: Option<String>,
-        /// Disable React component name enrichment
-        #[arg(long)]
-        no_react: bool,
-        /// Disable portal stitching
-        #[arg(long)]
-        no_portals: bool,
-        /// Max tokens for inline result (0 = unlimited, default 4000)
-        #[arg(long, default_value_t = 4000)]
-        max_tokens: usize,
-        /// Disable subtree file splitting (full output)
-        #[arg(long)]
-        no_split: bool,
-    },
+    Snapshot(SnapshotArgs),
     /// Click an element
     Click {
         /// @ref or CSS selector
@@ -165,63 +134,9 @@ enum Commands {
         extra: Option<String>,
     },
     /// Wait for element or text
-    Wait {
-        /// CSS selector to wait for
-        selector: Option<String>,
-        /// Wait for this text to appear
-        #[arg(long)]
-        text: Option<String>,
-        /// Wait for the current URL to match a glob pattern
-        #[arg(long)]
-        url: Option<String>,
-        /// Wait for document load state: domcontentloaded, load, networkidle
-        #[arg(long)]
-        load_state: Option<String>,
-        /// Wait until this JavaScript expression/function returns truthy
-        #[arg(long = "fn")]
-        function: Option<String>,
-        /// Element state for selector waits: attached, detached, visible, hidden
-        #[arg(long)]
-        state: Option<String>,
-        /// Timeout in milliseconds
-        #[arg(long, default_value_t = 5000)]
-        timeout: u64,
-    },
+    Wait(WaitArgs),
     /// Find elements semantically and optionally act on the match
-    Locator {
-        #[arg(long)]
-        role: Option<String>,
-        #[arg(long)]
-        text: Option<String>,
-        #[arg(long)]
-        label: Option<String>,
-        #[arg(long)]
-        placeholder: Option<String>,
-        #[arg(long)]
-        alt: Option<String>,
-        #[arg(long)]
-        title: Option<String>,
-        #[arg(long, alias = "testid")]
-        test_id: Option<String>,
-        /// Accessible-name filter applied after the primary locator
-        #[arg(long)]
-        name: Option<String>,
-        /// Match text/name exactly instead of substring matching
-        #[arg(long)]
-        exact: bool,
-        #[arg(long)]
-        first: bool,
-        #[arg(long)]
-        last: bool,
-        #[arg(long)]
-        nth: Option<usize>,
-        /// Optional action: click, fill, type, hover, focus, check, uncheck, text
-        #[arg(long)]
-        action: Option<String>,
-        /// Value for fill/type
-        #[arg(long)]
-        value: Option<String>,
-    },
+    Locator(LocatorArgs),
     /// Execute JavaScript
     Eval {
         /// JS expression
@@ -243,36 +158,7 @@ enum Commands {
         pattern: Option<String>,
     },
     /// Take a screenshot and save to file
-    Screenshot {
-        #[command(flatten)]
-        inspection: inspection::ScreenshotOptions,
-        /// Output file path (e.g. /tmp/shot.png)
-        output: Option<String>,
-        /// CSS selector or @ref for an element-scoped screenshot
-        #[arg(short, long)]
-        selector: Option<String>,
-        /// Image format: png, jpeg, webp
-        #[arg(short, long, default_value = "png")]
-        format: String,
-        /// JPEG/WebP quality (0-100)
-        #[arg(short, long, default_value_t = 80)]
-        quality: u8,
-        /// Max width in pixels (resize if larger)
-        #[arg(short, long)]
-        max_width: Option<u32>,
-        /// Allow overwriting an existing output path
-        #[arg(long)]
-        overwrite: bool,
-        /// Directory for auto-generated screenshot names
-        #[arg(long)]
-        output_dir: Option<PathBuf>,
-        /// Short slug included in auto-generated names
-        #[arg(long)]
-        name_hint: Option<String>,
-        /// Overlay numbered labels for @eN refs from the latest ai snapshot
-        #[arg(long)]
-        annotate: bool,
-    },
+    Screenshot(ScreenshotArgs),
     /// Get cached DOM snapshot (pushed from frontend)
     Dom,
     /// Find elements by CSS selector, XPath, or text
@@ -316,26 +202,7 @@ enum Commands {
         target: String,
     },
     /// Show captured frontend runtime failures and navigation/network events
-    Runtime {
-        /// Number of entries
-        #[arg(short = 'n', long, default_value_t = 100)]
-        lines: usize,
-        /// Runtime kind filter: network, window_error, unhandledrejection, navigation, resource_error
-        #[arg(short, long)]
-        kind: Option<String>,
-        /// Level filter: error, warn, info
-        #[arg(short, long)]
-        level: Option<String>,
-        /// Regex pattern to match
-        #[arg(short, long)]
-        pattern: Option<String>,
-        /// Only entries since this timestamp (epoch ms)
-        #[arg(long)]
-        since: Option<u64>,
-        /// Only entries since a debug mark
-        #[arg(long)]
-        since_mark: Option<String>,
-    },
+    Runtime(RuntimeArgs),
     /// Manage screenshot and diff artifacts
     Artifacts {
         #[command(subcommand)]
@@ -347,61 +214,9 @@ enum Commands {
         action: DebugCommands,
     },
     /// Perform one action and collect verification context
-    Act {
-        /// Action: click, fill, type, press, drag, hover
-        action: String,
-        /// Selector, @ref, or key for press
-        target: Option<String>,
-        /// Text for fill/type
-        text: Vec<String>,
-        /// Explicit key for press
-        #[arg(long)]
-        key: Option<String>,
-        /// Drag target selector/@ref
-        #[arg(long)]
-        target_selector: Option<String>,
-        /// Wait for selector after the action
-        #[arg(long)]
-        wait_selector: Option<String>,
-        /// Wait for text after the action
-        #[arg(long)]
-        wait_text: Option<String>,
-        /// Wait timeout in milliseconds
-        #[arg(long, default_value_t = 5000)]
-        timeout: u64,
-        /// Include DOM snapshot in verification
-        #[arg(long)]
-        dom: bool,
-        /// Include screenshot artifact in verification
-        #[arg(long)]
-        screenshot: bool,
-        /// Include console log diff
-        #[arg(long)]
-        logs: bool,
-        /// Include IPC diff
-        #[arg(long)]
-        ipc: bool,
-        /// Include runtime capture diff
-        #[arg(long)]
-        runtime: bool,
-    },
+    Act(ActArgs),
     /// Run a JSON batch of MCP tool actions sequentially, in parallel, or DAG-ordered
-    Batch {
-        /// Inline JSON spec, a path to a JSON file, or '-' for stdin
-        spec: String,
-        /// Write the run report as pretty JSON to this file
-        #[arg(long)]
-        save: Option<PathBuf>,
-        /// Override execution mode: sequential or parallel
-        #[arg(long)]
-        mode: Option<String>,
-        /// Keep starting independent actions after a failure
-        #[arg(long)]
-        continue_on_error: bool,
-        /// Cap on concurrently running actions
-        #[arg(long)]
-        max_parallel: Option<usize>,
-    },
+    Batch(BatchArgs),
     /// App backend state
     State,
     /// Show discovered connector instances
@@ -446,6 +261,214 @@ enum Commands {
         #[command(subcommand)]
         action: SkillCommands,
     },
+}
+
+// Keep the largest argument builders in separate functions. A single derived
+// Commands::augment_subcommands exceeded the Windows 1 MiB stack in debug builds.
+#[derive(clap::Args)]
+struct SnapshotArgs {
+    /// Interactive only (elements with refs)
+    #[arg(short, long)]
+    interactive: bool,
+    /// Compact (remove structural wrappers)
+    #[arg(short, long)]
+    compact: bool,
+    /// Max depth (0 = unlimited)
+    #[arg(short, long, default_value_t = 0)]
+    depth: usize,
+    /// Max elements (0 = unlimited)
+    #[arg(long, default_value_t = 0)]
+    max_elements: usize,
+    /// Scope to CSS selector
+    #[arg(short, long)]
+    selector: Option<String>,
+    /// Snapshot mode: ai, accessibility, structure
+    #[arg(long)]
+    mode: Option<String>,
+    /// Disable React component name enrichment
+    #[arg(long)]
+    no_react: bool,
+    /// Disable portal stitching
+    #[arg(long)]
+    no_portals: bool,
+    /// Max tokens for inline result (0 = unlimited, default 4000)
+    #[arg(long, default_value_t = 4000)]
+    max_tokens: usize,
+    /// Disable subtree file splitting (full output)
+    #[arg(long)]
+    no_split: bool,
+}
+
+#[derive(clap::Args)]
+struct WaitArgs {
+    /// CSS selector to wait for
+    selector: Option<String>,
+    /// Wait for this text to appear
+    #[arg(long)]
+    text: Option<String>,
+    /// Wait for the current URL to match a glob pattern
+    #[arg(long)]
+    url: Option<String>,
+    /// Wait for document load state: domcontentloaded, load, networkidle
+    #[arg(long)]
+    load_state: Option<String>,
+    /// Wait until this JavaScript expression/function returns truthy
+    #[arg(long = "fn")]
+    function: Option<String>,
+    /// Element state for selector waits: attached, detached, visible, hidden
+    #[arg(long)]
+    state: Option<String>,
+    /// Timeout in milliseconds
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
+}
+
+#[derive(clap::Args)]
+struct LocatorArgs {
+    #[arg(long)]
+    role: Option<String>,
+    #[arg(long)]
+    text: Option<String>,
+    #[arg(long)]
+    label: Option<String>,
+    #[arg(long)]
+    placeholder: Option<String>,
+    #[arg(long)]
+    alt: Option<String>,
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long, alias = "testid")]
+    test_id: Option<String>,
+    /// Accessible-name filter applied after the primary locator
+    #[arg(long)]
+    name: Option<String>,
+    /// Match text/name exactly instead of substring matching
+    #[arg(long)]
+    exact: bool,
+    #[arg(long)]
+    first: bool,
+    #[arg(long)]
+    last: bool,
+    #[arg(long)]
+    nth: Option<usize>,
+    /// Optional action: click, fill, type, hover, focus, check, uncheck, text
+    #[arg(long)]
+    action: Option<String>,
+    /// Value for fill/type
+    #[arg(long)]
+    value: Option<String>,
+}
+
+#[derive(clap::Args)]
+struct ScreenshotArgs {
+    #[command(flatten)]
+    inspection: inspection::ScreenshotOptions,
+    /// Output file path (e.g. /tmp/shot.png)
+    output: Option<String>,
+    /// CSS selector or @ref for an element-scoped screenshot
+    #[arg(short, long)]
+    selector: Option<String>,
+    /// Image format: png, jpeg, webp
+    #[arg(short, long, default_value = "png")]
+    format: String,
+    /// JPEG/WebP quality (0-100)
+    #[arg(short, long, default_value_t = 80)]
+    quality: u8,
+    /// Max width in pixels (resize if larger)
+    #[arg(short, long)]
+    max_width: Option<u32>,
+    /// Allow overwriting an existing output path
+    #[arg(long)]
+    overwrite: bool,
+    /// Directory for auto-generated screenshot names
+    #[arg(long)]
+    output_dir: Option<PathBuf>,
+    /// Short slug included in auto-generated names
+    #[arg(long)]
+    name_hint: Option<String>,
+    /// Overlay numbered labels for @eN refs from the latest ai snapshot
+    #[arg(long)]
+    annotate: bool,
+}
+
+#[derive(clap::Args)]
+struct RuntimeArgs {
+    /// Number of entries
+    #[arg(short = 'n', long, default_value_t = 100)]
+    lines: usize,
+    /// Runtime kind filter: network, window_error, unhandledrejection, navigation, resource_error
+    #[arg(short, long)]
+    kind: Option<String>,
+    /// Level filter: error, warn, info
+    #[arg(short, long)]
+    level: Option<String>,
+    /// Regex pattern to match
+    #[arg(short, long)]
+    pattern: Option<String>,
+    /// Only entries since this timestamp (epoch ms)
+    #[arg(long)]
+    since: Option<u64>,
+    /// Only entries since a debug mark
+    #[arg(long)]
+    since_mark: Option<String>,
+}
+
+#[derive(clap::Args)]
+struct ActArgs {
+    /// Action: click, fill, type, press, drag, hover
+    action: String,
+    /// Selector, @ref, or key for press
+    target: Option<String>,
+    /// Text for fill/type
+    text: Vec<String>,
+    /// Explicit key for press
+    #[arg(long)]
+    key: Option<String>,
+    /// Drag target selector/@ref
+    #[arg(long)]
+    target_selector: Option<String>,
+    /// Wait for selector after the action
+    #[arg(long)]
+    wait_selector: Option<String>,
+    /// Wait for text after the action
+    #[arg(long)]
+    wait_text: Option<String>,
+    /// Wait timeout in milliseconds
+    #[arg(long, default_value_t = 5000)]
+    timeout: u64,
+    /// Include DOM snapshot in verification
+    #[arg(long)]
+    dom: bool,
+    /// Include screenshot artifact in verification
+    #[arg(long)]
+    screenshot: bool,
+    /// Include console log diff
+    #[arg(long)]
+    logs: bool,
+    /// Include IPC diff
+    #[arg(long)]
+    ipc: bool,
+    /// Include runtime capture diff
+    #[arg(long)]
+    runtime: bool,
+}
+
+#[derive(clap::Args)]
+struct BatchArgs {
+    /// Inline JSON spec, a path to a JSON file, or '-' for stdin
+    spec: String,
+    /// Write the run report as pretty JSON to this file
+    #[arg(long)]
+    save: Option<PathBuf>,
+    /// Override execution mode: sequential or parallel
+    #[arg(long)]
+    mode: Option<String>,
+    /// Keep starting independent actions after a failure
+    #[arg(long)]
+    continue_on_error: bool,
+    /// Cap on concurrently running actions
+    #[arg(long)]
+    max_parallel: Option<usize>,
 }
 
 #[derive(Subcommand)]
@@ -671,9 +694,14 @@ enum EventCommands {
     Stop,
 }
 
+fn main() {
+    // Build and parse Clap's command tree before entering the async dispatcher,
+    // so their debug stack frames never overlap on Windows' 1 MiB main stack.
+    run_cli(Cli::parse());
+}
+
 #[tokio::main]
-async fn main() {
-    let cli = Cli::parse();
+async fn run_cli(cli: Cli) {
     commands::set_window_id(cli.window_id.clone());
     let workflow_handle = match &cli.command {
         Commands::Workflow {
@@ -941,7 +969,7 @@ async fn main() {
             )
             .await
         }
-        Commands::Snapshot {
+        Commands::Snapshot(SnapshotArgs {
             interactive,
             compact,
             depth,
@@ -952,7 +980,7 @@ async fn main() {
             no_portals,
             max_tokens,
             no_split,
-        } => {
+        }) => {
             match commands::snapshot(
                 &client,
                 interactive,
@@ -1014,7 +1042,7 @@ async fn main() {
             target,
             extra,
         } => commands::get_prop(&client, &refs, &prop, target.as_deref(), extra.as_deref()).await,
-        Commands::Wait {
+        Commands::Wait(WaitArgs {
             selector,
             text,
             url,
@@ -1022,7 +1050,7 @@ async fn main() {
             function,
             state,
             timeout,
-        } => {
+        }) => {
             commands::wait(
                 &client,
                 selector.as_deref(),
@@ -1035,7 +1063,7 @@ async fn main() {
             )
             .await
         }
-        Commands::Locator {
+        Commands::Locator(LocatorArgs {
             role,
             text,
             label,
@@ -1050,7 +1078,7 @@ async fn main() {
             nth,
             action,
             value,
-        } => {
+        }) => {
             commands::locator(
                 &client,
                 role.as_deref(),
@@ -1086,7 +1114,7 @@ async fn main() {
             )
             .await
         }
-        Commands::Screenshot {
+        Commands::Screenshot(ScreenshotArgs {
             inspection,
             output,
             selector,
@@ -1097,7 +1125,7 @@ async fn main() {
             output_dir,
             name_hint,
             annotate,
-        } => {
+        }) => {
             if inspection.is_rich() {
                 let mut args = serde_json::json!({"windowId":cli.window_id,"format":format,"quality":quality,"overwrite":overwrite,"annotate":annotate});
                 if let Some(selector) = selector {
@@ -1179,14 +1207,14 @@ async fn main() {
             EventCommands::Stop => commands::event_stop(&client).await,
         },
         Commands::Clear { target } => commands::clear_logs(&client, &target).await,
-        Commands::Runtime {
+        Commands::Runtime(RuntimeArgs {
             lines,
             kind,
             level,
             pattern,
             since,
             since_mark,
-        } => {
+        }) => {
             commands::runtime(
                 &client,
                 lines,
@@ -1248,7 +1276,7 @@ async fn main() {
                 .await
             }
         },
-        Commands::Act {
+        Commands::Act(ActArgs {
             action,
             target,
             text,
@@ -1262,7 +1290,7 @@ async fn main() {
             logs,
             ipc,
             runtime,
-        } => {
+        }) => {
             let action_key = if action == "press" {
                 key.as_deref().or(target.as_deref())
             } else {
@@ -1296,13 +1324,13 @@ async fn main() {
             )
             .await
         }
-        Commands::Batch {
+        Commands::Batch(BatchArgs {
             spec,
             save,
             mode,
             continue_on_error,
             max_parallel,
-        } => {
+        }) => {
             commands::batch(
                 &client,
                 &resolved.host,
@@ -1677,5 +1705,59 @@ mod inspection_cli_tests {
         ] {
             assert!(Cli::try_parse_from(std::iter::once("tauri-connector").chain(args)).is_ok());
         }
+    }
+}
+
+#[cfg(test)]
+mod command_stack_tests {
+    use super::*;
+
+    #[test]
+    fn command_tree_parses_with_windows_stack_budget() {
+        const CHILD_ENV: &str = "CONNECTOR_CLI_STACK_TEST_CHILD";
+        if std::env::var_os(CHILD_ENV).is_some() {
+            std::thread::Builder::new()
+                .name("windows-cli-stack-budget".into())
+                .stack_size(1024 * 1024)
+                .spawn(|| {
+                    for args in [
+                        vec![
+                            "ipc",
+                            "query",
+                            "app:capture:session",
+                            "--cursor",
+                            "namespace.app:capture:session.1",
+                        ],
+                        vec!["picker", "start", "--no-screenshot"],
+                        vec!["snapshot", "--max-tokens", "1000"],
+                        vec!["workflow", "capabilities"],
+                    ] {
+                        let parsed =
+                            Cli::try_parse_from(std::iter::once("tauri-connector").chain(args))
+                                .unwrap();
+                        assert_eq!(parsed.window_id, "main");
+                    }
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+            return;
+        }
+        // Stack overflow aborts rather than unwinds. Isolate the constrained
+        // thread so a regression is a reported test failure, not a lost suite.
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "command_stack_tests::command_tree_parses_with_windows_stack_budget",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success(),
+            "CLI parsing must fit the ordinary Windows 1 MiB stack: {}",
+            String::from_utf8_lossy(&child.stderr)
+        );
     }
 }

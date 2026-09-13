@@ -1,0 +1,210 @@
+{
+  "runId": 34759650446,
+  "commit": "52ba23968a378160c2c5864f9949b19b05cb10a4",
+  "url": "https://github.com/dickwu/tauri-connector/actions/runs/34759650446",
+  "status": "completed",
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "name": "core-contracts",
+      "id": 103730089039,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "docs-and-skills",
+      "id": 103730089150,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture macos-latest / connector off",
+      "id": 103730089156,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture macos-latest / connector on",
+      "id": 103730089159,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "page-runtime",
+      "id": 103730089165,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector on",
+      "id": 103730089182,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / no features",
+      "id": 103730089195,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / native-screenshot",
+      "id": 103730089218,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / no features",
+      "id": 103730089225,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / xcap",
+      "id": 103730089231,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture windows-latest / connector on",
+      "id": 103730089238,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture windows-latest / connector off",
+      "id": 103730089247,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap",
+      "id": 103730089250,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / xcap,native-screenshot",
+      "id": 103730089267,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / native-screenshot",
+      "id": 103730089272,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / xcap",
+      "id": 103730089277,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / no features",
+      "id": 103730089279,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / xcap,native-screenshot",
+      "id": 103730089290,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / native-screenshot",
+      "id": 103730089311,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap,native-screenshot",
+      "id": 103730089353,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector off",
+      "id": 103730089392,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build aarch64-unknown-linux-gnu",
+      "id": 103730145425,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-unknown-linux-gnu",
+      "id": 103730145445,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build aarch64-apple-darwin",
+      "id": 103730145459,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-apple-darwin",
+      "id": 103730145478,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-pc-windows-msvc",
+      "id": 103730145559,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Native WebView macos-latest",
+      "id": 103730652351,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Native WebView ubuntu-latest",
+      "id": 103730652360,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Native WebView windows-latest",
+      "id": 103730652389,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "aggregate",
+      "id": 103731282757,
+      "status": "completed",
+      "conclusion": "failure"
+    }
+  ],
+  "confirmedProgress": [
+    "All four Windows plugin test/Clippy combinations passed with the original private-journal boundary.",
+    "macOS and Linux native jobs passed, including active input, images, capture, four entry points, 100 cycles, expiry, benchmarks and legacy workflow regression.",
+    "Windows native selection, image, capture and Escape passed; CLI query then failed with stack overflow."
+  ],
+  "rootCause": "Windows debug Clap Commands::augment_subcommands reserved 1,058,920 stack bytes, exceeding the ordinary 1 MiB main stack; async future size was only 7,136 bytes.",
+  "repair": "Split large argument builders and parse synchronously before entering Tokio; do not increase stack reserves or skip CLI.",
+  "validation": {
+    "windowsCommandBuilderStackBytes": 595352,
+    "largestExtractedBuilderStackBytes": 95592,
+    "cliTestsPassed": 65,
+    "constrainedStackBytes": 1048576,
+    "helpCompatibility": {
+      "surfaces": 82,
+      "changed": [],
+      "beforeBinarySha256": "391262c223cb5380c5b9d1bed61e6cd051aef61412c462a5331883abf9b5f064",
+      "afterBinarySha256": "274c6c0205beb66e0393ec8778844c6ad318708c3b07c57d25ca18a26d0b862e",
+      "comparison": "Complete help output for every pre-existing v0.16 command/subcommand; NO_COLOR=1, CLICOLOR=0, TERM=dumb."
+    }
+  },
+  "remaining": "Normal Windows CI execution of the repaired CLI must still pass."
+}
