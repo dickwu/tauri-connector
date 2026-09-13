@@ -25,6 +25,99 @@ struct FixtureStore {
     evidence: Option<PathBuf>,
 }
 
+// Boot diagnostics are opt-in and separate from the business evidence store.
+struct FixtureBootEvidence(Option<PathBuf>);
+struct FixtureStallEvidence(Option<PathBuf>);
+
+#[tauri::command]
+async fn fixture_wait_for_stall(
+    evidence: tauri::State<'_, FixtureStallEvidence>,
+) -> Result<(), String> {
+    let path = evidence
+        .0
+        .as_ref()
+        .ok_or("fixture stall evidence not configured")?;
+    let staging = path.with_extension("tmp");
+    std::fs::write(&staging, br#"{"phase":"armed"}"#).map_err(|e| e.to_string())?;
+    std::fs::rename(staging, path).map_err(|e| e.to_string())?;
+    let signal = path.with_extension("signal");
+    for _ in 0..600 {
+        if signal.exists() {
+            std::fs::remove_file(signal).map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    Err("fixture stall signal timed out".into())
+}
+
+#[tauri::command]
+fn fixture_stall_finished(
+    elapsed_ms: f64,
+    evidence: tauri::State<'_, FixtureStallEvidence>,
+) -> Result<(), String> {
+    let path = evidence
+        .0
+        .as_ref()
+        .ok_or("fixture stall evidence not configured")?;
+    if !elapsed_ms.is_finite() || !(1000.0..=5000.0).contains(&elapsed_ms) {
+        return Err("fixture stall duration outside bounds".into());
+    }
+    let staging = path.with_extension("tmp");
+    std::fs::write(
+        &staging,
+        serde_json::to_vec(&serde_json::json!({"phase":"finished","elapsedMs":elapsed_ms}))
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::rename(staging, path).map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FrontendDiagnostic {
+    document_ready_state: String,
+    fixture_ready: bool,
+    connector_globals: Vec<String>,
+    hook_markers: Vec<String>,
+}
+
+#[tauri::command]
+fn fixture_frontend_ready(
+    window: tauri::WebviewWindow,
+    diagnostic: FrontendDiagnostic,
+    evidence: tauri::State<'_, FixtureBootEvidence>,
+) -> Result<(), String> {
+    let Some(path) = &evidence.0 else {
+        return Ok(());
+    };
+    if window.label() != "main" {
+        return Ok(());
+    }
+    if diagnostic.document_ready_state.len() > 16
+        || diagnostic.connector_globals.len() > 128
+        || diagnostic.hook_markers.len() > 128
+        || diagnostic
+            .connector_globals
+            .iter()
+            .chain(&diagnostic.hook_markers)
+            .any(|name| name.len() > 128)
+    {
+        return Err("fixture boot diagnostic exceeds bounds".into());
+    }
+    let mut value = serde_json::to_value(diagnostic).map_err(|e| e.to_string())?;
+    value["processId"] = serde_json::json!(std::process::id());
+    value["windowId"] = serde_json::json!(window.label());
+    value["connectorFeature"] = serde_json::json!(cfg!(feature = "dev-connector"));
+    let staging = path.with_extension("tmp");
+    std::fs::write(
+        &staging,
+        serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::rename(staging, path).map_err(|e| e.to_string())
+}
+
 impl FixtureStore {
     fn publish(&self, data: &FixtureData) -> Result<(), String> {
         if let Some(path) = &self.evidence {
@@ -80,7 +173,17 @@ fn fixture_set_delay(delay_ms: u64, store: tauri::State<'_, FixtureStore>) -> Re
 
 #[tauri::command]
 fn fixture_record_input(kind: String, store: tauri::State<'_, FixtureStore>) -> Result<(), String> {
-    if !["click", "submit", "change", "navigation", "earlyCapture"].contains(&kind.as_str()) {
+    if ![
+        "click",
+        "submit",
+        "change",
+        "navigation",
+        "earlyCapture",
+        "escapeKeydown",
+        "escapeKeyup",
+    ]
+    .contains(&kind.as_str())
+    {
         return Err("invalid fixture counter".into());
     }
     let mut data = store.data.lock().map_err(|e| e.to_string())?;
@@ -132,6 +235,12 @@ fn main() {
         .expect("write isolated fixture evidence");
     let builder = tauri::Builder::default()
         .manage(store)
+        .manage(FixtureStallEvidence(
+            std::env::var_os("CONNECTOR_FIXTURE_STALL_EVIDENCE").map(PathBuf::from),
+        ))
+        .manage(FixtureBootEvidence(
+            std::env::var_os("CONNECTOR_FIXTURE_BOOT_EVIDENCE").map(PathBuf::from),
+        ))
         .invoke_handler(tauri::generate_handler![
             fixture_create_task,
             fixture_state,
@@ -142,7 +251,10 @@ fn main() {
             fixture_fail_after_write,
             fixture_binary_result,
             fixture_pending,
-            fixture_window
+            fixture_window,
+            fixture_frontend_ready,
+            fixture_wait_for_stall,
+            fixture_stall_finished
         ]);
     #[cfg(feature = "dev-connector")]
     let builder = {

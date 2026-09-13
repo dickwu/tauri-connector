@@ -1,6 +1,68 @@
 use super::*;
 
 #[test]
+fn up_pk030_slow_read_on_same_connection_does_not_cancel_or_refresh_picker() {
+    let service = PickerService::default();
+    let arbiter = crate::workflow::resources::ResourceArbiter::default();
+    let (record, _) = service
+        .reserve(request("slow-status", "main"), 1, &arbiter)
+        .unwrap();
+    let mut e = lock(&record.inner);
+    e.status = "awaiting_selection".into();
+    e.context = json!({"pageEpoch":"page","runtimeId":"runtime"});
+    let before = e.report(false);
+    let deadline = e.deadline;
+    let failure = json!({"transportFailure":true});
+    let same = json!({"pageEpoch":"page","runtime":{"ready":true,"context":e.context}});
+    assert!(e.retain_after_slow_status("status", &failure, true, Ok(&same)));
+    for reason in ["WS bridge timeout", "Script execution timeout (eval path)"] {
+        let timeout = crate::bridge::BridgeError::DispatchedOutcomeUnknown {
+            request_id: "probe".into(),
+            reason: reason.into(),
+        };
+        assert!(e.retain_after_slow_status("status", &failure, true, Err(&timeout)));
+    }
+    for reason in [
+        "Target document is navigating",
+        "Current origin is outside host configuration",
+        "Target window is unavailable",
+        "Host probe lookup deadline expired",
+    ] {
+        let concrete = crate::bridge::BridgeError::NotDispatched {
+            request_id: "probe".into(),
+            reason: reason.into(),
+        };
+        assert!(!e.retain_after_slow_status("status", &failure, true, Err(&concrete)));
+    }
+    let script_error = crate::bridge::BridgeError::ExecutionFailed {
+        request_id: "probe".into(),
+        error: "page error".into(),
+    };
+    assert!(!e.retain_after_slow_status("status", &failure, true, Err(&script_error)));
+    let channel_error = crate::bridge::BridgeError::DispatchedOutcomeUnknown {
+        request_id: "probe".into(),
+        reason: "Bridge response channel closed".into(),
+    };
+    assert!(!e.retain_after_slow_status("status", &failure, true, Err(&channel_error)));
+    let explicit_status_error = page_transport_failure("status", script_error);
+    assert!(!e.retain_after_slow_status("status", &explicit_status_error, true, Ok(&same)));
+    assert_eq!(e.report(false), before);
+    assert_eq!(e.deadline, deadline);
+    assert!(e.lease.is_some());
+    assert!(!e.retain_after_slow_status("start", &failure, true, Ok(&same)));
+    assert!(!e.retain_after_slow_status("status", &failure, false, Ok(&same)));
+    assert!(!e.retain_after_slow_status(
+        "status",
+        &json!({"code":"picker_not_found"}),
+        true,
+        Ok(&same)
+    ));
+    assert!(!e.retain_after_slow_status("status", &failure, true, Ok(&json!({"pageEpoch":"new"}))));
+    e.terminal("cancelled");
+    assert!(!e.retain_after_slow_status("status", &failure, true, Ok(&same)));
+}
+
+#[test]
 fn up_pk013_only_a_never_dispatched_start_proves_no_guard_needs_cleanup() {
     use crate::bridge::BridgeError;
     let not_dispatched = || BridgeError::NotDispatched {
@@ -354,4 +416,28 @@ fn up_pk031_navigation_cancels_image_after_input_lease_released() {
     assert!(e.cancel_capture);
     assert_eq!(e.screenshot["status"], "failed");
     assert_eq!(e.cleanup, "context_destroyed");
+}
+
+#[tokio::test]
+async fn up_pk033_replaced_connection_rejects_late_image_as_context_change() {
+    let service = PickerService::default();
+    let arbiter = crate::workflow::resources::ResourceArbiter::default();
+    let window = format!("late-picker-{}", uuid::Uuid::new_v4());
+    let mut req = request("late-pin", &window);
+    req.capture_screenshot = true;
+    let (record, _) = service.reserve(req, 1, &arbiter).unwrap();
+    let bridge = crate::bridge::Bridge::start().unwrap();
+    let pin = bridge.pin_connection(&window).await;
+    {
+        let mut e = lock(&record.inner);
+        e.terminal("selected");
+        e.connection_pin = Some(pin);
+    }
+    crate::identity::page_navigation(&window);
+    assert!(!service.save_image(&record, vec![1, 2, 3], json!({})));
+    let e = lock(&record.inner);
+    assert_eq!(e.status, "selected");
+    assert_eq!(e.screenshot["error"]["code"], "capture_context_changed");
+    assert!(e.image.is_none());
+    crate::identity::window_destroyed(&window);
 }

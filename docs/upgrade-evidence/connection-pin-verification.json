@@ -1,0 +1,109 @@
+{
+  "recordedAt": "2026-09-13T14:57:45.067265+00:00",
+  "scope": "Connection pin, bounded slow-status retention and native fixture assertion upgrades",
+  "checks": [
+    {
+      "command": "cargo test --workspace --locked",
+      "passed": 330,
+      "note": "Before two final picker review fixes; affected picker tests rerun below."
+    },
+    {
+      "command": "npm test",
+      "helpers": 96,
+      "workflowChromium": 27,
+      "semanticChromium": 19,
+      "geometryChromium": 10,
+      "contractsAndHarness": 27,
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test -p tauri-plugin-connector picker:: --locked",
+      "passed": 17,
+      "note": "After review fixes; includes late image identity rejection and concrete probe errors."
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo fmt --all --check",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo build --release --locked -p connector-cli -p connector-mcp-server",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo check --locked -p tauri-plugin-connector --no-default-features",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run test:contracts",
+      "passed": 29,
+      "exitCode": 0,
+      "note": "Final native evidence and stall harness contract assertions; actual OS stall execution remains pending CI."
+    },
+    {
+      "command": "cargo test --workspace --locked",
+      "passed": 334,
+      "exitCode": 0,
+      "note": "Final production state including both review fixes and destroyed-window registry cleanup."
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
+      "exitCode": 0,
+      "note": "Final production state."
+    }
+  ],
+  "review": {
+    "initialFindings": [
+      "Concrete probe failures were collapsed into inconclusive timeouts",
+      "Late image identity rejection could be mislabeled as budget failure"
+    ],
+    "resolution": "Both fixed and independently re-reviewed; no remaining concrete blocker reported.",
+    "reviewerVerification": "10 up_pk03 tests passed"
+  },
+  "nativeStatus": "New assertions and production changes await same-commit macOS, Windows and Linux CI; these local tests do not establish native success.",
+  "logs": {
+    "tauri-v016-pin-rust.log": {
+      "rawSha256": "5c3065a2ea2027d4d42bbe4e323aff0468caf51ee262945c00bb86c0e2b83af5",
+      "scope": "local command log; CI independently reruns checked-in code"
+    },
+    "tauri-v016-pin-js.log": {
+      "rawSha256": "31ecce181a99512d91a3ca1eb75eb255d0756e3a6a80cdf505509925f27eedb7",
+      "scope": "local command log; CI independently reruns checked-in code"
+    },
+    "tauri-v016-pin-clippy.log": {
+      "rawSha256": "7eda46c9f28aae54e45e0ba10a7514fb0381ea5f3a8f51d3f1abb14b3c444570",
+      "scope": "local command log; CI independently reruns checked-in code"
+    },
+    "tauri-v016-pin-release-build.log": {
+      "rawSha256": "dd6aef45a8d2563688e6609403852cdd39b47e1e9f971d452c008a24b7a634b8",
+      "scope": "local command log; CI independently reruns checked-in code"
+    },
+    "tauri-v016-pin-no-features.log": {
+      "rawSha256": "07b7d910a6a8bbc0f35a7c580690667f5a6c055af1ed04c0b24def6c57b16510",
+      "scope": "local command log; CI independently reruns checked-in code"
+    },
+    "tauri-picker-review-fixes.log": {
+      "rawSha256": "27cbb6e05204142419e89ad9259834ff59ba3d88d26503c9a22c235995c78ee9",
+      "scope": "local command log; CI independently reruns checked-in code"
+    },
+    "tauri-pin-review-clippy.log": {
+      "rawSha256": "ebfc8f2beefac13b955753f71cedb743f3ef6c19580007360b14779cd15a5877",
+      "scope": "local command log; CI independently reruns checked-in code"
+    },
+    "tauri-v016-final-contracts.log": {
+      "rawSha256": "3888b392c03bb1272b52907acf1527f86e52a741fd1b3233c0e885371fbca6c6",
+      "scope": "local command log; CI independently reruns checked-in code"
+    },
+    "tauri-v016-final-connection-tests.log": {
+      "rawSha256": "9935575fa5c133244d053096620f79b7ee5d83ce11eab6b946616686310be4c0",
+      "scope": "local command log; CI independently reruns checked-in code"
+    },
+    "tauri-v016-final-connection-clippy.log": {
+      "rawSha256": "f65c4e6457051bda5b1463dc41ba81958200acff7c61c206fe61298765c8ff87",
+      "scope": "local command log; CI independently reruns checked-in code"
+    }
+  }
+}

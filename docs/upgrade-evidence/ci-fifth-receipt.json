@@ -1,0 +1,1331 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "fifth_hosted_ci",
+  "runId": "34762439916",
+  "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+  "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+  "conclusion": "failure",
+  "completedAt": "2026-09-13T14:29:41Z",
+  "scope": "Actual reached assertions only. A green job does not pass every acceptance row; later assertions in an aborted case are not credited. Native Wry/OS input, synthetic DOM workflow input, browser, unit and build evidence remain distinct.",
+  "pendingAfterCheckpoint": [
+    "Production picker status-race fix and stronger native assertions in the worktree are not credited by this receipt.",
+    "A new same-head CI/native run must validate those changes.",
+    "Release publication and local installation are separate gates."
+  ],
+  "jobs": [
+    {
+      "name": "core-contracts",
+      "jobId": 103737508082,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508082"
+    },
+    {
+      "name": "page-runtime",
+      "jobId": 103737508135,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508135"
+    },
+    {
+      "name": "Fixture windows-latest / connector on",
+      "jobId": 103737508159,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508159"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector on",
+      "jobId": 103737508163,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508163"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap,native-screenshot",
+      "jobId": 103737508172,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508172"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector off",
+      "jobId": 103737508193,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508193"
+    },
+    {
+      "name": "Fixture macos-latest / connector off",
+      "jobId": 103737508200,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508200"
+    },
+    {
+      "name": "docs-and-skills",
+      "jobId": 103737508206,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508206"
+    },
+    {
+      "name": "Fixture windows-latest / connector off",
+      "jobId": 103737508222,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508222"
+    },
+    {
+      "name": "Plugin windows-latest / native-screenshot",
+      "jobId": 103737508240,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508240"
+    },
+    {
+      "name": "Plugin macos-latest / xcap,native-screenshot",
+      "jobId": 103737508248,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508248"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap",
+      "jobId": 103737508251,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508251"
+    },
+    {
+      "name": "Plugin ubuntu-latest / native-screenshot",
+      "jobId": 103737508254,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508254"
+    },
+    {
+      "name": "Plugin windows-latest / xcap",
+      "jobId": 103737508263,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508263"
+    },
+    {
+      "name": "Plugin windows-latest / xcap,native-screenshot",
+      "jobId": 103737508270,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508270"
+    },
+    {
+      "name": "Plugin macos-latest / no features",
+      "jobId": 103737508273,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508273"
+    },
+    {
+      "name": "Plugin ubuntu-latest / no features",
+      "jobId": 103737508287,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508287"
+    },
+    {
+      "name": "Plugin windows-latest / no features",
+      "jobId": 103737508294,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508294"
+    },
+    {
+      "name": "Fixture macos-latest / connector on",
+      "jobId": 103737508307,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508307"
+    },
+    {
+      "name": "Plugin macos-latest / native-screenshot",
+      "jobId": 103737508325,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508325"
+    },
+    {
+      "name": "Plugin macos-latest / xcap",
+      "jobId": 103737508398,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737508398"
+    },
+    {
+      "name": "Build aarch64-apple-darwin",
+      "jobId": 103737576169,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737576169"
+    },
+    {
+      "name": "Build x86_64-apple-darwin",
+      "jobId": 103737576178,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737576178"
+    },
+    {
+      "name": "Build x86_64-unknown-linux-gnu",
+      "jobId": 103737576187,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737576187"
+    },
+    {
+      "name": "Build x86_64-pc-windows-msvc",
+      "jobId": 103737576189,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737576189"
+    },
+    {
+      "name": "Build aarch64-unknown-linux-gnu",
+      "jobId": 103737576205,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737576205"
+    },
+    {
+      "name": "Native WebView macos-latest",
+      "jobId": 103737993068,
+      "conclusion": "failure",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737993068"
+    },
+    {
+      "name": "Native WebView windows-latest",
+      "jobId": 103737993081,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737993081"
+    },
+    {
+      "name": "Native WebView ubuntu-latest",
+      "jobId": 103737993082,
+      "conclusion": "success",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103737993082"
+    },
+    {
+      "name": "aggregate",
+      "jobId": 103738498761,
+      "conclusion": "failure",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916/job/103738498761"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "34762439916:macos-latest/feature-off/result.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-macos-latest",
+      "file": "feature-off/result.json",
+      "sha256": "73f893a3e6717b2c800096a522220ba3d1f2f6dc1fcf48928c89de062db4911e",
+      "bytes": 232,
+      "layer": "native-webview",
+      "passed": true,
+      "tests": [],
+      "nativeAppRunning": true,
+      "connectorFeature": false,
+      "checkedPorts": [
+        19555,
+        19556
+      ],
+      "listeningPorts": []
+    },
+    {
+      "id": "34762439916:macos-latest/upgrade/upgrade-native-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-macos-latest",
+      "file": "upgrade/upgrade-native-results.json",
+      "sha256": "94c9da986a05044634ff28521b0c0b92acaef79d8a2ce1a589bddf0a6a898da9",
+      "bytes": 5559,
+      "layer": "native_webview",
+      "passed": false,
+      "tests": [
+        {
+          "name": "OS input driver reaches independent native fixture counter",
+          "passed": true,
+          "durationMs": 995.1949159999986,
+          "nativeWriteDelta": 1
+        },
+        {
+          "name": "legacy WS cannot discard requested native source or required masks",
+          "passed": true,
+          "durationMs": 2.1977919999990263
+        },
+        {
+          "name": "anonymous rich request fails before picker creation",
+          "passed": true,
+          "durationMs": 4.86883300000045
+        },
+        {
+          "name": "native identity and layered health expose cold state",
+          "passed": true,
+          "durationMs": 8.083375000001979
+        },
+        {
+          "name": "native save selection deduplicates, captures and never invokes save",
+          "passed": false,
+          "failure": "Expected selected; actual target_changed with selection null, screenshot cancelled and cleanup confirmed."
+        }
+      ]
+    },
+    {
+      "id": "34762439916:ubuntu-latest/feature-off/result.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-ubuntu-latest",
+      "file": "feature-off/result.json",
+      "sha256": "cef548eb06ab2ea60d119f27172f4b48b72bde4c450ea1c3af565c022e3c09a8",
+      "bytes": 219,
+      "layer": "native-webview",
+      "passed": true,
+      "tests": [],
+      "nativeAppRunning": true,
+      "connectorFeature": false,
+      "checkedPorts": [
+        19555,
+        19556
+      ],
+      "listeningPorts": []
+    },
+    {
+      "id": "34762439916:ubuntu-latest/picker-stress/runtime-native-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-ubuntu-latest",
+      "file": "picker-stress/runtime-native-results.json",
+      "sha256": "1a9a754191a45c1c8c7891c2158da313b84f4346133552e05155214a51f0bfdb",
+      "bytes": 1820,
+      "layer": "native_webview",
+      "passed": true,
+      "tests": [
+        {
+          "name": "anonymous rich health rejected",
+          "passed": true
+        },
+        {
+          "name": "native read-only probe does not install missing runtime",
+          "passed": true
+        },
+        {
+          "name": "native cold runtime handshake confirms complete context",
+          "passed": true
+        },
+        {
+          "name": "native explicit cancel confirms guard cleanup",
+          "passed": true
+        },
+        {
+          "name": "100 native WebView start/cancel cycles release DOM, guard, leases and bridge waiters",
+          "passed": true,
+          "cycles": 100
+        },
+        {
+          "name": "Native deadline expiry restores the same DOM and guard baseline without client cancel",
+          "passed": true,
+          "timeoutMs": 5000
+        }
+      ]
+    },
+    {
+      "id": "34762439916:ubuntu-latest/upgrade/capture-benchmark.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-ubuntu-latest",
+      "file": "upgrade/capture-benchmark.json",
+      "sha256": "463fc02bd435887baf5a104f2aee469816729c18ffb9924c8f7a6abf6a83bfe5",
+      "bytes": 175366,
+      "layer": "native_webview_workflow_gui_dispatch",
+      "passed": true,
+      "tests": [],
+      "samplesPerConfiguration": 30,
+      "warmupsPerConfiguration": 1,
+      "status": "completed",
+      "groups": [
+        {
+          "mode": "capture_off",
+          "samples": 30,
+          "warmups": 1,
+          "workflowSteps": 4,
+          "medianMs": 134.24815349999972,
+          "p95Ms": 1091.4545719999987,
+          "medianValidatedMs": 137.92974099999992,
+          "p95ValidatedMs": 1093.4841059999999,
+          "nativeSaveDelta": 30,
+          "nativeTaskDelta": 30,
+          "frontendInputEvents": 30,
+          "frontendOpens": 30,
+          "frontendSaves": 30,
+          "nativeSaveCallsIncludingWarmup": 31,
+          "nativePendingInvocations": 0,
+          "maxObservedQueuedEvents": 0,
+          "maxObservedQueuedBytes": 0,
+          "droppedEvents": 0
+        },
+        {
+          "mode": "capture_on",
+          "samples": 30,
+          "warmups": 1,
+          "workflowSteps": 4,
+          "medianMs": 114.64588300000105,
+          "p95Ms": 215.62894999999844,
+          "medianValidatedMs": 117.94592399999965,
+          "p95ValidatedMs": 219.60656999999992,
+          "nativeSaveDelta": 30,
+          "nativeTaskDelta": 30,
+          "frontendInputEvents": 30,
+          "frontendOpens": 30,
+          "frontendSaves": 30,
+          "nativeSaveCallsIncludingWarmup": 31,
+          "nativePendingInvocations": 0,
+          "maxObservedQueuedEvents": 0,
+          "maxObservedQueuedBytes": 0,
+          "droppedEvents": 0
+        }
+      ],
+      "coldSampleCount": null,
+      "rowCount": 60
+    },
+    {
+      "id": "34762439916:ubuntu-latest/upgrade/entry-points-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-ubuntu-latest",
+      "file": "upgrade/entry-points-results.json",
+      "sha256": "96a0945d4df7667de9d1601b5b3c6921075e734f02076b10aeca31a4de6d36f6",
+      "bytes": 2544,
+      "layer": "running-native-app-entry-points",
+      "passed": null,
+      "tests": [
+        {
+          "name": "Opaque IPC cursor round-trips unchanged through WS, CLI and both MCP servers",
+          "passed": true
+        },
+        {
+          "name": "embedded returns cached masked PNG and complete metadata",
+          "passed": true
+        },
+        {
+          "name": "stdio returns cached masked PNG and complete metadata",
+          "passed": true
+        },
+        {
+          "name": "Both MCPs preserve selected metadata when screenshot failed",
+          "passed": true
+        },
+        {
+          "name": "CLI start -> embedded MCP get -> standalone MCP cancel -> WS retained result",
+          "passed": true
+        },
+        {
+          "name": "Anonymous retained picker denied across WS and both MCP paths",
+          "passed": true
+        },
+        {
+          "name": "CLI omitted-action convenience activates native page picker and cleans up",
+          "passed": true
+        },
+        {
+          "name": "All four shipped inspection JSON examples execute with fresh keys and returned handles",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "34762439916:ubuntu-latest/upgrade/transport-benchmark.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-ubuntu-latest",
+      "file": "upgrade/transport-benchmark.json",
+      "sha256": "93e10d722f9b1137f3a1102452956d62e3897fe4610a03daf488138aa2fb8b10",
+      "bytes": 54316,
+      "layer": "native_webview",
+      "passed": null,
+      "tests": [],
+      "samplesPerConfiguration": 30,
+      "warmupsPerConfiguration": null,
+      "status": null,
+      "groups": [
+        {
+          "steps": 2,
+          "mode": "full_source",
+          "samples": 30,
+          "medianMs": 19.276582000002236,
+          "p95Ms": 27.73788599999898,
+          "meanScriptBytes": 123871.33333333333,
+          "meanBridgeCommandBytes": 127143.33333333333,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 2,
+          "mode": "short_packet",
+          "samples": 30,
+          "medianMs": 7.999128999999812,
+          "p95Ms": 13.345170999997208,
+          "meanScriptBytes": 6151.333333333333,
+          "meanBridgeCommandBytes": 7578.333333333333,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 10,
+          "mode": "full_source",
+          "samples": 30,
+          "medianMs": 76.74915200000032,
+          "p95Ms": 86.3817229999986,
+          "meanScriptBytes": 421664.6666666667,
+          "meanBridgeCommandBytes": 431576.6666666667,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 10,
+          "mode": "short_packet",
+          "samples": 30,
+          "medianMs": 30.107154000001174,
+          "p95Ms": 39.330974000000424,
+          "meanScriptBytes": 21416.666666666668,
+          "meanBridgeCommandBytes": 25055.666666666668,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 20,
+          "mode": "full_source",
+          "samples": 30,
+          "medianMs": 150.92453699999896,
+          "p95Ms": 167.4098440000016,
+          "meanScriptBytes": 793916.3333333334,
+          "meanBridgeCommandBytes": 812128.3333333334,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 20,
+          "mode": "short_packet",
+          "samples": 30,
+          "medianMs": 58.15809600000648,
+          "p95Ms": 81.85640499999863,
+          "meanScriptBytes": 40508.333333333336,
+          "meanBridgeCommandBytes": 46912.333333333336,
+          "nativeSaveDelta": 0
+        }
+      ],
+      "coldSampleCount": 3,
+      "rowCount": 180
+    },
+    {
+      "id": "34762439916:ubuntu-latest/upgrade/upgrade-native-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-ubuntu-latest",
+      "file": "upgrade/upgrade-native-results.json",
+      "sha256": "5b22ef30d1d8387e25a9783692da233098c87925e7baa372e4827d21562032f3",
+      "bytes": 25651,
+      "layer": "native_webview",
+      "passed": true,
+      "tests": [
+        {
+          "name": "OS input driver reaches independent native fixture counter",
+          "passed": true,
+          "durationMs": 119.88289599999985,
+          "nativeWriteDelta": 1
+        },
+        {
+          "name": "legacy WS cannot discard requested native source or required masks",
+          "passed": true,
+          "durationMs": 0.7234880000000885
+        },
+        {
+          "name": "anonymous rich request fails before picker creation",
+          "passed": true,
+          "durationMs": 0.34355600000003506
+        },
+        {
+          "name": "native identity and layered health expose cold state",
+          "passed": true,
+          "durationMs": 2.0307130000001052
+        },
+        {
+          "name": "native save selection deduplicates, captures and never invokes save",
+          "passed": true,
+          "durationMs": 834.4391630000002,
+          "nativeSaveDelta": 0,
+          "dimensions": [
+            67,
+            39
+          ]
+        },
+        {
+          "name": "omitted-action call waits for a real native user selection",
+          "passed": true,
+          "durationMs": 545.3582180000003
+        },
+        {
+          "name": "explicit screenshot backend failure keeps the native selection",
+          "passed": true,
+          "durationMs": 548.7115279999998
+        },
+        {
+          "name": "native checkbox gesture has no business default effect",
+          "passed": true,
+          "durationMs": 547.2449580000002
+        },
+        {
+          "name": "native link gesture has no business default effect",
+          "passed": true,
+          "durationMs": 545.7764950000001
+        },
+        {
+          "name": "native form gesture has no business default effect",
+          "passed": true,
+          "durationMs": 654.661419
+        },
+        {
+          "name": "native Escape cancels and releases guard",
+          "passed": true,
+          "durationMs": 544.1296990000001
+        },
+        {
+          "name": "reload invalidates original picker identity",
+          "passed": true,
+          "durationMs": 646.9903099999992
+        },
+        {
+          "name": "same GUI workflow load with capture off and on",
+          "passed": true,
+          "durationMs": 15236.483111000001
+        },
+        {
+          "name": "legacy native data callbacks remain available without exposing protected capture",
+          "passed": true,
+          "durationMs": 4.005164999998669
+        },
+        {
+          "name": "native capture returns bounded invoke evidence without legacy leak",
+          "passed": true,
+          "durationMs": 172.0605379999979,
+          "eventCount": 2
+        },
+        {
+          "name": "native capture preserves rejection, raw binary and pending business work",
+          "passed": true,
+          "durationMs": 168.3433210000003,
+          "nativeExpectedWriteDelta": 1,
+          "binaryBytes": 4,
+          "pendingBusinessStillActive": 1,
+          "redactedError": true
+        },
+        {
+          "name": "strict instance, capture, GUI workflow, query and native image compose",
+          "passed": true,
+          "durationMs": 616.6663540000009,
+          "nativeSaveDelta": 1,
+          "screenshotSource": "webview_native"
+        },
+        {
+          "name": "four real entry points share lifecycle, authority and exit semantics",
+          "passed": true,
+          "durationMs": 3472.2334329999976,
+          "layer": "running-native-app-entry-points",
+          "syntheticSelectionUsed": false,
+          "nativeUserSelectionPerformed": false
+        },
+        {
+          "name": "measured warm full-source vs short-packet transport",
+          "passed": true,
+          "durationMs": 12858.049741000003,
+          "samplesPerConfiguration": 30
+        },
+        {
+          "name": "unknown result keeps original effect and permits captured diagnostics without replay",
+          "passed": true,
+          "durationMs": 30020.569616999994,
+          "nativeSaveDelta": 1,
+          "quarantinePreserved": true,
+          "diagnosticEvents": 2
+        }
+      ],
+      "selectedResult": {
+        "status": "selected",
+        "cleanup": "confirmed",
+        "selectionTag": "button",
+        "screenshotStatus": "captured",
+        "source": "webview_native",
+        "widthPx": 67,
+        "heightPx": 39,
+        "redactionStatus": "applied"
+      }
+    },
+    {
+      "id": "34762439916:ubuntu-latest/workflow/native-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-ubuntu-latest",
+      "file": "workflow/native-results.json",
+      "sha256": "ea58714cf05ea001c37dfe47fc05efa13588df0cebeb6ce7fdf304aaea1c584b",
+      "bytes": 3855,
+      "layer": "native-webview",
+      "passed": true,
+      "tests": [
+        {
+          "name": "native React controlled input reaches Rust save exactly once",
+          "passed": true,
+          "durationMs": 186
+        },
+        {
+          "name": "same UI path via one caller request per step",
+          "passed": true,
+          "durationMs": 138
+        },
+        {
+          "name": "two clients share one runKey and cannot change its inputs",
+          "passed": true,
+          "durationMs": 199
+        },
+        {
+          "name": "disconnect and resubmit retain the existing logical run",
+          "passed": true,
+          "durationMs": 1343
+        },
+        {
+          "name": "cancel stops an outstanding wait and releases bridge waiters/resources",
+          "passed": true,
+          "durationMs": 139
+        },
+        {
+          "name": "WS operation beyond two seconds produces one native write",
+          "passed": true,
+          "durationMs": 2207
+        },
+        {
+          "name": "JS exception after native write does not replay through eval",
+          "passed": true,
+          "durationMs": 3
+        },
+        {
+          "name": "unknown write response quarantines resource without replay",
+          "passed": true,
+          "durationMs": 30006
+        }
+      ]
+    },
+    {
+      "id": "34762439916:windows-latest/feature-off/result.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-windows-latest",
+      "file": "feature-off/result.json",
+      "sha256": "eea233ba438b2c15bb058e69e513100bd4b8d3331846bd47f553addb979f5702",
+      "bytes": 231,
+      "layer": "native-webview",
+      "passed": true,
+      "tests": [],
+      "nativeAppRunning": true,
+      "connectorFeature": false,
+      "checkedPorts": [
+        19555,
+        19556
+      ],
+      "listeningPorts": []
+    },
+    {
+      "id": "34762439916:windows-latest/upgrade/entry-points-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-windows-latest",
+      "file": "upgrade/entry-points-results.json",
+      "sha256": "ccb018441e11fcfaf0fc80d73e38228cd5f3205e169d4136e226ad2e9abcce49",
+      "bytes": 2326,
+      "layer": "running-native-app-entry-points",
+      "passed": null,
+      "tests": [
+        {
+          "name": "Opaque IPC cursor round-trips unchanged through WS, CLI and both MCP servers",
+          "passed": true
+        },
+        {
+          "name": "embedded returns cached masked PNG and complete metadata",
+          "passed": true
+        },
+        {
+          "name": "stdio returns cached masked PNG and complete metadata",
+          "passed": true
+        },
+        {
+          "name": "CLI start -> embedded MCP get -> standalone MCP cancel -> WS retained result",
+          "passed": true
+        },
+        {
+          "name": "Anonymous retained picker denied across WS and both MCP paths",
+          "passed": true
+        },
+        {
+          "name": "CLI omitted-action convenience activates native page picker and cleans up",
+          "passed": true
+        },
+        {
+          "name": "All four shipped inspection JSON examples execute with fresh keys and returned handles",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "34762439916:windows-latest/upgrade/upgrade-native-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34762439916",
+      "headSha": "ad13524b7ae66ce5b5e1c1e08febe2364f2f4cb1",
+      "artifactName": "native-evidence-windows-latest",
+      "file": "upgrade/upgrade-native-results.json",
+      "sha256": "18ae623053a482ea7344825fced5d273f6fb5c65e1d3313c0b3ffe6ea19a0e10",
+      "bytes": 11425,
+      "layer": "native_webview",
+      "passed": true,
+      "tests": [
+        {
+          "name": "Windows strict identity and original workflow storage boundary",
+          "passed": true,
+          "durationMs": 2.5745999999999185
+        },
+        {
+          "name": "Windows native input sanity and immutable-invoke observation",
+          "passed": true,
+          "durationMs": 4782.2221,
+          "nativeSaveDelta": 1
+        },
+        {
+          "name": "Windows picker owns native input and captures selected WebView content",
+          "passed": true,
+          "durationMs": 1552.2156999999997
+        },
+        {
+          "name": "Windows native Escape cancels without workflow storage",
+          "passed": true,
+          "durationMs": 1583.7459999999992
+        },
+        {
+          "name": "Windows four-entry state remains shared under memory-only inspection",
+          "passed": true,
+          "durationMs": 2624.1604000000007,
+          "layer": "running-native-app-entry-points",
+          "syntheticSelectionUsed": false,
+          "nativeUserSelectionPerformed": false
+        }
+      ],
+      "selectedResult": {
+        "status": "selected",
+        "cleanup": "confirmed",
+        "selectionTag": "button",
+        "screenshotStatus": "captured",
+        "source": "webview_native",
+        "widthPx": 61,
+        "heightPx": 41,
+        "redactionStatus": "applied"
+      }
+    },
+    {
+      "id": "34761163669:macos-latest/feature-off/result.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669",
+      "headSha": "6f53e78b6010721e1e926dbcd0f8d0c2683cc8d9",
+      "artifactName": "native-evidence-macos-latest",
+      "file": "feature-off/result.json",
+      "sha256": "73f893a3e6717b2c800096a522220ba3d1f2f6dc1fcf48928c89de062db4911e",
+      "bytes": 232,
+      "layer": "native-webview",
+      "passed": true,
+      "tests": [],
+      "nativeAppRunning": true,
+      "connectorFeature": false,
+      "checkedPorts": [
+        19555,
+        19556
+      ],
+      "listeningPorts": []
+    },
+    {
+      "id": "34761163669:macos-latest/picker-stress/runtime-native-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669",
+      "headSha": "6f53e78b6010721e1e926dbcd0f8d0c2683cc8d9",
+      "artifactName": "native-evidence-macos-latest",
+      "file": "picker-stress/runtime-native-results.json",
+      "sha256": "19f15fc5c249112f6057ddc6ef13bbd413dad36038882517dd82b0e2b166e592",
+      "bytes": 1920,
+      "layer": "native_webview",
+      "passed": true,
+      "tests": [
+        {
+          "name": "anonymous rich health rejected",
+          "passed": true
+        },
+        {
+          "name": "native read-only probe does not install missing runtime",
+          "passed": true
+        },
+        {
+          "name": "native cold runtime handshake confirms complete context",
+          "passed": true
+        },
+        {
+          "name": "native explicit cancel confirms guard cleanup",
+          "passed": true
+        },
+        {
+          "name": "100 native WebView start/cancel cycles release DOM, guard, leases and bridge waiters",
+          "passed": true,
+          "cycles": 100
+        },
+        {
+          "name": "Native deadline expiry restores the same DOM and guard baseline without client cancel",
+          "passed": true,
+          "timeoutMs": 5000
+        }
+      ]
+    },
+    {
+      "id": "34761163669:macos-latest/upgrade/capture-benchmark.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669",
+      "headSha": "6f53e78b6010721e1e926dbcd0f8d0c2683cc8d9",
+      "artifactName": "native-evidence-macos-latest",
+      "file": "upgrade/capture-benchmark.json",
+      "sha256": "b63c2417b7ec2b7a76faa0b4fd62e9d38b4ee0fff09db12642c096738b919014",
+      "bytes": 175359,
+      "layer": "native_webview_workflow_gui_dispatch",
+      "passed": true,
+      "tests": [],
+      "samplesPerConfiguration": 30,
+      "warmupsPerConfiguration": 1,
+      "status": "completed",
+      "groups": [
+        {
+          "mode": "capture_off",
+          "samples": 30,
+          "warmups": 1,
+          "workflowSteps": 4,
+          "medianMs": 154.34100000000217,
+          "p95Ms": 345.88774999999805,
+          "medianValidatedMs": 156.99456250000185,
+          "p95ValidatedMs": 349.0564169999998,
+          "nativeSaveDelta": 30,
+          "nativeTaskDelta": 30,
+          "frontendInputEvents": 30,
+          "frontendOpens": 30,
+          "frontendSaves": 30,
+          "nativeSaveCallsIncludingWarmup": 31,
+          "nativePendingInvocations": 0,
+          "maxObservedQueuedEvents": 0,
+          "maxObservedQueuedBytes": 0,
+          "droppedEvents": 0
+        },
+        {
+          "mode": "capture_on",
+          "samples": 30,
+          "warmups": 1,
+          "workflowSteps": 4,
+          "medianMs": 159.32039549999718,
+          "p95Ms": 207.5098330000037,
+          "medianValidatedMs": 161.82402099999854,
+          "p95ValidatedMs": 211.29962499999965,
+          "nativeSaveDelta": 30,
+          "nativeTaskDelta": 30,
+          "frontendInputEvents": 30,
+          "frontendOpens": 30,
+          "frontendSaves": 30,
+          "nativeSaveCallsIncludingWarmup": 31,
+          "nativePendingInvocations": 0,
+          "maxObservedQueuedEvents": 0,
+          "maxObservedQueuedBytes": 0,
+          "droppedEvents": 0
+        }
+      ],
+      "coldSampleCount": null,
+      "rowCount": 60
+    },
+    {
+      "id": "34761163669:macos-latest/upgrade/entry-points-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669",
+      "headSha": "6f53e78b6010721e1e926dbcd0f8d0c2683cc8d9",
+      "artifactName": "native-evidence-macos-latest",
+      "file": "upgrade/entry-points-results.json",
+      "sha256": "a064db68fad348b151f94459b250bc05fbd478fd1df3572aac7fe4a4e9f32a76",
+      "bytes": 2544,
+      "layer": "running-native-app-entry-points",
+      "passed": null,
+      "tests": [
+        {
+          "name": "Opaque IPC cursor round-trips unchanged through WS, CLI and both MCP servers",
+          "passed": true
+        },
+        {
+          "name": "embedded returns cached masked PNG and complete metadata",
+          "passed": true
+        },
+        {
+          "name": "stdio returns cached masked PNG and complete metadata",
+          "passed": true
+        },
+        {
+          "name": "Both MCPs preserve selected metadata when screenshot failed",
+          "passed": true
+        },
+        {
+          "name": "CLI start -> embedded MCP get -> standalone MCP cancel -> WS retained result",
+          "passed": true
+        },
+        {
+          "name": "Anonymous retained picker denied across WS and both MCP paths",
+          "passed": true
+        },
+        {
+          "name": "CLI omitted-action convenience activates native page picker and cleans up",
+          "passed": true
+        },
+        {
+          "name": "All four shipped inspection JSON examples execute with fresh keys and returned handles",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "34761163669:macos-latest/upgrade/transport-benchmark.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669",
+      "headSha": "6f53e78b6010721e1e926dbcd0f8d0c2683cc8d9",
+      "artifactName": "native-evidence-macos-latest",
+      "file": "upgrade/transport-benchmark.json",
+      "sha256": "1c8fa805be840d65902cd859cab52efaf8aaef46955eb7677a9ee412a79ff4b8",
+      "bytes": 54330,
+      "layer": "native_webview",
+      "passed": null,
+      "tests": [],
+      "samplesPerConfiguration": 30,
+      "warmupsPerConfiguration": null,
+      "status": null,
+      "groups": [
+        {
+          "steps": 2,
+          "mode": "full_source",
+          "samples": 30,
+          "medianMs": 30.954334000001836,
+          "p95Ms": 42.495083000001614,
+          "meanScriptBytes": 123871.33333333333,
+          "meanBridgeCommandBytes": 127143.33333333333,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 2,
+          "mode": "short_packet",
+          "samples": 30,
+          "medianMs": 16.778959000002942,
+          "p95Ms": 23.184000000001106,
+          "meanScriptBytes": 6151.333333333333,
+          "meanBridgeCommandBytes": 7578.333333333333,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 10,
+          "mode": "full_source",
+          "samples": 30,
+          "medianMs": 97.40962500000023,
+          "p95Ms": 134.6191669999971,
+          "meanScriptBytes": 421664.6666666667,
+          "meanBridgeCommandBytes": 431576.6666666667,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 10,
+          "mode": "short_packet",
+          "samples": 30,
+          "medianMs": 53.93974999999773,
+          "p95Ms": 78.22554200000013,
+          "meanScriptBytes": 21416.666666666668,
+          "meanBridgeCommandBytes": 25055.666666666668,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 20,
+          "mode": "full_source",
+          "samples": 30,
+          "medianMs": 200.56858300000022,
+          "p95Ms": 279.1814169999998,
+          "meanScriptBytes": 793916.3333333334,
+          "meanBridgeCommandBytes": 812128.3333333334,
+          "nativeSaveDelta": 0
+        },
+        {
+          "steps": 20,
+          "mode": "short_packet",
+          "samples": 30,
+          "medianMs": 116.60279200000514,
+          "p95Ms": 182.58433399999922,
+          "meanScriptBytes": 40508.333333333336,
+          "meanBridgeCommandBytes": 46912.333333333336,
+          "nativeSaveDelta": 0
+        }
+      ],
+      "coldSampleCount": 3,
+      "rowCount": 180
+    },
+    {
+      "id": "34761163669:macos-latest/upgrade/upgrade-native-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669",
+      "headSha": "6f53e78b6010721e1e926dbcd0f8d0c2683cc8d9",
+      "artifactName": "native-evidence-macos-latest",
+      "file": "upgrade/upgrade-native-results.json",
+      "sha256": "9c1200f069e85b6327ab349dcd789815d2f52a4875edf65c407782e87a87a348",
+      "bytes": 25656,
+      "layer": "native_webview",
+      "passed": true,
+      "tests": [
+        {
+          "name": "OS input driver reaches independent native fixture counter",
+          "passed": true,
+          "durationMs": 1098.4631250000002,
+          "nativeWriteDelta": 1
+        },
+        {
+          "name": "legacy WS cannot discard requested native source or required masks",
+          "passed": true,
+          "durationMs": 1.710624999999709
+        },
+        {
+          "name": "anonymous rich request fails before picker creation",
+          "passed": true,
+          "durationMs": 1.4054580000010901
+        },
+        {
+          "name": "native identity and layered health expose cold state",
+          "passed": true,
+          "durationMs": 6.415666999999303
+        },
+        {
+          "name": "native save selection deduplicates, captures and never invokes save",
+          "passed": true,
+          "durationMs": 1362.8014999999996,
+          "nativeSaveDelta": 0,
+          "dimensions": [
+            63,
+            38
+          ]
+        },
+        {
+          "name": "omitted-action call waits for a real native user selection",
+          "passed": true,
+          "durationMs": 1059.6973749999997
+        },
+        {
+          "name": "explicit screenshot backend failure keeps the native selection",
+          "passed": true,
+          "durationMs": 1070.019124999999
+        },
+        {
+          "name": "native checkbox gesture has no business default effect",
+          "passed": true,
+          "durationMs": 1019.0924999999988
+        },
+        {
+          "name": "native link gesture has no business default effect",
+          "passed": true,
+          "durationMs": 1002.6280840000036
+        },
+        {
+          "name": "native form gesture has no business default effect",
+          "passed": true,
+          "durationMs": 1274.7361670000028
+        },
+        {
+          "name": "native Escape cancels and releases guard",
+          "passed": true,
+          "durationMs": 931.947833000002
+        },
+        {
+          "name": "reload invalidates original picker identity",
+          "passed": true,
+          "durationMs": 692.5967920000003
+        },
+        {
+          "name": "same GUI workflow load with capture off and on",
+          "passed": true,
+          "durationMs": 12118.040125
+        },
+        {
+          "name": "legacy native data callbacks remain available without exposing protected capture",
+          "passed": true,
+          "durationMs": 8.530791000004683
+        },
+        {
+          "name": "native capture returns bounded invoke evidence without legacy leak",
+          "passed": true,
+          "durationMs": 198.97379199999705,
+          "eventCount": 2
+        },
+        {
+          "name": "native capture preserves rejection, raw binary and pending business work",
+          "passed": true,
+          "durationMs": 196.92583300000115,
+          "nativeExpectedWriteDelta": 1,
+          "binaryBytes": 4,
+          "pendingBusinessStillActive": 1,
+          "redactedError": true
+        },
+        {
+          "name": "strict instance, capture, GUI workflow, query and native image compose",
+          "passed": true,
+          "durationMs": 719.0539999999964,
+          "nativeSaveDelta": 1,
+          "screenshotSource": "webview_native"
+        },
+        {
+          "name": "four real entry points share lifecycle, authority and exit semantics",
+          "passed": true,
+          "durationMs": 3855.5752500000017,
+          "layer": "running-native-app-entry-points",
+          "syntheticSelectionUsed": false,
+          "nativeUserSelectionPerformed": false
+        },
+        {
+          "name": "measured warm full-source vs short-packet transport",
+          "passed": true,
+          "durationMs": 19958.605292,
+          "samplesPerConfiguration": 30
+        },
+        {
+          "name": "unknown result keeps original effect and permits captured diagnostics without replay",
+          "passed": true,
+          "durationMs": 30063.346791999997,
+          "nativeSaveDelta": 1,
+          "quarantinePreserved": true,
+          "diagnosticEvents": 2
+        }
+      ],
+      "selectedResult": {
+        "status": "selected",
+        "cleanup": "confirmed",
+        "selectionTag": "button",
+        "screenshotStatus": "captured",
+        "source": "webview_native",
+        "widthPx": 63,
+        "heightPx": 38,
+        "redactionStatus": "applied"
+      }
+    },
+    {
+      "id": "34761163669:macos-latest/workflow/native-results.json",
+      "runUrl": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669",
+      "headSha": "6f53e78b6010721e1e926dbcd0f8d0c2683cc8d9",
+      "artifactName": "native-evidence-macos-latest",
+      "file": "workflow/native-results.json",
+      "sha256": "8e236bc1e990dfe347d909af1e4c847bc8cb13bd0730332365b34dc622f268de",
+      "bytes": 3884,
+      "layer": "native-webview",
+      "passed": true,
+      "tests": [
+        {
+          "name": "native React controlled input reaches Rust save exactly once",
+          "passed": true,
+          "durationMs": 1818
+        },
+        {
+          "name": "same UI path via one caller request per step",
+          "passed": true,
+          "durationMs": 192
+        },
+        {
+          "name": "two clients share one runKey and cannot change its inputs",
+          "passed": true,
+          "durationMs": 143
+        },
+        {
+          "name": "disconnect and resubmit retain the existing logical run",
+          "passed": true,
+          "durationMs": 1451
+        },
+        {
+          "name": "cancel stops an outstanding wait and releases bridge waiters/resources",
+          "passed": true,
+          "durationMs": 149
+        },
+        {
+          "name": "WS operation beyond two seconds produces one native write",
+          "passed": true,
+          "durationMs": 2219
+        },
+        {
+          "name": "JS exception after native write does not replay through eval",
+          "passed": true,
+          "durationMs": 11
+        },
+        {
+          "name": "unknown write response quarantines resource without replay",
+          "passed": true,
+          "durationMs": 30033
+        }
+      ]
+    }
+  ],
+  "priorCheckpoints": [
+    {
+      "runId": "34759650446",
+      "headSha": "52ba23968a378160c2c5864f9949b19b05cb10a4",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34759650446",
+      "conclusion": "failure",
+      "jobs": [
+        {
+          "name": "Native WebView macos-latest",
+          "jobId": 103730652351,
+          "conclusion": "success",
+          "url": "https://github.com/dickwu/tauri-connector/actions/runs/34759650446/job/103730652351"
+        },
+        {
+          "name": "Native WebView ubuntu-latest",
+          "jobId": 103730652360,
+          "conclusion": "success",
+          "url": "https://github.com/dickwu/tauri-connector/actions/runs/34759650446/job/103730652360"
+        },
+        {
+          "name": "Native WebView windows-latest",
+          "jobId": 103730652389,
+          "conclusion": "failure",
+          "url": "https://github.com/dickwu/tauri-connector/actions/runs/34759650446/job/103730652389"
+        },
+        {
+          "name": "aggregate",
+          "jobId": 103731282757,
+          "conclusion": "failure",
+          "url": "https://github.com/dickwu/tauri-connector/actions/runs/34759650446/job/103731282757"
+        }
+      ],
+      "note": "Windows4native checks passed before a CLI stack overflow stopped4entry verification."
+    },
+    {
+      "runId": "34761163669",
+      "headSha": "6f53e78b6010721e1e926dbcd0f8d0c2683cc8d9",
+      "url": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669",
+      "conclusion": "failure",
+      "jobs": [
+        {
+          "name": "Plugin ubuntu-latest / xcap",
+          "jobId": 103734134796,
+          "conclusion": "failure",
+          "url": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669/job/103734134796"
+        },
+        {
+          "name": "Native WebView macos-latest",
+          "jobId": 103734681105,
+          "conclusion": "success",
+          "url": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669/job/103734681105"
+        },
+        {
+          "name": "Native WebView windows-latest",
+          "jobId": 103734681114,
+          "conclusion": "failure",
+          "url": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669/job/103734681114"
+        },
+        {
+          "name": "Native WebView ubuntu-latest",
+          "jobId": 103734681118,
+          "conclusion": "success",
+          "url": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669/job/103734681118"
+        },
+        {
+          "name": "aggregate",
+          "jobId": 103735260808,
+          "conclusion": "failure",
+          "url": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669/job/103735260808"
+        }
+      ],
+      "note": "macOS/Linux native suites passed; Windows stopped at readiness and Linux xcap had2workflow test timing failures. Fifth run supersedes those Windows/Linux failures, not the historical macOS observations."
+    }
+  ],
+  "actualAssertionSummary": {
+    "buildAndNonNative": "All12plugin platform/feature jobs,6fixture builds,5CLI/MCP target builds,core contracts,page runtime and docs/skills pass at ad13524. This proves their completed commands only.",
+    "linux": "Actual WebKitGTK/XTest upgrade suite20checks,entry suite8cases,native100start/cancel cycles and5s natural expiry,legacy workflow8cases and transport/capture benchmarks pass. Legacy workflow and benchmark input is synthetic DOM GUI dispatch inside native Wry; active picker input is XTest.",
+    "windows": "Actual WebView2/user32 suite5checks passes: strict identity and fail-closed durable workflow; independent native input plus matched capture pair; Save selection plus native image with unchanged store; Escape cleanup; real4entry behavior. Entry suite7cases passes, including cursor,2MCP image outputs,shared lifecycle,anonymous rejection,CLI convenience and JSON examples.",
+    "macos": "Native feature-off and4upgrade prechecks pass. The first picker case confirms duplicate starts share a handle, then receives target_changed instead of selected. Screenshot,store-side-effect,repeat-get and DOM-removal assertions after that assertion are not reached. Later upgrade,stress,workflow and entry steps are skipped. Earlier macOS successes are historical and do not supersede this failure."
+  },
+  "limitations": [
+    "Feature-off native process evidence checks listening ports only; runtime-global and capture-hook absence is not directly measured.",
+    "The Windows fifth-run entry suite has7cases: it does not include the failed-screenshot partial-result case exercised on Linux.",
+    "Linux/Windows native image smoke checks source/dimensions/redaction metadata; decoded mask/geometry pixels and picker-decoration absence need stronger native evidence.",
+    "Native Escape checks terminal state and cleanup, not application shortcut/delete/submit counters.",
+    "Windows durable workflow remains unsupported and returns persistence_unavailable without increasing the independent save counter.",
+    "macOS fifth run fails first active-selection completion; subsequent assertions and subsequent native steps did not run."
+  ]
+}

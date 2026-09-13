@@ -16,10 +16,12 @@ async function execute(mode) {
   const loader=resolve(directory,'surrogate.mjs');
   const output=resolve(directory,'evidence');
   writeFileSync(loader, `
+    import {writeFileSync} from 'node:fs';
     if (process.argv.length === 1) {
       setInterval(() => {}, 1000);
       if (process.env.CONNECTOR_FEATURE_OFF_TEST_MODE === 'signal') setTimeout(() => process.kill(process.pid, 'SIGTERM'), 20);
       if (process.env.CONNECTOR_FEATURE_OFF_TEST_MODE === 'normal_exit') setTimeout(() => process.exit(0), 20);
+      if (process.env.CONNECTOR_FEATURE_OFF_TEST_MODE === 'boot_contract') writeFileSync(process.env.CONNECTOR_FIXTURE_BOOT_EVIDENCE,JSON.stringify({processId:process.pid,windowId:'main',connectorFeature:false,documentReadyState:'complete',fixtureReady:true,connectorGlobals:[],hookMarkers:[]}));
     }
   `);
   const child=spawn(process.execPath,[harness],{
@@ -57,10 +59,17 @@ test('UP-T005 early clean child exit is also rejected',async()=>{
   assert.match(result.stderr,/must remain running|no longer alive/i);
 });
 
-test('UP-T005 live surrogate validates harness liveness mechanics only',async()=>{
+test('UP-T005 live surrogate without frontend boot cannot claim native readiness',async()=>{
   const result=await execute('alive');
+  assert.notEqual(result.code,0);assert.equal(result.report?.passed===true,false);
+  assert.match(result.stderr,/frontend boot evidence missing/);
+});
+
+test('UP-T005 synthetic boot record validates harness contract only, never native evidence',async()=>{
+  const result=await execute('boot_contract');
   assert.equal(result.code,0,result.stderr);assert.equal(result.signal,null);
   assert.equal(result.report.passed,true);assert.equal(result.report.nativeAppRunning,true);
+  assert.equal(result.report.frontendBoot.fixtureReady,true);assert.deepEqual(result.report.frontendBoot.connectorGlobals,[]);
   assert.deepEqual(result.report.checkedPorts,[19555,19556]);
   // This temporary surrogate report is discarded and never used as native evidence.
 });

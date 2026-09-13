@@ -5,7 +5,8 @@ import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
-export async function verifyWindowsNative({rpc,token,root,output,fixtureId,child,input,exec,store,test,results}) {
+import {assertEscapeDelivered,verifyNativePixels,verifyPickerSurvivesStall} from './native-evidence.mjs';
+export async function verifyWindowsNative({rpc,token,root,output,fixtureId,child,input,exec,store,test,results,stallPath}) {
   let cursorCaptureSessionId;
   const geometry=async()=>JSON.parse((await exec('powershell',['-NoProfile','-ExecutionPolicy','Bypass','-File',resolve(root,'examples/workflow-fixture/scripts/native-input.ps1'),'window',String(child.pid),'0'])).stdout);
   const wait=async(report,ready=false)=>{const until=Date.now()+12000;while((ready?['created','installing'].includes(report.status):!report.resultComplete)&&Date.now()<until){report=await rpc.pick({action:'get',pickerId:report.pickerId,waitMs:1000,includeImage:true});}return report;};
@@ -30,6 +31,11 @@ export async function verifyWindowsNative({rpc,token,root,output,fixtureId,child
     cursorCaptureSessionId=capture.captureSessionId;
     return{nativeSaveDelta:1,captureSessionId:cursorCaptureSessionId};
   });
+  await test([], 'Windows unguarded native Escape reaches keydown and keyup counters',async()=>{
+    await geometry();const before=store();await input('escape');
+    for(let n=0;n<30&&((store().inputEffects.escapeKeydown||0)===(before.inputEffects.escapeKeydown||0)||(store().inputEffects.escapeKeyup||0)===(before.inputEffects.escapeKeyup||0));n++)await delay(100);
+    assertEscapeDelivered(before,store());return {escapeKeydownDelta:1,escapeKeyupDelta:1};
+  });
   await test(['UP-PK001','UP-PK014','UP-PK026'], 'Windows picker owns native input and captures selected WebView content',async()=>{
     const before=store();const key=randomUUID();let report=await rpc.pick({requestKey:key,waitMs:0,screenshotSource:'webview_native'});
     report=await wait(report,true);assert.equal(report.status,'awaiting_selection');await clickSave();report=await wait(report);
@@ -39,8 +45,20 @@ export async function verifyWindowsNative({rpc,token,root,output,fixtureId,child
     results.selection={...report,screenshot:{...report.screenshot,image:undefined}};
   });
   await test(['UP-T069','UP-PK019'], 'Windows native Escape cancels without workflow storage',async()=>{
-    await geometry();let report=await rpc.pick({action:'start',requestKey:randomUUID(),captureScreenshot:false});report=await wait(report,true);assert.equal(report.status,'awaiting_selection');
+    await geometry();const before=store();let report=await rpc.pick({action:'start',requestKey:randomUUID(),captureScreenshot:false});report=await wait(report,true);assert.equal(report.status,'awaiting_selection');
     await input('escape');report=await wait(report);assert.equal(report.status,'cancelled');assert.equal(report.cleanup.status,'confirmed');
+    await delay(150);assert.deepEqual(store(),before,'Picker Escape must suppress both application keyboard listeners');
+    return {escapeKeydownDelta:0,escapeKeyupDelta:0,businessEffectsChanged:false};
+  });
+  await test(['UP-PK001','UP-PK014','UP-T076'], 'Windows active native picker survives a one-second main-thread stall',async()=>{
+    const g=await geometry();assert.ok(g.width/g.scale>560);
+    return verifyPickerSurvivesStall({rpc,store,stallPath,arm:()=>input('click',g.x+480*g.scale,g.y+32*g.scale),click:clickSave,awaiting:r=>wait(r,true),settled:r=>wait(r)});
+  });
+  await test(['UP-T051','UP-T056','UP-T060','UP-T062'], 'Windows native PNG pixels prove viewport geometry and required password masks',async()=>{
+    await geometry();const before=store();
+    const shot=await rpc.inspect('webview_screenshot',{source:'webview_native',redaction:'required',format:'png',includeImage:true});
+    const proof=verifyNativePixels(shot);assert.deepEqual(store(),before);results.nativePixels=proof;
+    return {...proof,businessEffectsChanged:false};
   });
   await test(['UP-T101','UP-PK004'], 'Windows four-entry state remains shared under memory-only inspection',async()=>{
     assert.ok(cursorCaptureSessionId,'The native-input capture session must remain available for cursor verification');

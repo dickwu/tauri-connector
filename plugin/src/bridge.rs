@@ -96,6 +96,54 @@ impl DispatchRequest<'_> {
     }
 }
 type ClientMap = Arc<Mutex<HashMap<String, BridgeClient>>>;
+type ConnectionRegistry = Arc<StdMutex<HashMap<String, ConnectionState>>>;
+
+#[derive(Clone, Default, PartialEq, Eq)]
+struct ConnectionState {
+    bridge_key: String,
+    conn_id: Option<String>,
+    // Retain disconnect revisions so a no-WS pin cannot revive after a socket
+    // appears and disappears again, even if nobody checked the pin in between.
+    revision: u64,
+}
+
+impl ConnectionState {
+    fn set_connection(&mut self, conn_id: Option<String>) {
+        if self.conn_id != conn_id {
+            self.conn_id = conn_id;
+            self.revision += 1;
+        }
+    }
+}
+
+/// A transport identity captured once for a host-authorized operation/session.
+/// It also represents the legitimate no-WS eval route. Authorization may check
+/// this synchronously while dispatch holds the async clients lock.
+#[derive(Clone)]
+pub(crate) struct BridgeConnectionPin {
+    window_id: String,
+    bridge_key: String,
+    connection: ConnectionState,
+    tx: Option<mpsc::UnboundedSender<String>>,
+    connections: ConnectionRegistry,
+}
+
+impl BridgeConnectionPin {
+    pub(crate) fn is_current(&self) -> bool {
+        if self.tx.as_ref().is_some_and(|tx| tx.is_closed())
+            || !crate::identity::verify_bridge_key(&self.window_id, &self.bridge_key)
+        {
+            return false;
+        }
+        self.connections
+            .lock()
+            .unwrap()
+            .get(&self.window_id)
+            .cloned()
+            .unwrap_or_default()
+            == self.connection
+    }
+}
 
 #[derive(Clone)]
 pub struct BridgeClient {
@@ -115,6 +163,9 @@ pub struct Bridge {
     port: u16,
     /// Connected webview bridge clients, keyed by Tauri window label.
     clients: ClientMap,
+    /// Synchronous identity mirror for authorization closures. Every mutation
+    /// holds clients first, then this registry; no guard crosses awaited I/O.
+    connections: ConnectionRegistry,
     /// Pending JS evaluation results, keyed by request ID
     pending: PendingMap,
     /// App handle for eval-based fallback execution
@@ -135,6 +186,7 @@ impl Bridge {
         let bridge = Self {
             port,
             clients,
+            connections: Arc::new(StdMutex::new(HashMap::new())),
             pending: pending.clone(),
             app_handle: Arc::new(Mutex::new(None)),
             runtime: Arc::new(crate::runtime::RuntimeManager::default()),
@@ -158,6 +210,32 @@ impl Bridge {
     /// Set the app handle for eval-based fallback JS execution.
     pub async fn set_app_handle(&self, handle: tauri::AppHandle) {
         *self.app_handle.lock().await = Some(handle);
+    }
+
+    pub(crate) async fn pin_connection(&self, window_id: &str) -> BridgeConnectionPin {
+        let clients = self.clients.lock().await;
+        let client = clients.get(window_id);
+        let bridge_key = client
+            .map(|client| client.bridge_key.clone())
+            .unwrap_or_else(|| crate::identity::bridge_key(window_id));
+        let mut connections = self.connections.lock().unwrap();
+        let connection = connections.entry(window_id.to_string()).or_default();
+        if connection.bridge_key != bridge_key {
+            // A recreated no-WS window starts a new transport lifetime even if
+            // destruction cleanup for the old label has not acquired its lock.
+            *connection = ConnectionState {
+                bridge_key: bridge_key.clone(),
+                conn_id: client.map(|client| client.conn_id.clone()),
+                revision: 0,
+            };
+        }
+        BridgeConnectionPin {
+            window_id: window_id.to_string(),
+            bridge_key,
+            connection: connection.clone(),
+            tx: client.map(|client| client.tx.clone()),
+            connections: self.connections.clone(),
+        }
     }
 
     /// Execute JavaScript; fallback is permitted only before dispatch.
@@ -364,18 +442,35 @@ impl Bridge {
         });
         let _listener = CleanupGuard(Some(|| app.unlisten(listener_id)));
         let js = eval_script(script, &id, &event_name);
-        request.ensure_budget()?;
-        // The platform eval API may fail after handing work to the webview.
-        // Conservatively retain uncertainty; never replay after this boundary.
-        self.runtime.record_transmission(script, js.len());
-        window
-            .eval(&js)
-            .map_err(|error| request.unknown(format!("eval inject failed: {error}")))?;
+        self.enqueue_eval(request, || {
+            self.runtime.record_transmission(script, js.len());
+            window.eval(&js).map_err(|error| error.to_string())
+        })
+        .await?;
         match tokio::time::timeout_at(request.deadline, rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(request.unknown("Eval result channel closed")),
             Err(_) => Err(request.unknown("Script execution timeout (eval path)")),
         }
+    }
+
+    async fn enqueue_eval(
+        &self,
+        request: &DispatchRequest<'_>,
+        inject: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), BridgeError> {
+        let clients = tokio::time::timeout_at(request.deadline, self.clients.lock())
+            .await
+            .map_err(|_| request.not_dispatched("Deadline expired before eval dispatch"))?;
+        // Serialize final authorization and synchronous injection with hello /
+        // disconnect, just as WS enqueue does. Never hold this while waiting.
+        request.ensure_budget()?;
+        // The platform eval API may fail after handing work to the webview.
+        // Conservatively retain uncertainty; never replay after this boundary.
+        let result =
+            inject().map_err(|error| request.unknown(format!("eval inject failed: {error}")));
+        drop(clients);
+        result
     }
 
     async fn runtime_target(
@@ -530,6 +625,25 @@ impl Bridge {
 
     pub fn window_destroyed(&self, window_id: &str) {
         self.runtime.window_destroyed(window_id);
+        // lib.rs removes the host identity before this callback. Cleanup may
+        // wait for dispatch, so check the stored key again before removing a
+        // label that could already belong to a recreated window.
+        let bridge = self.clone();
+        let window_id = window_id.to_string();
+        tauri::async_runtime::spawn(async move {
+            bridge.remove_destroyed_window(&window_id).await;
+        });
+    }
+
+    async fn remove_destroyed_window(&self, window_id: &str) {
+        let mut clients = self.clients.lock().await;
+        let mut connections = self.connections.lock().unwrap();
+        if connections.get(window_id).is_some_and(|connection| {
+            !crate::identity::verify_bridge_key(window_id, &connection.bridge_key)
+        }) {
+            clients.remove(window_id);
+            connections.remove(window_id);
+        }
     }
 
     pub fn runtime_diagnostics(&self) -> serde_json::Value {
@@ -573,9 +687,10 @@ impl Bridge {
             let (stream, addr) = listener.accept().await.map_err(|e| e.to_string())?;
             println!("[connector][bridge] Webview client connected from {addr}");
             let clients = self.clients.clone();
+            let connections = self.connections.clone();
             let pending = self.pending.clone();
             tokio::spawn(async move {
-                if let Err(e) = handle_bridge_client(stream, clients, pending).await {
+                if let Err(e) = handle_bridge_client(stream, clients, connections, pending).await {
                     eprintln!("[connector][bridge] Client error: {e}");
                 }
             });
@@ -586,6 +701,7 @@ impl Bridge {
 async fn handle_bridge_client(
     stream: tokio::net::TcpStream,
     clients: ClientMap,
+    connections: ConnectionRegistry,
     pending: PendingMap,
 ) -> Result<(), String> {
     let ws_stream = tokio_tungstenite::accept_async(stream)
@@ -618,6 +734,7 @@ async fn handle_bridge_client(
                             &text,
                             &tx,
                             &clients,
+                            &connections,
                             &pending,
                             &conn_id,
                         ).await {
@@ -633,13 +750,7 @@ async fn handle_bridge_client(
     }
 
     if let Some(window_id) = window_id {
-        let mut clients = clients.lock().await;
-        let is_current = clients
-            .get(&window_id)
-            .map(|c| c.conn_id == conn_id)
-            .unwrap_or(false);
-        if is_current {
-            clients.remove(&window_id);
+        if disconnect_bridge_client(&clients, &connections, &window_id, &conn_id).await {
             println!("[connector][bridge] Webview client disconnected: {window_id}");
         } else {
             println!(
@@ -653,10 +764,33 @@ async fn handle_bridge_client(
     Ok(())
 }
 
+async fn disconnect_bridge_client(
+    clients: &ClientMap,
+    connections: &ConnectionRegistry,
+    window_id: &str,
+    conn_id: &str,
+) -> bool {
+    let mut clients = clients.lock().await;
+    if !clients
+        .get(window_id)
+        .is_some_and(|client| client.conn_id == conn_id)
+    {
+        return false;
+    }
+    let mut connections = connections.lock().unwrap();
+    clients.remove(window_id);
+    connections
+        .entry(window_id.to_string())
+        .or_default()
+        .set_connection(None);
+    true
+}
+
 async fn handle_bridge_message(
     text: &str,
     tx: &mpsc::UnboundedSender<String>,
     clients: &ClientMap,
+    connections: &ConnectionRegistry,
     pending: &PendingMap,
     conn_id: &str,
 ) -> Option<String> {
@@ -692,7 +826,16 @@ async fn handle_bridge_message(
             conn_id: conn_id.to_string(),
             tx: tx.clone(),
         };
-        clients.lock().await.insert(window_id.clone(), client);
+        let mut clients = clients.lock().await;
+        // Destruction/navigation may happen while hello waits for dispatch.
+        if !crate::identity::verify_bridge_key(&window_id, &client.bridge_key) {
+            return None;
+        }
+        let mut connections = connections.lock().unwrap();
+        let connection = connections.entry(window_id.clone()).or_default();
+        connection.bridge_key = client.bridge_key.clone();
+        connection.set_connection(Some(conn_id.to_string()));
+        clients.insert(window_id.clone(), client);
         println!("[connector][bridge] Registered window bridge: {window_id}");
         return Some(window_id);
     }
@@ -1980,6 +2123,14 @@ mod transport_tests {
         let bridge = Bridge {
             port: 0,
             clients: Arc::new(Mutex::new(HashMap::new())),
+            connections: Arc::new(StdMutex::new(HashMap::from([(
+                "main".into(),
+                ConnectionState {
+                    bridge_key: crate::identity::bridge_key("main"),
+                    conn_id: Some("connection-a".into()),
+                    revision: 1,
+                },
+            )]))),
             pending: Arc::new(StdMutex::new(HashMap::new())),
             app_handle: Arc::new(Mutex::new(None)),
             runtime: Arc::new(crate::runtime::RuntimeManager::default()),
@@ -1995,6 +2146,371 @@ mod transport_tests {
             },
         );
         (bridge, rx)
+    }
+
+    #[tokio::test]
+    async fn connection_pin_stays_current_on_the_same_socket() {
+        let (bridge, _rx) = queued_bridge().await;
+        let pin = bridge.pin_connection("main").await;
+        let clone = pin.clone();
+        let client = bridge.clients.lock().await["main"].clone();
+        assert!(pin.is_current());
+        handle_bridge_message(
+            &json!({"type":"hello","windowId":"main","bridgeKey":client.bridge_key}).to_string(),
+            &client.tx,
+            &bridge.clients,
+            &bridge.connections,
+            &bridge.pending,
+            &client.conn_id,
+        )
+        .await;
+        assert!(pin.is_current());
+        assert!(clone.is_current());
+    }
+
+    #[tokio::test]
+    async fn connection_pin_rejects_a_replacement_before_enqueue_or_fallback() {
+        let (bridge, mut old_rx) = queued_bridge().await;
+        let pin = bridge.pin_connection("main").await;
+        let (tx, mut new_rx) = mpsc::unbounded_channel();
+        handle_bridge_message(
+            &json!({"type":"hello","windowId":"main","bridgeKey":crate::identity::bridge_key("main")})
+                .to_string(),
+            &tx,
+            &bridge.clients,
+            &bridge.connections,
+            &bridge.pending,
+            "replacement",
+        )
+        .await;
+        assert!(!pin.is_current());
+        assert!(bridge.pin_connection("main").await.is_current());
+        let authorize = || pin.is_current();
+        // If fallback preparation runs, this lock consumes the deadline and
+        // yields a different failure. An invalid pin must reject it first.
+        let _app_guard = bridge.app_handle.lock().await;
+        let error = bridge
+            .execute_js_authorized("write()", 100, "main", "pinned", Some(&authorize))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, BridgeError::NotDispatched { ref reason, .. }
+            if reason.contains("authorization was revoked"))
+        );
+        assert!(old_rx.try_recv().is_err());
+        assert!(new_rx.try_recv().is_err());
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn connection_pin_disconnect_only_invalidates_its_own_window() {
+        let (bridge, _rx) = queued_bridge().await;
+        let label = uuid::Uuid::new_v4().to_string();
+        let (tx, _other_rx) = mpsc::unbounded_channel();
+        handle_bridge_message(
+            &json!({"type":"hello","windowId":label,"bridgeKey":crate::identity::bridge_key(&label)})
+                .to_string(),
+            &tx,
+            &bridge.clients,
+            &bridge.connections,
+            &bridge.pending,
+            "other-connection",
+        )
+        .await;
+        let main_pin = bridge.pin_connection("main").await;
+        let other_pin = bridge.pin_connection(&label).await;
+        assert!(
+            disconnect_bridge_client(&bridge.clients, &bridge.connections, "main", "connection-a",)
+                .await
+        );
+        assert!(!main_pin.is_current());
+        assert!(other_pin.is_current());
+        assert!(bridge.pin_connection("main").await.is_current());
+        crate::identity::window_destroyed(&label);
+    }
+
+    #[tokio::test]
+    async fn connection_pin_ignores_a_stale_disconnect_after_replacement() {
+        let (bridge, _rx) = queued_bridge().await;
+        let original = bridge.pin_connection("main").await;
+        let (tx, _new_rx) = mpsc::unbounded_channel();
+        handle_bridge_message(
+            &json!({"type":"hello","windowId":"main","bridgeKey":crate::identity::bridge_key("main")})
+                .to_string(),
+            &tx,
+            &bridge.clients,
+            &bridge.connections,
+            &bridge.pending,
+            "replacement",
+        )
+        .await;
+        let replacement = bridge.pin_connection("main").await;
+        assert!(
+            !disconnect_bridge_client(
+                &bridge.clients,
+                &bridge.connections,
+                "main",
+                "connection-a",
+            )
+            .await
+        );
+        assert!(!original.is_current());
+        assert!(replacement.is_current());
+        assert_eq!(bridge.clients.lock().await["main"].conn_id, "replacement");
+    }
+
+    #[tokio::test]
+    async fn connection_pin_for_eval_does_not_revive_after_a_socket_comes_and_goes() {
+        let (bridge, _rx) = queued_bridge().await;
+        let label = uuid::Uuid::new_v4().to_string();
+        let eval_pin = bridge.pin_connection(&label).await;
+        assert!(eval_pin.is_current());
+        assert!(eval_pin.tx.is_none());
+        let (tx, _other_rx) = mpsc::unbounded_channel();
+        handle_bridge_message(
+            &json!({"type":"hello","windowId":label,"bridgeKey":crate::identity::bridge_key(&label)})
+                .to_string(),
+            &tx,
+            &bridge.clients,
+            &bridge.connections,
+            &bridge.pending,
+            "temporary-socket",
+        )
+        .await;
+        disconnect_bridge_client(
+            &bridge.clients,
+            &bridge.connections,
+            &label,
+            "temporary-socket",
+        )
+        .await;
+        // Check only after both transitions: observing an invalid intermediate
+        // state must not be required for permanent invalidation of the old pin.
+        assert!(!eval_pin.is_current());
+        let current_eval_pin = bridge.pin_connection(&label).await;
+        assert!(current_eval_pin.is_current());
+        assert!(current_eval_pin.tx.is_none());
+        let authorize = || current_eval_pin.is_current();
+        let error = bridge
+            .execute_js_authorized("read()", 100, &label, "eval-route", Some(&authorize))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, BridgeError::NotDispatched { ref reason, .. }
+            if reason.contains("App handle not set for eval fallback")),
+            "a current no-WS pin must still permit eval preparation: {error}"
+        );
+        crate::identity::window_destroyed(&label);
+        assert!(!current_eval_pin.is_current());
+    }
+
+    #[tokio::test]
+    async fn connection_pin_rejects_a_closed_sender_before_disconnect_cleanup() {
+        let (bridge, rx) = queued_bridge().await;
+        let pin = bridge.pin_connection("main").await;
+        assert!(pin.is_current());
+        drop(rx);
+        assert!(!pin.is_current());
+        let authorize = || pin.is_current();
+        let error = bridge
+            .execute_js_authorized("write()", 100, "main", "closed", Some(&authorize))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, BridgeError::NotDispatched { ref reason, .. }
+            if reason.contains("authorization was revoked"))
+        );
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn connection_pin_is_rechecked_after_waiting_to_enqueue() {
+        let (bridge, mut old_rx) = queued_bridge().await;
+        let pin = bridge.pin_connection("main").await;
+        let (tx, mut new_rx) = mpsc::unbounded_channel();
+        let hello = json!({"type":"hello","windowId":"main","bridgeKey":crate::identity::bridge_key("main")})
+            .to_string();
+        let clients = bridge.clients.lock().await;
+        let replacement = handle_bridge_message(
+            &hello,
+            &tx,
+            &bridge.clients,
+            &bridge.connections,
+            &bridge.pending,
+            "replacement",
+        );
+        tokio::pin!(replacement);
+        // Queue replacement first on the fair clients mutex, then dispatch.
+        tokio::select! {
+            biased;
+            _ = &mut replacement => panic!("replacement passed the held clients lock"),
+            _ = tokio::task::yield_now() => {}
+        }
+        let checks = std::sync::atomic::AtomicUsize::new(0);
+        let authorize = || {
+            checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            pin.is_current()
+        };
+        let dispatch =
+            bridge.execute_js_authorized("write()", 1000, "main", "enqueue-race", Some(&authorize));
+        tokio::pin!(dispatch);
+        tokio::select! {
+            biased;
+            _ = &mut dispatch => panic!("dispatch passed the held clients lock"),
+            _ = tokio::task::yield_now() => {}
+        }
+        assert_eq!(checks.load(std::sync::atomic::Ordering::SeqCst), 1);
+        drop(clients);
+        replacement.await;
+        let error = dispatch.await.unwrap_err();
+        assert!(
+            matches!(error, BridgeError::NotDispatched { ref reason, .. }
+            if reason.contains("authorization was revoked"))
+        );
+        assert!(checks.load(std::sync::atomic::Ordering::SeqCst) > 1);
+        assert!(old_rx.try_recv().is_err());
+        assert!(new_rx.try_recv().is_err());
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn connection_pin_serializes_eval_authorization_and_injection() {
+        let (bridge, _rx) = queued_bridge().await;
+        let label = uuid::Uuid::new_v4().to_string();
+        let pin = bridge.pin_connection(&label).await;
+        let authorize = || pin.is_current();
+        let request = DispatchRequest {
+            id: "eval-boundary",
+            deadline: Instant::now() + Duration::from_secs(1),
+            authorize: Some(&authorize),
+        };
+        let mut injected = false;
+        bridge
+            .enqueue_eval(&request, || {
+                assert!(bridge.clients.try_lock().is_err());
+                injected = true;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(injected);
+        assert!(bridge.clients.try_lock().is_ok());
+        let (tx, _new_rx) = mpsc::unbounded_channel();
+        handle_bridge_message(
+            &json!({"type":"hello","windowId":label,"bridgeKey":crate::identity::bridge_key(&label)})
+                .to_string(),
+            &tx,
+            &bridge.clients,
+            &bridge.connections,
+            &bridge.pending,
+            "new-socket",
+        )
+        .await;
+        injected = false;
+        let error = bridge
+            .enqueue_eval(&request, || {
+                injected = true;
+                Ok(())
+            })
+            .await
+            .unwrap_err();
+        assert!(!injected);
+        assert!(matches!(error, BridgeError::NotDispatched { .. }));
+        assert!(bridge.clients.try_lock().is_ok());
+        crate::identity::window_destroyed(&label);
+    }
+
+    #[tokio::test]
+    async fn connection_pin_destruction_reclaims_unique_window_registrations() {
+        let (bridge, _rx) = queued_bridge().await;
+        let mut old_pins = Vec::new();
+        for _ in 0..16 {
+            let label = uuid::Uuid::new_v4().to_string();
+            let (tx, _rx) = mpsc::unbounded_channel();
+            handle_bridge_message(
+                &json!({"type":"hello","windowId":label,"bridgeKey":crate::identity::bridge_key(&label)})
+                    .to_string(),
+                &tx,
+                &bridge.clients,
+                &bridge.connections,
+                &bridge.pending,
+                "temporary-socket",
+            )
+            .await;
+            old_pins.push(bridge.pin_connection(&label).await);
+            disconnect_bridge_client(
+                &bridge.clients,
+                &bridge.connections,
+                &label,
+                "temporary-socket",
+            )
+            .await;
+            // Match the real lib.rs lifecycle order, including the synchronous
+            // callback that schedules cleanup on Tauri's async runtime.
+            crate::identity::window_destroyed(&label);
+            bridge.window_destroyed(&label);
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while bridge.connections.lock().unwrap().len() != 1 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(bridge.clients.lock().await.len(), 1);
+        assert!(old_pins.iter().all(|pin| !pin.is_current()));
+        assert!(bridge.pin_connection("main").await.is_current());
+    }
+
+    #[tokio::test]
+    async fn connection_pin_delayed_destruction_preserves_recreated_eval_window() {
+        let (bridge, _rx) = queued_bridge().await;
+        let label = uuid::Uuid::new_v4().to_string();
+        let old_pin = bridge.pin_connection(&label).await;
+        crate::identity::window_destroyed(&label);
+        let fresh_pin = bridge.pin_connection(&label).await;
+        assert!(fresh_pin.is_current());
+        assert!(!old_pin.is_current());
+        bridge.remove_destroyed_window(&label).await;
+        assert!(fresh_pin.is_current());
+        assert!(!old_pin.is_current());
+        assert!(bridge.connections.lock().unwrap().contains_key(&label));
+        crate::identity::window_destroyed(&label);
+        bridge.remove_destroyed_window(&label).await;
+        assert!(!fresh_pin.is_current());
+        assert!(!bridge.connections.lock().unwrap().contains_key(&label));
+    }
+
+    #[tokio::test]
+    async fn connection_pin_destroyed_window_rejects_hello_waiting_for_dispatch() {
+        let (bridge, _rx) = queued_bridge().await;
+        let label = uuid::Uuid::new_v4().to_string();
+        let pin = bridge.pin_connection(&label).await;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let hello = json!({"type":"hello","windowId":label,"bridgeKey":crate::identity::bridge_key(&label)})
+            .to_string();
+        let clients = bridge.clients.lock().await;
+        let registration = handle_bridge_message(
+            &hello,
+            &tx,
+            &bridge.clients,
+            &bridge.connections,
+            &bridge.pending,
+            "late-socket",
+        );
+        tokio::pin!(registration);
+        tokio::select! {
+            biased;
+            _ = &mut registration => panic!("hello passed the held clients lock"),
+            _ = tokio::task::yield_now() => {}
+        }
+        crate::identity::window_destroyed(&label);
+        drop(clients);
+        assert!(registration.await.is_none());
+        bridge.remove_destroyed_window(&label).await;
+        assert!(!pin.is_current());
+        assert!(!bridge.clients.lock().await.contains_key(&label));
+        assert!(!bridge.connections.lock().unwrap().contains_key(&label));
     }
 
     async fn simulated_runtime_bridge(
@@ -2061,6 +2577,7 @@ mod transport_tests {
                     &response.to_string(),
                     &client.tx,
                     &worker.clients,
+                    &worker.connections,
                     &worker.pending,
                     &client.conn_id,
                 )
@@ -2406,21 +2923,36 @@ mod transport_tests {
     #[tokio::test]
     async fn bridge_hello_requires_host_window_binding() {
         let clients = Arc::new(Mutex::new(HashMap::new()));
+        let connections = Arc::new(StdMutex::new(HashMap::new()));
         let pending = Arc::new(StdMutex::new(HashMap::new()));
         let (tx, _rx) = mpsc::unbounded_channel();
         let label = uuid::Uuid::new_v4().to_string();
         let key = crate::identity::bridge_key(&label);
         let invalid = json!({"type":"hello","windowId":label,"bridgeKey":"forged"});
         assert!(
-            handle_bridge_message(&invalid.to_string(), &tx, &clients, &pending, "untrusted")
-                .await
-                .is_none()
+            handle_bridge_message(
+                &invalid.to_string(),
+                &tx,
+                &clients,
+                &connections,
+                &pending,
+                "untrusted"
+            )
+            .await
+            .is_none()
         );
         let valid = json!({"type":"hello","windowId":label,"bridgeKey":key});
         assert!(
-            handle_bridge_message(&valid.to_string(), &tx, &clients, &pending, "bound")
-                .await
-                .is_some()
+            handle_bridge_message(
+                &valid.to_string(),
+                &tx,
+                &clients,
+                &connections,
+                &pending,
+                "bound"
+            )
+            .await
+            .is_some()
         );
         crate::identity::page_navigation(&label);
         assert!(
@@ -2428,6 +2960,7 @@ mod transport_tests {
                 &valid.to_string(),
                 &tx,
                 &clients,
+                &connections,
                 &pending,
                 "stale-document"
             )
@@ -2452,6 +2985,7 @@ mod transport_tests {
             &json!({"id": command["id"], "error": "fixture exception"}).to_string(),
             &client.tx,
             &bridge.clients,
+            &bridge.connections,
             &bridge.pending,
             &client.conn_id,
         )
@@ -2513,6 +3047,7 @@ mod transport_tests {
                 &json!({"id": command["id"], "result": {"saved": true}}).to_string(),
                 &client.tx,
                 &remote.clients,
+                &remote.connections,
                 &remote.pending,
                 &client.conn_id,
             )
@@ -2636,6 +3171,7 @@ mod transport_tests {
             &result,
             &client.tx,
             &bridge.clients,
+            &bridge.connections,
             &bridge.pending,
             "stale-connection",
         )
@@ -2645,6 +3181,7 @@ mod transport_tests {
             &result,
             &client.tx,
             &bridge.clients,
+            &bridge.connections,
             &bridge.pending,
             &client.conn_id,
         )

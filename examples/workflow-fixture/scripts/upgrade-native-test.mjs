@@ -11,6 +11,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import net from 'node:net';
 import {sendLinuxInput} from './native-input-linux.mjs';
 import {inspectionTargetReady} from './fixture-readiness.mjs';
+import {assertEscapeDelivered,verifyNativePixels,verifyPickerSurvivesStall} from './native-evidence.mjs';
 const exec=promisify(execFile);
 const root=fileURLToPath(new URL('../../../',import.meta.url));
 const output=process.env.CONNECTOR_FIXTURE_OUTPUT||mkdtempSync(resolve(tmpdir(),'connector-upgrade-native-'));
@@ -18,6 +19,7 @@ mkdirSync(output,{recursive:true,mode:0o700});
 const token=randomBytes(32).toString('hex');
 const fixtureId=`dev.connector.workflow-fixture.${randomUUID()}`;
 const storePath=resolve(output,'independent-native-store.json');
+const stallPath=resolve(output,`page-stall-${randomUUID()}.json`);
 const binary=process.env.CONNECTOR_FIXTURE_BINARY||resolve(root,`target/debug/connector-workflow-fixture${process.platform==='win32'?'.exe':''}`);
 const inputBinary=resolve(output,'native-input');
 const tests=[];const sockets=[];let child;
@@ -61,7 +63,7 @@ try {
   if(process.platform==='darwin'){await exec('swiftc',[resolve(root,'examples/workflow-fixture/scripts/native-input.swift'),'-o',inputBinary]);await exec(inputBinary,['probe']);}
   else if(process.platform==='linux')await exec('xdotool',['version']);
   const log=openSync(resolve(output,'private-app.log'),'w',0o600);
-  child=spawn(binary,[],{cwd:root,env:{...process.env,TAURI_CONNECTOR_WORKFLOW_TOKEN:token,CONNECTOR_FIXTURE_ID:fixtureId,CONNECTOR_FIXTURE_EVIDENCE:storePath,TAURI_CONNECTOR_CAPTURE_PREVIEW_COMMANDS:'fixture_create_task,fixture_slow_write,fixture_fail_after_write,fixture_binary_result,fixture_pending',TAURI_CONNECTOR_CAPTURE_PREVIEW_PATHS:'id,name'},stdio:['ignore',log,log]});closeSync(log);
+  child=spawn(binary,[],{cwd:root,env:{...process.env,TAURI_CONNECTOR_WORKFLOW_TOKEN:token,CONNECTOR_FIXTURE_ID:fixtureId,CONNECTOR_FIXTURE_EVIDENCE:storePath,CONNECTOR_FIXTURE_STALL_EVIDENCE:stallPath,TAURI_CONNECTOR_CAPTURE_PREVIEW_COMMANDS:'fixture_create_task,fixture_slow_write,fixture_fail_after_write,fixture_binary_result,fixture_pending',TAURI_CONNECTOR_CAPTURE_PREVIEW_PATHS:'id,name'},stdio:['ignore',log,log]});closeSync(log);
   let rpc;for(let n=0;n<100;n++){try{rpc=await Rpc.connect();break;}catch{await delay(100);}}
   assert.ok(rpc,'fixture bridge unavailable');
   let fixtureReady=false;
@@ -75,7 +77,7 @@ try {
   assert.ok(fixtureReady,'Native fixture document must be ready before capture or input');
   if(process.platform==='win32') {
     const {verifyWindowsNative}=await import('./windows-native.mjs');
-    await verifyWindowsNative({rpc,token,root,output,fixtureId,child,input,exec,store,test,results});
+    await verifyWindowsNative({rpc,token,root,output,fixtureId,child,input,exec,store,test,results,stallPath});
   } else {
   await test([], 'OS input driver reaches independent native fixture counter', async()=>{
     const p=await point(rpc,'#pick-save');results.inputPoint=p;const before=store().saveCalls;
@@ -83,6 +85,11 @@ try {
     assert.equal(store().saveCalls,before+1,JSON.stringify({point:p,store:store()}));
     await rpc.js("window.__TAURI_INTERNALS__.invoke('fixture_reset')");
     return {nativeWriteDelta:1,reset:true};
+  });
+  await test([], 'unguarded native Escape reaches independent keydown and keyup counters',async()=>{
+    await point(rpc,'#pick-save');const before=store();await input('escape');
+    for(let n=0;n<30&&((store().inputEffects.escapeKeydown||0)===(before.inputEffects.escapeKeydown||0)||(store().inputEffects.escapeKeyup||0)===(before.inputEffects.escapeKeyup||0));n++)await delay(100);
+    assertEscapeDelivered(before,store());return {escapeKeydownDelta:1,escapeKeyupDelta:1};
   });
   await test(['UP-T052','UP-T060'], 'legacy WS cannot discard requested native source or required masks', async()=>{
     for(const args of [{source:'webview_native'}, {redaction:'required'}, {source:null}]) {
@@ -110,6 +117,10 @@ try {
     await input('click',p.x,p.y);const selected=await response;assert.equal(selected.status,'selected',JSON.stringify(selected));assert.ok(selected.selection);
     const complete=await settled(peer,selected);assert.equal(complete.cleanup.status,'confirmed');assert.deepEqual(store(),before);
   });
+  await test(['UP-PK001','UP-PK014','UP-T076'],'same-page native picker survives a one-second main-thread stall within its original deadline',async()=>{
+    const save=await point(rpc,'#pick-save'),arm=await point(rpc,'#arm-page-stall');
+    return verifyPickerSurvivesStall({rpc,store,stallPath,arm:()=>input('click',arm.x,arm.y),click:()=>input('click',save.x,save.y),awaiting:r=>awaiting(rpc,r),settled:r=>settled(rpc,r)});
+  });
   await test(['UP-PK027','UP-T074'],'explicit screenshot backend failure keeps the native selection',async()=>{
     const p=await point(rpc,'#pick-save');const before=store();let selected=await rpc.pick({action:'start',requestKey:randomUUID(),screenshotSource:'dom_rendering'});await awaiting(rpc,selected);
     await input('click',p.x,p.y);selected=await settled(rpc,selected);assert.equal(selected.status,'selected');assert.ok(selected.selection);assert.equal(selected.screenshot.status,'failed');assert.deepEqual(store(),before);results.partialPickerId=selected.pickerId;
@@ -118,7 +129,15 @@ try {
     const p=await point(rpc,selector),before=store();let r=await rpc.pick({action:'start',requestKey:randomUUID(),captureScreenshot:false});await awaiting(rpc,r);await input(action,p.x,p.y);r=await settled(rpc,r);assert.equal(r.status,'selected',JSON.stringify(r));assert.equal(r.screenshot.status,'not_requested');assert.deepEqual(store(),before);
   });
   await test(['UP-PK019','UP-PK020','UP-T069'],'native Escape cancels and releases guard',async()=>{
-    await point(rpc,'#pick-save');let r=await rpc.pick({action:'start',requestKey:randomUUID(),captureScreenshot:false});await awaiting(rpc,r);await input('escape');r=await settled(rpc,r);assert.equal(r.status,'cancelled');assert.equal(r.cleanup.status,'confirmed');
+    await point(rpc,'#pick-save');const before=store();let r=await rpc.pick({action:'start',requestKey:randomUUID(),captureScreenshot:false});await awaiting(rpc,r);await input('escape');r=await settled(rpc,r);assert.equal(r.status,'cancelled');assert.equal(r.cleanup.status,'confirmed');
+    await delay(150);assert.deepEqual(store(),before,'Picker Escape must suppress both application keyboard listeners');
+    return {escapeKeydownDelta:0,escapeKeyupDelta:0,businessEffectsChanged:false};
+  });
+  await test(['UP-T051','UP-T056','UP-T060','UP-T062'],'native PNG pixels prove viewport corner geometry and required password masks',async()=>{
+    await point(rpc,'#pick-save');const before=store();
+    const shot=await rpc.inspect('webview_screenshot',{source:'webview_native',redaction:'required',format:'png',includeImage:true});
+    const proof=verifyNativePixels(shot);assert.deepEqual(store(),before);results.nativePixels=proof;
+    return {...proof,businessEffectsChanged:false};
   });
   await test(['UP-PK030','UP-PK031','UP-T076'],'reload invalidates original picker identity',async()=>{
     // Navigation is scheduled by the isolated fixture before acquiring the lease.

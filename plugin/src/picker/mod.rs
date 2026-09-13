@@ -109,8 +109,37 @@ struct Entry {
     cancel_capture: bool,
     metadata_reservation: Option<crate::workflow::budget::Reservation>,
     image_reservation: Option<crate::workflow::budget::Reservation>,
+    connection_pin: Option<crate::bridge::BridgeConnectionPin>,
 }
 impl Entry {
+    fn retain_after_slow_status(
+        &self,
+        command: &str,
+        failure: &Value,
+        connection_live: bool,
+        probe: Result<&Value, &crate::bridge::BridgeError>,
+    ) -> bool {
+        self.active()
+            && command == "status"
+            && failure["transportFailure"] == true
+            && connection_live
+            && match probe {
+                Ok(p) => {
+                    p["pageEpoch"] == self.context["pageEpoch"]
+                        && p["runtime"]["ready"] == true
+                        && p["runtime"]["context"] == self.context
+                }
+                // Only an elapsed response wait is inconclusive. Host target,
+                // authorization, script and channel failures remain terminal.
+                Err(crate::bridge::BridgeError::DispatchedOutcomeUnknown { reason, .. }) => {
+                    matches!(
+                        reason.as_str(),
+                        "WS bridge timeout" | "Script execution timeout (eval path)"
+                    )
+                }
+                Err(_) => false,
+            }
+    }
     fn cleanup_budget(&self, maximum: u64) -> u64 {
         self.cleanup_deadline.map_or(maximum, |deadline| {
             (deadline
@@ -379,6 +408,7 @@ impl PickerService {
             cancel_capture: false,
             metadata_reservation: None,
             image_reservation: None,
+            connection_pin: None,
             request,
         };
         if let Some(key) = &entry.request.request_key {
@@ -418,6 +448,13 @@ impl PickerService {
             .map(|r| lock(&r.inner).image.as_ref().map_or(0, Vec::len))
             .sum();
         let mut e = lock(&record.inner);
+        if e.connection_pin
+            .as_ref()
+            .is_some_and(|pin| !pin.is_current())
+        {
+            e.begin_target_cleanup();
+            return false;
+        }
         if Instant::now() >= e.deadline
             || e.cancel_capture
             || e.screenshot["status"] != "pending"
@@ -592,6 +629,10 @@ async fn page_call(
 }
 fn page_transport_failure(command: &str, failure: crate::bridge::BridgeError) -> Value {
     let mut report = error("target_changed");
+    report["transportFailure"] = json!(!matches!(
+        failure,
+        crate::bridge::BridgeError::ExecutionFailed { .. }
+    ));
     // The typed transport boundary proves the UI start never reached the page.
     // A dispatched failure/unknown outcome does not permit this shortcut.
     if command == "start" && !failure.is_dispatched() {
@@ -606,13 +647,17 @@ async fn page_call_authorized(
     budget: u64,
     authorize: &(dyn Fn() -> bool + Send + Sync),
 ) -> Result<Value, Value> {
-    let (window, args) = {
+    let (window, args, pin, require_pin) = {
         let e = lock(&record.inner);
         (
             e.request.window_id.clone(),
             json!({"cmd":command,"pickerId":e.id,"nonce":e.nonce,"context":e.context,"timeoutMs":e.deadline.saturating_duration_since(Instant::now()).as_millis() as u64}),
+            e.connection_pin.clone(),
+            command == "start" || command == "geometry" || (command == "status" && e.active()),
         )
     };
+    let permitted =
+        || authorize() && (!require_pin || pin.as_ref().is_some_and(|pin| pin.is_current()));
     let result = bridge
         .execute_runtime_authorized(
             &window,
@@ -620,10 +665,13 @@ async fn page_call_authorized(
             args.clone(),
             budget,
             &uuid::Uuid::new_v4().to_string(),
-            authorize,
+            &permitted,
         )
         .await
         .map_err(|failure| page_transport_failure(command, failure))?;
+    if require_pin && !pin.as_ref().is_some_and(|pin| pin.is_current()) {
+        return Err(error("target_changed"));
+    }
     if result.get("error").is_some_and(|e| !e.is_null()) {
         let mut failure = result["error"].clone();
         if result["cleanup"]["status"] == "confirmed"
@@ -659,6 +707,8 @@ async fn run(record: Arc<Record>, bridge: Bridge, app: tauri::AppHandle, state: 
         )
     };
     record.notify.notify_waiters();
+    let connection_pin = bridge.pin_connection(&window).await;
+    lock(&record.inner).connection_pin = Some(connection_pin);
     let prepared = bridge.runtime_context(&window, budget.min(5000)).await;
     match prepared {
         Ok(context) => {
@@ -695,7 +745,15 @@ async fn run(record: Arc<Record>, bridge: Bridge, app: tauri::AppHandle, state: 
                 if !state.workflow.inspection_authorized(generation) {
                     e.revoke();
                 }
-                e.accept(&report);
+                if e.active()
+                    && e.connection_pin
+                        .as_ref()
+                        .is_some_and(|pin| !pin.is_current())
+                {
+                    e.begin_target_cleanup();
+                } else {
+                    e.accept(&report);
+                }
             }
             Err(failure) => {
                 let mut e = lock(&record.inner);
@@ -740,6 +798,12 @@ async fn run(record: Arc<Record>, bridge: Bridge, app: tauri::AppHandle, state: 
             if !authorized {
                 e.revoke();
             }
+            if e.connection_pin
+                .as_ref()
+                .is_some_and(|pin| !pin.is_current())
+            {
+                e.begin_target_cleanup();
+            }
             if Instant::now() >= e.deadline {
                 e.terminal("expired");
                 if e.screenshot["status"] == "pending" {
@@ -749,13 +813,14 @@ async fn run(record: Arc<Record>, bridge: Bridge, app: tauri::AppHandle, state: 
                 }
             }
         }
-        let (active, selected, cleanup_done, needs_capture) = {
+        let (active, selected, cleanup_done, needs_capture, cancel_capture) = {
             let e = lock(&record.inner);
             (
                 e.active(),
                 e.status == "selected",
                 matches!(e.cleanup.as_str(), "confirmed" | "context_destroyed"),
                 e.screenshot["status"] == "pending",
+                e.cancel_capture,
             )
         };
         if selected && needs_capture && !capture_started && authorized {
@@ -790,7 +855,7 @@ async fn run(record: Arc<Record>, bridge: Bridge, app: tauri::AppHandle, state: 
             tokio::time::sleep(Duration::from_millis(50)).await;
             continue;
         }
-        let cmd = if !active && !selected {
+        let cmd = if !active && (!selected || cancel_capture) {
             "cancel"
         } else {
             "status"
@@ -802,11 +867,18 @@ async fn run(record: Arc<Record>, bridge: Bridge, app: tauri::AppHandle, state: 
                 if !state.workflow.inspection_authorized(generation) {
                     e.revoke();
                 }
-                if e.accept(&report) {
+                if e.active()
+                    && e.connection_pin
+                        .as_ref()
+                        .is_some_and(|pin| !pin.is_current())
+                {
+                    e.begin_target_cleanup();
+                    record.notify.notify_waiters();
+                } else if e.accept(&report) {
                     record.notify.notify_waiters();
                 }
             }
-            Err(_) => {
+            Err(failure) => {
                 let destroyed = app.get_webview_window(&window).is_none()
                     || crate::identity::window_instance_id(&window)
                         != lock(&record.inner).context["windowInstanceId"]
@@ -818,9 +890,18 @@ async fn run(record: Arc<Record>, bridge: Bridge, app: tauri::AppHandle, state: 
                         e.page_unavailable(true);
                         break;
                     }
-                    e.begin_target_cleanup();
                 }
-                let probe_budget = lock(&record.inner).cleanup_budget(300);
+                let probe_budget = {
+                    let e = lock(&record.inner);
+                    if e.active() {
+                        (e.deadline
+                            .saturating_duration_since(Instant::now())
+                            .as_millis() as u64)
+                            .min(1500)
+                    } else {
+                        e.cleanup_budget(300)
+                    }
+                };
                 let probe = bridge.probe_runtime(&window, probe_budget).await;
                 let context_changed = probe.as_ref().ok().is_some_and(|p| {
                     (p["pageEpoch"].is_string()
@@ -832,6 +913,16 @@ async fn run(record: Arc<Record>, bridge: Bridge, app: tauri::AppHandle, state: 
                 if destroyed || context_changed || e.cleanup == "context_destroyed" {
                     e.page_unavailable(true);
                     break;
+                }
+                let connection_live = e
+                    .connection_pin
+                    .as_ref()
+                    .is_some_and(|pin| pin.is_current());
+                if e.retain_after_slow_status(cmd, &failure, connection_live, probe.as_ref()) {
+                    // A slow read on the same connection/document is not a
+                    // target change. Keep its original state and deadline;
+                    // only status is polled again, never start or business work.
+                    continue;
                 }
                 // Retry only this picker's idempotent cancel/status within the
                 // existing terminal budget, retaining its original context.

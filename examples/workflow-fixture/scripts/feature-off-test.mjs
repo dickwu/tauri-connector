@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
+import { assertFrontendBoot } from './native-evidence.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const output = process.env.CONNECTOR_FIXTURE_OUTPUT || mkdtempSync(resolve(tmpdir(), 'connector-feature-off-'));
@@ -22,7 +23,9 @@ async function listening(port) {
   });
 }
 for (const port of [19555, 19556]) assert.equal(await listening(port), false, `Fixture port ${port} already occupied`);
-const env = { ...process.env, CONNECTOR_FIXTURE_ID: `dev.connector.workflow-fixture.${randomUUID()}` };
+const bootPath = resolve(output, `frontend-boot-${randomUUID()}.json`);
+const env = { ...process.env, CONNECTOR_FIXTURE_ID: `dev.connector.workflow-fixture.${randomUUID()}`,
+  CONNECTOR_FIXTURE_BOOT_EVIDENCE: bootPath };
 delete env.TAURI_CONNECTOR_WORKFLOW_TOKEN;
 let log = '';
 const child = spawn(binary, [], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -45,13 +48,22 @@ child.stderr.on('data', data => { log += data; });
 try {
   await delay(2000);
   assertRunning();
+  const deadline = Date.now() + 8000;
+  while (!existsSync(bootPath) && Date.now() < deadline) {
+    assertRunning();
+    await delay(100);
+  }
+  assertRunning();
+  assert.ok(existsSync(bootPath), 'Feature-off frontend boot evidence missing: live process alone does not prove WebView readiness');
+  const frontendBoot = JSON.parse(readFileSync(bootPath, 'utf8'));
+  assertFrontendBoot(frontendBoot, child.pid);
   for (const port of [19555, 19556]) assert.equal(await listening(port), false, `Feature-off app opened connector port ${port}`);
   assert.ok(!log.includes('[connector]'), 'Feature-off app must not initialize connector');
   assertRunning();
   writeFileSync(resolve(output, 'result.json'), JSON.stringify({ platform: process.platform, layer: 'native-webview',
     display: process.platform === 'linux' ? (process.env.DISPLAY || 'unavailable') : 'desktop-session', nativeAppRunning: true, connectorFeature: false,
-    listeningPorts: [], checkedPorts: [19555, 19556], passed: true }, null, 2));
-  console.log(`PASS native feature-off app opens no connector listeners: ${output}/result.json`);
+    frontendBoot, listeningPorts: [], checkedPorts: [19555, 19556], passed: true }, null, 2));
+  console.log(`PASS native feature-off frontend is ready with no connector injection or listeners: ${output}/result.json`);
 } finally {
   if (!exited && child.pid && child.exitCode === null && child.signalCode === null) {
     child.kill('SIGTERM');

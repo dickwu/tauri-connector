@@ -9,9 +9,17 @@
     button, input, textarea { font: inherit; padding: 8px 12px; margin: 6px; }
     [role="dialog"] { position: fixed; top: 100px; left: 200px; width: 560px; padding: 24px; background: white; border: 2px solid #456; z-index: 10; }
     [data-testid="task-row"] { padding: 12px; margin: 8px 0; border: 1px solid #789; background: white; }
+    .native-pixel-marker { position: fixed; z-index: 10000; width: 8px; height: 8px; pointer-events: none; }
+    #native-pixel-password { position: fixed; z-index: 10000; left: 200px; top: 20px; width: 180px; height: 24px; box-sizing: border-box; margin: 0; padding: 0; pointer-events: none; }
   </style>
 </head>
 <body>
+  <div aria-hidden="true" class="native-pixel-marker" style="left:20px;top:20px;background:rgb(17,231,59)"></div>
+  <div aria-hidden="true" class="native-pixel-marker" style="right:20px;top:20px;background:rgb(221,31,211)"></div>
+  <div aria-hidden="true" class="native-pixel-marker" style="left:20px;bottom:20px;background:rgb(51,97,227)"></div>
+  <div aria-hidden="true" class="native-pixel-marker" style="right:20px;bottom:20px;background:rgb(239,173,41)"></div>
+  <input id="native-pixel-password" type="password" value="native-fixture-secret" aria-label="Native pixel mask fixture" readonly tabindex="-1">
+  <button id="arm-page-stall" style="position:fixed;left:400px;top:16px;width:160px;height:32px;margin:0;padding:0">Arm fixture stall</button>
   <section id="upgrade-fixture" style="margin:60px 0 16px">
     <button id="pick-save" data-testid="pick-save">Save</button>
     <button id="pick-save-two" data-testid="pick-save-two">Save</button>
@@ -21,15 +29,47 @@
     <form id="pick-form"><button id="pick-submit">Submit fixture</button></form>
   </section>
   <div id="fixture"></div>
-  <script>
+  <script id="fixture-input">
     const record = kind => window.__TAURI_INTERNALS__.invoke('fixture_record_input', {kind});
     document.querySelector('#upgrade-fixture').addEventListener('click', () => record('click'));
     document.querySelector('#pick-save').addEventListener('click', () => window.__TAURI_INTERNALS__.invoke('fixture_create_task', {name:'picker-must-not-save'}));
     document.querySelector('#pick-form').addEventListener('submit', event => {event.preventDefault();record('submit');});
     document.querySelector('#pick-checkbox').addEventListener('change', () => record('change'));
     document.querySelector('#pick-link').addEventListener('click', () => record('navigation'));
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') record('escapeKeydown'); });
+    document.addEventListener('keyup', event => { if (event.key === 'Escape') record('escapeKeyup'); });
+  </script>
+  <script id="fixture-stall">
+    document.querySelector('#arm-page-stall').addEventListener('click', async event => {
+      event.currentTarget.disabled = true;
+      // The harness releases this normal fixture command only after observing
+      // awaiting_selection. No connector command or production hook is used.
+      await window.__TAURI_INTERNALS__.invoke('fixture_wait_for_stall');
+      const started = performance.now();
+      while (performance.now() - started < 1000) { /* intentional bounded main-thread stall */ }
+      await window.__TAURI_INTERNALS__.invoke('fixture_stall_finished', { elapsedMs: performance.now() - started });
+    });
   </script>
   <script src="react.js"></script>
   <script src="fixture-app.js"></script>
+  <script id="fixture-boot">
+    window.addEventListener('load', async () => {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (window.__WORKFLOW_FIXTURE__ && document.querySelector('#fixture main')) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      const connectorName = name => /^_*connector/i.test(name);
+      const functions = [['invoke', window.__TAURI_INTERNALS__?.invoke], ['fetch', window.fetch],
+        ['xhr.open', window.XMLHttpRequest?.prototype.open], ['xhr.send', window.XMLHttpRequest?.prototype.send],
+        ['history.pushState', history.pushState], ['history.replaceState', history.replaceState],
+        ...['log', 'warn', 'error', 'info', 'debug'].map(name => ['console.' + name, console[name]])];
+      await window.__TAURI_INTERNALS__.invoke('fixture_frontend_ready', { diagnostic: {
+        documentReadyState: document.readyState,
+        fixtureReady: Boolean(window.__WORKFLOW_FIXTURE__ && document.querySelector('#fixture main')),
+        connectorGlobals: Object.getOwnPropertyNames(window).filter(connectorName).sort(),
+        hookMarkers: functions.flatMap(([label, fn]) => fn ? Object.getOwnPropertyNames(fn).filter(connectorName).map(name => label + '.' + name) : []).sort()
+      }});
+    }, { once: true });
+  </script>
 </body>
 </html>
