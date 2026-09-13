@@ -242,6 +242,7 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | IPC | `ipc_execute_command` | `ipc exec <cmd> [-a '{...}']` |
 | Identity | `app_identity` | `identity`, global `--app-instance-id` |
 | Health | `runtime_health` | `runtime-health [--depth runtime]` |
+| Bridge | `bridge_status` | `bridge` |
 | IPC v2 capture | `ipc_capture` / `ipc_query` | `ipc capture start\|status\|stop`, `ipc query` |
 | Monitor | `ipc_monitor` | `ipc monitor` / `ipc unmonitor` |
 | Captured | `ipc_get_captured` | `ipc captured [-f filter]` |
@@ -254,8 +255,12 @@ Every tool is available via both the embedded MCP server (for Claude Code) and t
 | Events | `event_get_captured` | `events captured [-p regex]` |
 | DOM | `webview_search_snapshot` | *(via MCP only)* |
 | Setup | `get_setup_instructions` | `examples` |
-| Skills | *(CLI only)* | `skills list|get|path` |
+| Skills | *(CLI only)* | `skills list\|get\|path` |
 | Diagnostics | *(CLI only)* | `doctor [--json] [--no-runtime]` |
+| Discovery | *(CLI only)* | `status [--json]` |
+| Snapshots | *(CLI only)* | `snapshots list\|read` |
+| Hook | *(CLI only)* | `hook install\|remove` |
+| Self-update | *(CLI only)* | `update [--check]` |
 | Devices | `list_devices` | *(info only)* |
 
 ### CLI Ref-Based Addressing
