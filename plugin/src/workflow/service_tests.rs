@@ -18,6 +18,10 @@ struct MockBackend {
     reject_prepare: AtomicBool,
     reject_prepare_number: AtomicUsize,
     stall_condition: AtomicBool,
+    condition_started: Notify,
+    timeout_next_condition: AtomicBool,
+    condition_timeout_started: Notify,
+    condition_timeout_release: Notify,
     echo_value: AtomicBool,
     hold_execute: AtomicBool,
     execute_started: Notify,
@@ -98,6 +102,24 @@ impl Backend for MockBackend {
                 }
                 "condition" => {
                     self.conditions.fetch_add(1, Ordering::SeqCst);
+                    self.condition_started.notify_one();
+                    if self.timeout_next_condition.swap(false, Ordering::SeqCst) {
+                        assert!(
+                            self.ready.load(Ordering::SeqCst),
+                            "Timeout injected before observation readiness"
+                        );
+                        assert!(
+                            !self.satisfied.load(Ordering::SeqCst),
+                            "A satisfied condition cannot time out"
+                        );
+                        self.condition_timeout_started.notify_one();
+                        self.condition_timeout_release.notified().await;
+                        return Err(WorkflowError::new(
+                            "condition_timeout",
+                            "waiting",
+                            "Fixture condition timed out after observation readiness",
+                        ));
+                    }
                     if self.stall_condition.load(Ordering::SeqCst) {
                         std::future::pending::<()>().await;
                     }
@@ -171,6 +193,15 @@ async fn saw_conditions(backend: &MockBackend) {
     .expect("Condition was never observed");
 }
 
+async fn wait_for_injected_condition_timeout(backend: &MockBackend) {
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        backend.condition_timeout_started.notified(),
+    )
+    .await
+    .expect("Backend never reached the prepared condition-timeout gate");
+}
+
 #[tokio::test]
 async fn concurrent_duplicate_submissions_dispatch_only_once() {
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -224,18 +255,95 @@ async fn deadline_failure_never_dispatches_later_write() {
         let fixture = Fixture::new();
         let manager = fixture.manager();
         let backend = Arc::new(MockBackend::default());
+        // Exhaust the real run deadline in a deterministic phase: no worker slot
+        // is available, irrespective of journal or CI scheduling latency.
+        let held_slots = manager
+            .slots
+            .clone()
+            .acquire_many_owned(manager.slots.available_permits() as u32)
+            .await
+            .unwrap();
+        let deadline_ms = 80;
         let run = manager
-            .create(wait_spec("deadline", 80), PRINCIPAL, backend.clone())
+            .create(
+                wait_spec("deadline", deadline_ms),
+                PRINCIPAL,
+                backend.clone(),
+            )
             .await
             .unwrap();
         let report = settled(&run).await;
+        assert_eq!(report["status"], "failed");
         assert_eq!(report["reason"], "condition_timeout");
+        assert!(run.lock().await.started.elapsed() >= Duration::from_millis(deadline_ms));
+        assert_eq!(backend.prepares.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.conditions.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            backend.cleanups.load(Ordering::SeqCst),
+            0,
+            "No observation was created while queued"
+        );
+        assert_eq!(report["mayHaveEffects"], false);
+        assert_eq!(report["summary"]["completedSteps"], 0);
+        drop(held_slots);
+        tokio::task::yield_now().await;
+        assert_eq!(backend.dispatches.load(Ordering::SeqCst), 0);
         assert_eq!(backend.effects.load(Ordering::SeqCst), 0);
-        assert!(backend.cleanups.load(Ordering::SeqCst) > 0);
-        assert_eq!(report["blockedOutcome"]["effect"], "none");
     })
     .await
     .expect("Service contract test exceeded five seconds");
+}
+
+#[tokio::test]
+async fn condition_timeout_after_observation_ready_cleans_up_without_later_write() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let fixture = Fixture::new();
+        let manager = fixture.manager();
+        let backend = Arc::new(MockBackend {
+            stall_condition: AtomicBool::new(true),
+            ..MockBackend::default()
+        });
+        // Give real journal/preparation work time to run, then hold the condition
+        // forever. Only the production host/global deadline may release it.
+        let deadline_ms = 5000;
+        let run = manager
+            .create(
+                wait_spec("prepared-timeout", deadline_ms),
+                PRINCIPAL,
+                backend.clone(),
+            )
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), backend.condition_started.notified())
+            .await
+            .expect("Backend never entered the prepared condition before the host deadline");
+        assert_eq!(backend.prepares.load(Ordering::SeqCst), 1);
+        assert_eq!(backend.conditions.load(Ordering::SeqCst), 1);
+        assert!(backend.ready.load(Ordering::SeqCst));
+        assert_eq!(backend.cleanups.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.dispatches.load(Ordering::SeqCst), 0);
+        let original_deadline = run.lock().await.started + Duration::from_millis(deadline_ms);
+        tokio::time::sleep_until(original_deadline.into()).await;
+        let report = settled(&run).await;
+        assert!(run.lock().await.started.elapsed() >= Duration::from_millis(deadline_ms));
+        assert_eq!(report["reason"], "condition_timeout");
+        assert_eq!(report["blockedOutcome"]["effect"], "none");
+        assert!(backend.cleanups.load(Ordering::SeqCst) > 0);
+        assert!(!backend.ready.load(Ordering::SeqCst));
+        assert_eq!(backend.dispatches.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.effects.load(Ordering::SeqCst), 0);
+        let requests = backend.requests.lock().await;
+        let observation =
+            &requests.iter().find(|r| r["cmd"] == "condition").unwrap()["observationId"];
+        assert!(
+            requests
+                .iter()
+                .any(|r| r["cmd"] == "cleanup" && &r["observationId"] == observation),
+            "The prepared observation was not cleaned up"
+        );
+    })
+    .await
+    .expect("Prepared condition timeout exceeded test budget");
 }
 
 #[tokio::test]
@@ -596,20 +704,61 @@ async fn changed_prior_expectation_blocks_resumed_write() {
         let manager = fixture.manager();
         let backend = MockBackend::successful();
         backend.reject_prepare_number.store(2, Ordering::SeqCst);
+        let mut spec = two_step_spec("changed-prior");
+        // This case targets continuation revalidation, not global expiry. The
+        // backend obstruction fixes the pause at the second preparation.
+        spec.deadline_ms = 5000;
         let run = manager
-            .create(two_step_spec("changed-prior"), PRINCIPAL, backend.clone())
+            .create(spec, PRINCIPAL, backend.clone())
             .await
             .unwrap();
         let paused = settled(&run).await;
         assert_eq!(paused["summary"]["completedSteps"], 1);
+        assert_eq!(paused["status"], "paused");
+        assert_eq!(paused["reason"], "not_actionable");
+        assert_eq!(paused["blockedOutcome"]["execution"], "not_dispatched");
+        assert!(paused["checkpointId"].is_string());
+        assert_eq!(backend.prepares.load(Ordering::SeqCst), 2);
+        {
+            let requests = backend.requests.lock().await;
+            assert_eq!(
+                requests.iter().rfind(|r| r["cmd"] == "prepare").unwrap()["step"]["id"],
+                "second"
+            );
+        }
+        let conditions_before = backend.conditions.load(Ordering::SeqCst);
         backend.satisfied.store(false, Ordering::SeqCst);
+        backend.timeout_next_condition.store(true, Ordering::SeqCst);
         resume_run(&manager, &run, &continue_args(&paused), backend.clone())
             .await
             .unwrap();
+        wait_for_injected_condition_timeout(&backend).await;
+        assert_eq!(
+            backend.conditions.load(Ordering::SeqCst),
+            conditions_before + 1
+        );
+        assert_eq!(backend.effects.load(Ordering::SeqCst), 1);
+        {
+            let requests = backend.requests.lock().await;
+            let checked = requests.iter().rfind(|r| r["cmd"] == "condition").unwrap();
+            assert_eq!(
+                checked["condition"]["target"]["value"],
+                json!({"literal":".first-result"})
+            );
+        }
+        backend.condition_timeout_release.notify_one();
         let report = settled(&run).await;
         assert_ne!(report["status"], "completed");
         assert_eq!(report["reason"], "precondition_failed");
+        assert_eq!(report["blockedOutcome"]["execution"], "not_dispatched");
+        assert_eq!(backend.dispatches.load(Ordering::SeqCst), 1);
         assert_eq!(backend.effects.load(Ordering::SeqCst), 1);
+        let requests = backend.requests.lock().await;
+        assert!(
+            !requests
+                .iter()
+                .any(|r| r["cmd"] == "execute" && r["step"]["id"] == "second")
+        );
     })
     .await
     .expect("Changed precondition exceeded test timeout");

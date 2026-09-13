@@ -1,0 +1,164 @@
+{
+  "runId": 34761163669,
+  "commit": "6f53e78b6010721e1e926dbcd0f8d0c2683cc8d9",
+  "url": "https://github.com/dickwu/tauri-connector/actions/runs/34761163669",
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "name": "page-runtime",
+      "id": 103734134584,
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector off",
+      "id": 103734134667,
+      "conclusion": "success"
+    },
+    {
+      "name": "docs-and-skills",
+      "id": 103734134678,
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture ubuntu-latest / connector on",
+      "id": 103734134707,
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture windows-latest / connector off",
+      "id": 103734134719,
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture macos-latest / connector on",
+      "id": 103734134738,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / xcap",
+      "id": 103734134755,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap,native-screenshot",
+      "id": 103734134760,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / native-screenshot",
+      "id": 103734134769,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / native-screenshot",
+      "id": 103734134780,
+      "conclusion": "success"
+    },
+    {
+      "name": "Fixture windows-latest / connector on",
+      "id": 103734134781,
+      "conclusion": "success"
+    },
+    {
+      "name": "core-contracts",
+      "id": 103734134790,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / xcap",
+      "id": 103734134796,
+      "conclusion": "failure"
+    },
+    {
+      "name": "Fixture macos-latest / connector off",
+      "id": 103734134798,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / native-screenshot",
+      "id": 103734134808,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / no features",
+      "id": 103734134811,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / xcap,native-screenshot",
+      "id": 103734134812,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin macos-latest / no features",
+      "id": 103734134840,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin ubuntu-latest / no features",
+      "id": 103734134843,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / xcap",
+      "id": 103734134850,
+      "conclusion": "success"
+    },
+    {
+      "name": "Plugin windows-latest / xcap,native-screenshot",
+      "id": 103734134891,
+      "conclusion": "success"
+    },
+    {
+      "name": "Build aarch64-apple-darwin",
+      "id": 103734197896,
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-pc-windows-msvc",
+      "id": 103734197897,
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-unknown-linux-gnu",
+      "id": 103734197922,
+      "conclusion": "success"
+    },
+    {
+      "name": "Build aarch64-unknown-linux-gnu",
+      "id": 103734197925,
+      "conclusion": "success"
+    },
+    {
+      "name": "Build x86_64-apple-darwin",
+      "id": 103734197948,
+      "conclusion": "success"
+    },
+    {
+      "name": "Native WebView macos-latest",
+      "id": 103734681105,
+      "conclusion": "success"
+    },
+    {
+      "name": "Native WebView windows-latest",
+      "id": 103734681114,
+      "conclusion": "failure"
+    },
+    {
+      "name": "Native WebView ubuntu-latest",
+      "id": 103734681118,
+      "conclusion": "success"
+    },
+    {
+      "name": "aggregate",
+      "id": 103735260808,
+      "conclusion": "failure"
+    }
+  ],
+  "findings": [
+    "macOS and Linux native jobs passed again, including lifecycle stress, expiry and original workflow regressions.",
+    "Windows capture started after socket connection but before the document was ready; protected runtime correctly rejected it. The helper now waits for runtime health readiness.",
+    "Two Linux xcap workflow tests reached unintended deadline phases under load. Queue expiry and expiry after an established observation are now tested separately with real host deadlines; continuation revalidation is synchronized."
+  ],
+  "safety": "No production deadline, permission, journal, replay, CAS or quarantine rule was changed."
+}

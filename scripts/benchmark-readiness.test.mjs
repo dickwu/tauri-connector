@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {waitForColdDocument} from '../examples/workflow-fixture/scripts/transport-benchmark.mjs';
+import {inspectionTargetReady} from '../examples/workflow-fixture/scripts/fixture-readiness.mjs';
+
+test('Native capture readiness requires a responsive document, not a connected socket',()=>{
+  assert.equal(inspectionTargetReady({checks:{bridge:{connected:true,status:'unavailable'}},conclusion:'runtime_target_unavailable'}),false);
+  assert.equal(inspectionTargetReady({checks:{bridge:{connected:true,status:'responsive'}},conclusion:'runtime_probe_not_completed'}),false);
+  assert.equal(inspectionTargetReady({checks:{bridge:{status:'responsive'}},conclusion:'runtime_missing'}),true);
+  assert.equal(inspectionTargetReady({checks:{bridge:{status:'responsive'}},conclusion:'runtime_responsive'}),true);
+  assert.equal(inspectionTargetReady(null),false);
+});
 
 test('UP-T105 cold preparation rejects the old epoch and incomplete replacement documents',async()=>{
   const pages=[{epoch:'old',ready:true,fixture:true},{epoch:'new',ready:false,fixture:true},{epoch:'new',ready:true,fixture:false},{epoch:'new',ready:true,fixture:true}];

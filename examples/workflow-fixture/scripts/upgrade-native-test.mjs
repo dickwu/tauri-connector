@@ -10,6 +10,7 @@ import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import net from 'node:net';
 import {sendLinuxInput} from './native-input-linux.mjs';
+import {inspectionTargetReady} from './fixture-readiness.mjs';
 const exec=promisify(execFile);
 const root=fileURLToPath(new URL('../../../',import.meta.url));
 const output=process.env.CONNECTOR_FIXTURE_OUTPUT||mkdtempSync(resolve(tmpdir(),'connector-upgrade-native-'));
@@ -63,13 +64,15 @@ try {
   child=spawn(binary,[],{cwd:root,env:{...process.env,TAURI_CONNECTOR_WORKFLOW_TOKEN:token,CONNECTOR_FIXTURE_ID:fixtureId,CONNECTOR_FIXTURE_EVIDENCE:storePath,TAURI_CONNECTOR_CAPTURE_PREVIEW_COMMANDS:'fixture_create_task,fixture_slow_write,fixture_fail_after_write,fixture_binary_result,fixture_pending',TAURI_CONNECTOR_CAPTURE_PREVIEW_PATHS:'id,name'},stdio:['ignore',log,log]});closeSync(log);
   let rpc;for(let n=0;n<100;n++){try{rpc=await Rpc.connect();break;}catch{await delay(100);}}
   assert.ok(rpc,'fixture bridge unavailable');
+  let fixtureReady=false;
   for(let n=0;n<60;n++){
     try {
-      if(process.platform==='win32') {const health=await rpc.inspect('runtime_health',{depth:'bridge',timeoutMs:1000});if(health.checks.bridge.connected)break;}
-      else if(await rpc.js("!!document.querySelector('#pick-save')&&!!window.__WORKFLOW_FIXTURE__"))break;
+      if(process.platform==='win32') {const health=await rpc.inspect('runtime_health',{depth:'runtime',timeoutMs:1000});if(inspectionTargetReady(health)){fixtureReady=true;break;}}
+      else if(await rpc.js("!!document.querySelector('#pick-save')&&!!window.__WORKFLOW_FIXTURE__")){fixtureReady=true;break;}
     }catch{}
     await delay(100);
   }
+  assert.ok(fixtureReady,'Native fixture document must be ready before capture or input');
   if(process.platform==='win32') {
     const {verifyWindowsNative}=await import('./windows-native.mjs');
     await verifyWindowsNative({rpc,token,root,output,fixtureId,child,input,exec,store,test,results});
