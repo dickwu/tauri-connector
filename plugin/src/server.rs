@@ -211,6 +211,9 @@ async fn handle_command(
         "backend_state" => "ipc_get_backend_state",
         other => other,
     };
+    if let Some(message) = crate::handlers::preflight_error(tool, &args) {
+        return Response::not_dispatched(id, "invalid_arguments", message);
+    }
     let lease = match crate::workflow::resources::acquire(state, tool, &args).await {
         Ok(lease) => lease,
         Err(error) => return Response::rejected(id, &error),

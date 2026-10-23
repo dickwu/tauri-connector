@@ -713,6 +713,9 @@ pub(crate) async fn call_raw(
     if is_inspection(name, args) {
         return inspection_response("mcp", name, args, bridge, app, state).await;
     }
+    if let Some(message) = crate::handlers::preflight_error(name, args) {
+        return Response::not_dispatched("mcp".into(), "invalid_arguments", message);
+    }
     let lease = match crate::workflow::resources::acquire(state, name, args).await {
         Ok(lease) => lease,
         Err(error) => return Response::rejected("mcp".into(), &error),

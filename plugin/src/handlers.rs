@@ -44,6 +44,23 @@ fn styles_filter_js(properties: Option<&[String]>) -> String {
     }
 }
 
+/// Argument errors that can be detected before acquiring app resources.
+///
+/// Rejecting here keeps a malformed request from being reported as
+/// `outcome_unknown`, which would quarantine the resources it touched.
+pub(crate) fn preflight_error(tool: &str, args: &serde_json::Value) -> Option<String> {
+    if tool != "webview_interact"
+        || args.get("action").and_then(serde_json::Value::as_str) != Some("drag")
+    {
+        return None;
+    }
+    let strategy = args
+        .get("dragStrategy")
+        .or_else(|| args.get("drag_strategy"))
+        .and_then(serde_json::Value::as_str)?;
+    validate_drag_strategy(strategy).err()
+}
+
 /// Drag strategies understood by the injected drag script.
 const DRAG_STRATEGIES: &[&str] = &["auto", "pointer", "html5dnd"];
 
@@ -3954,8 +3971,8 @@ pub async fn search_snapshot(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_wait_script, event_listener_js, ref_resolver_block, same_path, sha256_hex,
-        snapshot_selector_arg, styles_filter_js, validate_drag_strategy,
+        build_wait_script, event_listener_js, preflight_error, ref_resolver_block, same_path,
+        sha256_hex, snapshot_selector_arg, styles_filter_js, validate_drag_strategy,
     };
     use crate::state::{PluginState, RefEntry};
     use std::path::Path;
@@ -4326,6 +4343,24 @@ mod tests {
         assert!(err.contains("Unknown drag strategy 'html5'"), "{err}");
         assert!(err.contains("auto, pointer, html5dnd"), "{err}");
         assert!(validate_drag_strategy("auto'; alert(1); '").is_err());
+    }
+
+    #[test]
+    fn preflight_rejects_unknown_drag_strategy_before_dispatch() {
+        let mcp = serde_json::json!({"action": "drag", "dragStrategy": "bogus"});
+        assert!(
+            preflight_error("webview_interact", &mcp)
+                .unwrap()
+                .contains("bogus")
+        );
+        let ws = serde_json::json!({"action": "drag", "drag_strategy": "html5"});
+        assert!(preflight_error("webview_interact", &ws).is_some());
+        let ok = serde_json::json!({"action": "drag", "dragStrategy": "pointer"});
+        assert!(preflight_error("webview_interact", &ok).is_none());
+        let default = serde_json::json!({"action": "drag", "drag_strategy": null});
+        assert!(preflight_error("webview_interact", &default).is_none());
+        let click = serde_json::json!({"action": "click", "dragStrategy": "bogus"});
+        assert!(preflight_error("webview_interact", &click).is_none());
     }
 
     #[test]
