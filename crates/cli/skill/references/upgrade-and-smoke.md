@@ -6,10 +6,10 @@ Use this guide when a user asks to install or upgrade the connector in an existi
 
 1. Read the target application's local instructions, Cargo manifest, feature gates, Tauri config and launch scripts. Record its uncommitted changes and existing lockfile before changing dependencies.
 2. Check `tauri-connector --version`, `tauri-connector update --check` and the plugin's published stable version. Updating the CLI does not update a plugin already compiled into an app.
-3. Change the existing `tauri-plugin-connector` requirement to the selected compatible release. Preserve the existing optional feature name and dependency pins. For the 0.16 release, the focused update is:
+3. Change the existing `tauri-plugin-connector` requirement to the selected compatible release. Preserve the existing optional feature name and dependency pins. For the 0.17 release, the focused update is:
 
    ```bash
-   cargo update --manifest-path src-tauri/Cargo.toml -p tauri-plugin-connector --precise 0.16.0
+   cargo update --manifest-path src-tauri/Cargo.toml -p tauri-plugin-connector --precise 0.17.0
    cargo tree --manifest-path src-tauri/Cargo.toml --locked --features connector -i tauri-plugin-connector
    ```
 
