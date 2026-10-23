@@ -586,6 +586,60 @@ impl Response {
     }
 }
 
+/// Internal bridge message: plugin → webview JS.
+#[derive(Debug, Serialize)]
+pub struct BridgeCommand {
+    pub id: String,
+    pub script: String,
+}
+
+/// Internal bridge message: webview JS → plugin.
+#[derive(Debug, Deserialize)]
+pub struct BridgeResult {
+    pub id: String,
+    #[serde(default)]
+    pub result: Option<serde_json::Value>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// App metadata for backend_state.
+#[derive(Debug, Serialize)]
+pub struct BackendState {
+    pub app: AppInfo,
+    pub tauri: TauriInfo,
+    pub environment: EnvInfo,
+    pub windows: Vec<WindowEntry>,
+    pub timestamp: u128,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AppInfo {
+    pub name: String,
+    pub identifier: String,
+    pub version: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TauriInfo {
+    pub version: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EnvInfo {
+    pub debug: bool,
+    pub os: String,
+    pub arch: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WindowEntry {
+    pub label: String,
+    pub title: String,
+    pub visible: bool,
+    pub focused: bool,
+}
+
 #[cfg(test)]
 mod workflow_protocol_tests {
     use super::*;
@@ -669,58 +723,4 @@ mod workflow_protocol_tests {
             assert_eq!(window_id, expected);
         }
     }
-}
-
-/// Internal bridge message: plugin → webview JS.
-#[derive(Debug, Serialize)]
-pub struct BridgeCommand {
-    pub id: String,
-    pub script: String,
-}
-
-/// Internal bridge message: webview JS → plugin.
-#[derive(Debug, Deserialize)]
-pub struct BridgeResult {
-    pub id: String,
-    #[serde(default)]
-    pub result: Option<serde_json::Value>,
-    #[serde(default)]
-    pub error: Option<String>,
-}
-
-/// App metadata for backend_state.
-#[derive(Debug, Serialize)]
-pub struct BackendState {
-    pub app: AppInfo,
-    pub tauri: TauriInfo,
-    pub environment: EnvInfo,
-    pub windows: Vec<WindowEntry>,
-    pub timestamp: u128,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AppInfo {
-    pub name: String,
-    pub identifier: String,
-    pub version: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TauriInfo {
-    pub version: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct EnvInfo {
-    pub debug: bool,
-    pub os: String,
-    pub arch: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct WindowEntry {
-    pub label: String,
-    pub title: String,
-    pub visible: bool,
-    pub focused: bool,
 }

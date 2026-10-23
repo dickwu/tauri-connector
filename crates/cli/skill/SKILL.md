@@ -573,7 +573,7 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | `tauri build` still compiles the plugin / pulls xcap, aws-sdk-s3 | Plugin is gated on `cfg(debug_assertions)` (legacy). Migrate to `cfg(feature = "dev-connector")` with `optional = true` so the dep is skipped entirely when the feature is off. Doctor's legacy nudge has the full migration checklist. |
 | Connection refused | App not running or plugin not loaded. Check: `lsof -i :9555 \| grep LISTEN` |
 | Stale PID file | Verify its PID and executable are no longer live. Use the new launch's actual PID path/ports; remove only a stale record you own, especially when target directories are shared |
-| Port conflict | Use `ConnectorBuilder::new().port_range(9600, 9700)` or set `TAURI_CONNECTOR_PORT=9600` |
+| Port conflict | Use `ConnectorBuilder::new().port_range(9600, 9700)` (inclusive; the plugin ignores `TAURI_CONNECTOR_PORT`). Then point clients at the new port with `TAURI_CONNECTOR_PORT` or `--port` if discovery does not find it |
 | Refs not found | DOM changed since snapshot. Re-run snapshot for fresh refs |
 | Acting on the wrong window | Pass `windowId` (MCP) / `--window-id` (CLI). Default is `main`; each window has independent DOM and refs |
 | Bridge not connected | Eval+event fallback is permitted only before dispatch, within the remaining deadline. Persistent slowness: check `tauri-connector bridge` and `withGlobalTauri: true` |

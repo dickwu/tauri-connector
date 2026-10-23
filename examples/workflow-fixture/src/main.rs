@@ -267,8 +267,8 @@ fn main() {
         builder
             .plugin(
                 tauri_plugin_connector::ConnectorBuilder::new()
-                    .port_range(19555, 19556)
-                    .mcp_port_range(19556, 19557)
+                    .port_range(19555, 19555)
+                    .mcp_port_range(19556, 19556)
                     .workflow_token(token)
                     .build(),
             )

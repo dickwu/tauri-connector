@@ -822,8 +822,8 @@ use tauri_plugin_connector::ConnectorBuilder;
     builder = builder.plugin(
         ConnectorBuilder::new()
             .bind_address("127.0.0.1")  // localhost only (the default)
-            .port_range(8000, 8100)     // WS port range (default: 9555-9655)
-            .mcp_port_range(8100, 8200) // MCP port range (default: 9556-9656)
+            .port_range(8000, 8100)     // WS port range, inclusive (default: 9555-9655)
+            .mcp_port_range(8100, 8200) // MCP port range, inclusive (default: 9556-9656)
             .build()
     );
 }

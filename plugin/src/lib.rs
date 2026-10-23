@@ -332,7 +332,7 @@ impl ConnectorBuilder {
         }
     }
 
-    /// Set the port range for the WebSocket server. Default: 9555-9655.
+    /// Set the inclusive port range for the WebSocket server. Default: 9555-9655.
     pub fn port_range(self, start: u16, end: u16) -> Self {
         Self {
             port_range: (start, end),
@@ -340,7 +340,7 @@ impl ConnectorBuilder {
         }
     }
 
-    /// Set the port range for the embedded MCP HTTP server. Default: 9556-9656.
+    /// Set the inclusive port range for the embedded MCP HTTP server. Default: 9556-9656.
     pub fn mcp_port_range(self, start: u16, end: u16) -> Self {
         Self {
             mcp_port_range: (start, end),

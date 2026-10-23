@@ -32,7 +32,7 @@ Perform gestures on elements: click, double-click, focus, scroll, hover, drag.
 | `targetY` | number | | | Drag target Y coordinate |
 | `steps` | number | | 10 | Drag intermediate move events (higher = smoother) |
 | `durationMs` | number | | 300 | Drag total duration in ms |
-| `dragStrategy` | string | | `auto` | `auto` (checks `el.draggable`), `pointer`, `html5dnd` |
+| `dragStrategy` | string | | `auto` | `auto` (checks `el.draggable`), `pointer`, `html5dnd`; any other value is rejected |
 
 ### webview_keyboard
 

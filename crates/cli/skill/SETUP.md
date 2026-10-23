@@ -291,8 +291,8 @@ use tauri_plugin_connector::ConnectorBuilder;
     builder = builder.plugin(
         ConnectorBuilder::new()
             .bind_address("127.0.0.1")   // default (localhost only); "0.0.0.0" exposes the connector to the network
-            .port_range(9600, 9700)      // WS port range (default: 9555-9655)
-            .mcp_port_range(9700, 9800)  // MCP port range (default: 9556-9656)
+            .port_range(9600, 9700)      // WS port range, inclusive (default: 9555-9655)
+            .mcp_port_range(9700, 9800)  // MCP port range, inclusive (default: 9556-9656)
             .disable_mcp()               // skip the embedded MCP HTTP server (default: enabled)
             .workflow_token(token)       // enable workflow_* tools; >= 32 bytes, see Step 6b
             .build()
