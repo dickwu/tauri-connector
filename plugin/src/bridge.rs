@@ -6,7 +6,6 @@
 //! through this channel, completely bypassing Tauri's IPC layer.
 
 use std::collections::HashMap;
-use std::net::TcpListener;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
@@ -173,12 +172,21 @@ pub struct Bridge {
     runtime: Arc<crate::runtime::RuntimeManager>,
 }
 
+/// Inclusive port range for the internal bridge listener.
+const BRIDGE_PORT_RANGE: (u16, u16) = (9300, 9400);
+
 impl Bridge {
     /// Start the internal bridge WebSocket server.
     /// Returns the Bridge handle and the port it's listening on.
+    ///
+    /// The listener is bound before returning, so a bind failure is reported
+    /// to the caller instead of leaving a handle to a bridge nobody serves.
+    /// Must be called from within a Tokio runtime.
     pub fn start() -> Result<Self, String> {
-        let port = find_available_port(9300, 9400)
-            .ok_or_else(|| "No available port in range 9300-9400".to_string())?;
+        let (std_listener, port) =
+            crate::net::bind_in_range("127.0.0.1", BRIDGE_PORT_RANGE.0, BRIDGE_PORT_RANGE.1)?;
+        let listener = TokioTcpListener::from_std(std_listener)
+            .map_err(|e| format!("Failed to register bridge listener: {e}"))?;
 
         let pending: PendingMap = Arc::new(StdMutex::new(HashMap::new()));
         let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
@@ -194,7 +202,7 @@ impl Bridge {
 
         let bridge_clone = bridge.clone();
         tokio::spawn(async move {
-            if let Err(e) = bridge_clone.run_server().await {
+            if let Err(e) = bridge_clone.run_server(listener).await {
                 eprintln!("[connector][bridge] Server error: {e}");
             }
         });
@@ -678,11 +686,7 @@ impl Bridge {
         })
     }
 
-    async fn run_server(&self) -> Result<(), String> {
-        let listener = TokioTcpListener::bind(format!("127.0.0.1:{}", self.port))
-            .await
-            .map_err(|e| e.to_string())?;
-
+    async fn run_server(&self, listener: TokioTcpListener) -> Result<(), String> {
         loop {
             let (stream, addr) = listener.accept().await.map_err(|e| e.to_string())?;
             println!("[connector][bridge] Webview client connected from {addr}");
@@ -2107,10 +2111,6 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
 }})();
 "#
     )
-}
-
-fn find_available_port(start: u16, end: u16) -> Option<u16> {
-    (start..end).find(|&port| TcpListener::bind(("127.0.0.1", port)).is_ok())
 }
 
 #[cfg(test)]

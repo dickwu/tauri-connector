@@ -39,6 +39,7 @@ mod identity;
 mod mcp;
 mod mcp_tool_schema;
 mod mcp_tools;
+mod net;
 pub(crate) mod picker;
 mod protocol;
 mod runtime;

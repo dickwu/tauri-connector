@@ -1,7 +1,6 @@
 //! External WebSocket server that MCP servers connect to.
 
-use std::net::TcpListener;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener as TokioTcpListener;
@@ -15,6 +14,7 @@ use crate::state::PluginState;
 
 pub struct Server {
     port: u16,
+    listener: StdMutex<Option<std::net::TcpListener>>,
     bridge: Bridge,
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     state: PluginState,
@@ -47,16 +47,13 @@ impl Server {
         bridge: Bridge,
         state: PluginState,
     ) -> Result<Self, String> {
-        let port =
-            find_available_port(bind_address, port_range.0, port_range.1).ok_or_else(|| {
-                format!(
-                    "No available port in range {}-{}",
-                    port_range.0, port_range.1
-                )
-            })?;
+        // Bind now and hold the socket until `run`, so the advertised port
+        // cannot be taken by another process in between.
+        let (listener, port) = crate::net::bind_in_range(bind_address, port_range.0, port_range.1)?;
 
         Ok(Self {
             port,
+            listener: StdMutex::new(Some(listener)),
             bridge,
             app_handle: Arc::new(Mutex::new(None)),
             state,
@@ -76,9 +73,13 @@ impl Server {
 
     pub async fn run(&self, bind_address: String) -> Result<(), String> {
         let addr = format!("{bind_address}:{}", self.port);
-        let listener = TokioTcpListener::bind(&addr)
-            .await
-            .map_err(|e| e.to_string())?;
+        let std_listener = self
+            .listener
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .ok_or_else(|| "WebSocket server is already running".to_string())?;
+        let listener = TokioTcpListener::from_std(std_listener).map_err(|e| e.to_string())?;
 
         println!("[connector][server] Listening on {addr}");
 
@@ -719,10 +720,6 @@ where
     tx.send(Message::Text(json.into()))
         .await
         .map_err(|e| e.to_string())
-}
-
-fn find_available_port(addr: &str, start: u16, end: u16) -> Option<u16> {
-    (start..end).find(|&port| TcpListener::bind((addr, port)).is_ok())
 }
 
 #[cfg(test)]
