@@ -56,6 +56,8 @@ use server::Server;
 /// `links` key, so only one instance can be registered).
 static BRIDGE_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
 static BRIDGE_HANDLE: std::sync::OnceLock<Bridge> = std::sync::OnceLock::new();
+/// The `.connector.json` this process wrote, removed on `RunEvent::Exit`.
+static PID_FILE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 use state::{DomEntry, EventEntry, IpcEvent, LogEntry, PluginState, RuntimeEntry};
 
 #[doc(hidden)]
@@ -387,6 +389,11 @@ impl ConnectorBuilder {
             .js_init_script(runtime::initialization_script())
             .on_webview_ready(|webview| { identity::window_instance_id(webview.label()); })
             .on_event(|app, event| {
+                if let tauri::RunEvent::Exit = event
+                    && let Some(path) = PID_FILE.get()
+                {
+                    remove_own_pid_file(path, std::process::id());
+                }
                 if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = event {
                     identity::window_destroyed(label);
                     if let Some(bridge)=BRIDGE_HANDLE.get() { bridge.window_destroyed(label); }
@@ -548,24 +555,21 @@ impl ConnectorBuilder {
                     );
 
                     // 7. Write PID file so bun scripts can auto-discover ports
-                    let pid_file = write_pid_file(
+                    if let Some(path) = write_pid_file(
                         ws_port,
                         mcp_port_actual,
                         bridge_port,
                         &config.product_name.clone().unwrap_or_default(),
                         &config.identifier,
                         &log_dir_for_pid,
-                    );
+                    ) {
+                        let _ = PID_FILE.set(path);
+                    }
 
                     server.set_app_handle(handle);
 
                     if let Err(e) = server.run(bind_address).await {
                         eprintln!("[connector] Server error: {e}");
-                    }
-
-                    // Clean up PID file on exit
-                    if let Some(path) = pid_file {
-                        let _ = std::fs::remove_file(&path);
                     }
                 });
 
@@ -580,7 +584,32 @@ pub fn init() -> TauriPlugin<Wry> {
     ConnectorBuilder::new().build()
 }
 
-/// Write a `.connector.json` PID file to `target/` so bun scripts can auto-discover ports.
+/// Directory for `.connector.json`: the nearest `target` ancestor of the
+/// executable (covers `target/debug`, `target/<triple>/release` and `.app`
+/// bundles built under `target/`), otherwise `fallback` (the log dir), so the
+/// file never lands inside an app bundle or next to an installed binary.
+fn pid_file_dir(exe: &std::path::Path, fallback: &std::path::Path) -> std::path::PathBuf {
+    exe.ancestors()
+        .skip(1)
+        .find(|dir| dir.file_name().is_some_and(|name| name == "target"))
+        .unwrap_or(fallback)
+        .to_path_buf()
+}
+
+/// Remove the PID file only if it still describes this process; another
+/// instance sharing the target dir may have replaced it.
+fn remove_own_pid_file(path: &std::path::Path, pid: u32) {
+    let owned = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|info| info.get("pid").and_then(serde_json::Value::as_u64))
+        == Some(u64::from(pid));
+    if owned {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Write a `.connector.json` PID file (see [`pid_file_dir`]) so scripts can auto-discover ports.
 /// Returns the path if successful (for cleanup on exit).
 fn write_pid_file(
     ws_port: u16,
@@ -591,8 +620,11 @@ fn write_pid_file(
     log_dir: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    // exe = .../target/debug/app-name  ->  target/ is 2 levels up
-    let target_dir = exe.parent()?.parent()?;
+    let target_dir = pid_file_dir(&exe, log_dir);
+    if let Err(e) = std::fs::create_dir_all(&target_dir) {
+        eprintln!("[connector] Failed to create PID file directory: {e}");
+        return None;
+    }
 
     let pid_path = target_dir.join(".connector.json");
     let pid = std::process::id();
@@ -623,5 +655,56 @@ fn write_pid_file(
             eprintln!("[connector] Failed to write PID file: {e}");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod pid_file_tests {
+    use super::{pid_file_dir, remove_own_pid_file};
+    use std::path::Path;
+
+    #[test]
+    fn pid_file_goes_to_the_nearest_target_dir() {
+        let fallback = Path::new("/data/logs");
+        for (exe, expected) in [
+            ("/p/src-tauri/target/debug/app", "/p/src-tauri/target"),
+            ("/p/target/aarch64-apple-darwin/release/app", "/p/target"),
+            (
+                "/p/target/release/bundle/macos/App.app/Contents/MacOS/App",
+                "/p/target",
+            ),
+        ] {
+            assert_eq!(pid_file_dir(Path::new(exe), fallback), Path::new(expected));
+        }
+    }
+
+    #[test]
+    fn installed_apps_use_the_fallback_dir() {
+        let fallback = Path::new("/data/logs");
+        for exe in [
+            "/Applications/App.app/Contents/MacOS/App",
+            "/usr/local/bin/app",
+            "/home/me/target-app/app",
+        ] {
+            assert_eq!(pid_file_dir(Path::new(exe), fallback), fallback);
+        }
+    }
+
+    #[test]
+    fn exit_cleanup_only_removes_our_own_pid_file() {
+        let dir = std::env::temp_dir().join(format!("connector-pid-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".connector.json");
+
+        std::fs::write(&path, r#"{"pid": 41}"#).unwrap();
+        remove_own_pid_file(&path, 42);
+        assert!(path.exists(), "another instance's file is kept");
+
+        std::fs::write(&path, r#"{"pid": 42}"#).unwrap();
+        remove_own_pid_file(&path, 42);
+        assert!(!path.exists());
+
+        remove_own_pid_file(&path, 42); // missing file is fine
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

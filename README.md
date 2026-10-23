@@ -937,7 +937,7 @@ Set `annotate: true` or `tauri-connector screenshot --annotate --name-hint <slug
 
 ### PID File Auto-Discovery
 
-When the plugin starts, it writes `target/.connector.json` with all port info:
+When the plugin starts, it writes `.connector.json` with all port info into the nearest `target/` directory above the executable (also for `target/<triple>/...` builds and `.app` bundles built there). Executables outside a `target/` directory, such as an installed app, write it to the connector log directory instead; discovery then falls back to `TAURI_CONNECTOR_PID_FILE` or the port scan. The file is removed when the app exits, unless another instance has since replaced it:
 
 ```json
 { "pid": 12345, "ws_port": 9555, "mcp_port": 9556, "bridge_port": 9300, "app_name": "MyApp", "app_id": "com.example.app" }
