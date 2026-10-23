@@ -56,8 +56,8 @@ objc2-web-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-webview2-com = { version = "0.38", optional = true }
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage"], optional = true }
+webview2-com = { version = "0.39", optional = true }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2", features = ["v2_40"], optional = true }
