@@ -232,6 +232,12 @@ fn now_ms() -> u64 {
 }
 
 /// Parse a ref string (@e1, ref=e1, e1) into a canonical ref ID.
+/// Encode `value` as a JS string literal (JSON string syntax), preserving
+/// backslashes, quotes and newlines exactly.
+pub fn js_string(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+}
+
 pub fn parse_ref(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if let Some(rest) = trimmed.strip_prefix('@') {
@@ -259,19 +265,20 @@ pub fn build_resolve_and_act_script(
     match parse_ref(selector_or_ref) {
         None => {
             // CSS selector path
-            let escaped = selector_or_ref.replace('"', "\\\"").replace('\'', "\\'");
+            let selector = js_string(selector_or_ref);
             format!(
                 r#"(() => {{
-      const el = document.querySelector("{escaped}");
-      if (!el) return {{ error: 'Element not found: {escaped}' }};
+      const el = document.querySelector({selector});
+      if (!el) return {{ error: 'Element not found: ' + {selector} }};
       {action_js}
     }})()"#
             )
         }
         Some(ref_id) => {
             let Some(entry) = ref_map.get(&ref_id) else {
+                let ref_js = js_string(&ref_id);
                 return format!(
-                    r#"(() => {{ return {{ error: 'Unknown ref: {ref_id}. Run snapshot first.' }}; }})()"#
+                    r#"(() => {{ return {{ error: 'Unknown ref: ' + {ref_js} + '. Run snapshot first.' }}; }})()"#
                 );
             };
 
@@ -289,44 +296,45 @@ pub fn build_resolve_and_act_script(
                 }})()"#
                 );
             }
-            let escaped_selector = entry.selector.replace('"', "\\\"");
-            let escaped_name = entry.name.replace('"', "\\\"");
-            let escaped_name: String = escaped_name.chars().take(50).collect();
-            let tag = &entry.tag;
-            let role = entry.role.as_deref().unwrap_or("");
+            let selector = js_string(&entry.selector);
+            let short_name: String = entry.name.chars().take(50).collect();
+            let name = js_string(&short_name);
+            let tag = js_string(&entry.tag);
+            let role = js_string(entry.role.as_deref().unwrap_or(""));
+            let ref_js = js_string(&ref_id);
 
             format!(
                 r#"(() => {{
       let el = null;
 
       // Strategy 1: CSS selector
-      el = document.querySelector("{escaped_selector}");
+      el = document.querySelector({selector});
 
       // Strategy 2: role + accessible name matching
       if (!el) {{
-        const candidates = document.querySelectorAll("{tag}");
+        const candidates = document.querySelectorAll({tag});
         for (const c of candidates) {{
           const al = c.getAttribute('aria-label') || '';
           const t = c.textContent?.trim().substring(0, 100) || '';
-          if ((al.includes("{escaped_name}") || t.includes("{escaped_name}"))) {{
+          if ((al.includes({name}) || t.includes({name}))) {{
             el = c; break;
           }}
         }}
       }}
 
       // Strategy 3: all elements with matching role
-      if (!el && "{role}") {{
-        const byRole = document.querySelectorAll('[role="{role}"]');
+      if (!el && {role}) {{
+        const byRole = document.querySelectorAll('[role=' + JSON.stringify({role}) + ']');
         for (const c of byRole) {{
           const al = c.getAttribute('aria-label') || '';
           const t = c.textContent?.trim().substring(0, 100) || '';
-          if (al.includes("{escaped_name}") || t.includes("{escaped_name}")) {{
+          if (al.includes({name}) || t.includes({name})) {{
             el = c; break;
           }}
         }}
       }}
 
-      if (!el) return {{ error: 'Could not resolve ref={ref_id} ({tag} "{escaped_name}")' }};
+      if (!el) return {{ error: 'Could not resolve ref=' + {ref_js} + ' (' + {tag} + ' "' + {name} + '")' }};
       {action_js}
     }})()"#
             )
@@ -423,5 +431,26 @@ mod tests {
         assert!(script.contains("target_changed"));
         assert!(!script.contains("querySelector"));
         assert!(!script.contains("includes("));
+    }
+
+    #[test]
+    fn css_selectors_and_names_are_json_encoded_in_scripts() {
+        let script = build_resolve_and_act_script(r".md\:flex", &HashMap::new(), "return 1;");
+        assert!(
+            script.contains(r#"document.querySelector(".md\\:flex")"#),
+            "{script}"
+        );
+
+        let entry: RefEntry = serde_json::from_value(serde_json::json!({
+            "tag": "button",
+            "role": "button",
+            "name": "Say \"hi\"\n",
+            "selector": r".w-1\/2"
+        }))
+        .unwrap();
+        let refs = HashMap::from([("e2".into(), entry)]);
+        let script = build_resolve_and_act_script("@e2", &refs, "return 1;");
+        assert!(script.contains(r#"querySelector(".w-1\\/2")"#), "{script}");
+        assert!(script.contains(r#"includes("Say \"hi\"\n")"#), "{script}");
     }
 }

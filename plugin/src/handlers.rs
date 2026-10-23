@@ -24,6 +24,62 @@ fn js_string(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+/// JS literal for the optional snapshot root selector. Uses JSON string
+/// encoding so backslash-escaped selectors (e.g. Tailwind `.md\:flex`)
+/// reach `querySelector` unchanged.
+fn snapshot_selector_arg(selector: Option<&str>) -> String {
+    selector
+        .map(js_string)
+        .unwrap_or_else(|| "null".to_string())
+}
+
+/// JS statement declaring the computed-style property filter.
+fn styles_filter_js(properties: Option<&[String]>) -> String {
+    match properties {
+        Some(props) => {
+            let list: Vec<String> = props.iter().map(|p| js_string(p)).collect();
+            format!("const filter = [{}];", list.join(","))
+        }
+        None => "const filter = null;".to_string(),
+    }
+}
+
+/// Drag strategies understood by the injected drag script.
+const DRAG_STRATEGIES: &[&str] = &["auto", "pointer", "html5dnd"];
+
+fn validate_drag_strategy(drag_strategy: &str) -> Result<&'static str, String> {
+    DRAG_STRATEGIES
+        .iter()
+        .copied()
+        .find(|known| *known == drag_strategy)
+        .ok_or_else(|| {
+            format!(
+                "Unknown drag strategy '{drag_strategy}': expected one of {}",
+                DRAG_STRATEGIES.join(", ")
+            )
+        })
+}
+
+/// JS that registers a Tauri event listener forwarding to the connector,
+/// idempotent per event name. The name is JSON-encoded, so any string is safe.
+fn event_listener_js(event: &str) -> String {
+    format!(
+        "window.__CONNECTOR_EVENT_LISTENERS__ = window.__CONNECTOR_EVENT_LISTENERS__ || {{}};\
+        if (!window.__CONNECTOR_EVENT_LISTENERS__[{ev}]) {{\
+            window.__CONNECTOR_EVENT_LISTENERS__[{ev}] = true;\
+            window.__TAURI__.event.listen({ev}, function(ev) {{\
+                var ipc = window.__CONNECTOR_ORIG_INVOKE__ || window.__TAURI_INTERNALS__.invoke;\
+                ipc('plugin:connector|push_event', {{\
+                    payload: {{ event: {ev}, payload: ev.payload, timestamp: Date.now(), windowId: ev.windowLabel || 'main' }}\
+                }}).catch(function(){{}});\
+            }}).then(function(unlisten) {{\
+                window.__CONNECTOR_EVENT_LISTENERS__[{ev}] = unlisten;\
+            }});\
+        }}",
+        ev = js_string(event),
+    )
+}
+
 fn parse_ref(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if let Some(rest) = trimmed.strip_prefix('@') {
@@ -285,10 +341,7 @@ pub async fn dom_snapshot(
         _ => return Response::error(id.to_string(), format!("Unknown snapshot mode: {mode}")),
     };
 
-    let selector_arg = match selector {
-        Some(s) => format!("'{}'", s.replace('\'', "\\'")),
-        None => "null".to_string(),
-    };
+    let selector_arg = snapshot_selector_arg(selector);
 
     let script = format!(
         "window.__CONNECTOR_SNAPSHOT__({{ mode: '{}', selector: {}, maxDepth: {}, maxElements: {}, maxTokens: {}, reactEnrich: {}, followPortals: {}, shadowDom: {} }})",
@@ -604,7 +657,7 @@ pub async fn find_element(
     let script = match strategy {
         "xpath" => format!(
             r#"(() => {{
-                const result = document.evaluate("{sel}", document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+                const result = document.evaluate({sel}, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
                 const elements = [];
                 for (let i = 0; i < result.snapshotLength; i++) {{
                     const el = result.snapshotItem(i);
@@ -620,14 +673,14 @@ pub async fn find_element(
                 }}
                 return {{ count: elements.length, elements }};
             }})()"#,
-            sel = selector.replace('"', r#"\""#)
+            sel = js_string(selector)
         ),
         "text" => format!(
             r#"(() => {{
                 const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
                 const elements = [];
                 while (walker.nextNode()) {{
-                    if (walker.currentNode.textContent.includes("{text}")) {{
+                    if (walker.currentNode.textContent.includes({text})) {{
                         const el = walker.currentNode.parentElement;
                         if (!el) continue;
                         const rect = el.getBoundingClientRect();
@@ -643,7 +696,7 @@ pub async fn find_element(
                 }}
                 return {{ count: elements.length, elements }};
             }})()"#,
-            text = selector.replace('"', r#"\""#)
+            text = js_string(selector)
         ),
         "regex" => {
             let tgt = target.unwrap_or("text");
@@ -656,7 +709,7 @@ pub async fn find_element(
             };
             format!(
                 r#"(() => {{
-                    const re = new RegExp("{pat}", "i");
+                    const re = new RegExp({pat}, "i");
                     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
                     const elements = [];
                     while (walker.nextNode()) {{
@@ -676,13 +729,13 @@ pub async fn find_element(
                     }}
                     return {{ count: elements.length, elements }};
                 }})()"#,
-                pat = selector.replace('"', r#"\""#),
+                pat = js_string(selector),
                 match_expr = match_expr,
             )
         }
         _ => format!(
             r#"(() => {{
-                const els = document.querySelectorAll("{sel}");
+                const els = document.querySelectorAll({sel});
                 const elements = [];
                 els.forEach(el => {{
                     const rect = el.getBoundingClientRect();
@@ -697,7 +750,7 @@ pub async fn find_element(
                 }});
                 return {{ count: elements.length, elements }};
             }})()"#,
-            sel = selector.replace('"', r#"\""#)
+            sel = js_string(selector)
         ),
     };
 
@@ -718,13 +771,7 @@ pub async fn get_styles(
     bridge: &Bridge,
     state: &PluginState,
 ) -> Response {
-    let props_filter = match properties {
-        Some(props) => {
-            let list: Vec<String> = props.iter().map(|p| format!("'{p}'")).collect();
-            format!("const filter = [{}];", list.join(","))
-        }
-        None => "const filter = null;".to_string(),
-    };
+    let props_filter = styles_filter_js(properties);
 
     let target = match element_resolver_block(state, window_id, selector, "css", "el").await {
         Ok(js) => js,
@@ -744,9 +791,9 @@ pub async fn get_styles(
                     styles[prop] = computed.getPropertyValue(prop);
                 }}
             }}
-            return {{ selector: "{sel}", styles }};
+            return {{ selector: {sel}, styles }};
         }})()"#,
-        sel = selector.replace('"', r#"\""#),
+        sel = js_string(selector),
         props_filter = props_filter,
         target = target,
     );
@@ -895,6 +942,12 @@ pub async fn drag(
     bridge: &Bridge,
     state: &PluginState,
 ) -> Response {
+    let drag_strategy = match validate_drag_strategy(drag_strategy) {
+        Ok(strategy) => strategy,
+        Err(e) => return Response::error(id.to_string(), e),
+    };
+    // Zero steps would divide by zero in the script and never resolve.
+    let steps = steps.max(1);
     // Resolve source element
     let source_js = match (selector, x, y) {
         (Some(sel), _, _) => {
@@ -3680,23 +3733,7 @@ pub async fn ipc_listen(
             // single-threaded per webview, so the synchronous placeholder
             // check closes the race when two concurrent starts (e.g. a
             // parallel batch) both inject for the same event.
-            let events_js: Vec<String> = new_events.iter().map(|e| {
-                format!(
-                    "window.__CONNECTOR_EVENT_LISTENERS__ = window.__CONNECTOR_EVENT_LISTENERS__ || {{}};\
-                    if (!window.__CONNECTOR_EVENT_LISTENERS__['{ev}']) {{\
-                        window.__CONNECTOR_EVENT_LISTENERS__['{ev}'] = true;\
-                        window.__TAURI__.event.listen('{ev}', function(ev) {{\
-                            var ipc = window.__CONNECTOR_ORIG_INVOKE__ || window.__TAURI_INTERNALS__.invoke;\
-                            ipc('plugin:connector|push_event', {{\
-                                payload: {{ event: '{ev}', payload: ev.payload, timestamp: Date.now(), windowId: ev.windowLabel || 'main' }}\
-                            }}).catch(function(){{}});\
-                        }}).then(function(unlisten) {{\
-                            window.__CONNECTOR_EVENT_LISTENERS__['{ev}'] = unlisten;\
-                        }});\
-                    }}",
-                    ev = e,
-                )
-            }).collect();
+            let events_js: Vec<String> = new_events.iter().map(|e| event_listener_js(e)).collect();
 
             let script = events_js.join("\n");
             drop(listeners); // release lock before bridge call
@@ -3916,7 +3953,10 @@ pub async fn search_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_wait_script, ref_resolver_block, same_path, sha256_hex};
+    use super::{
+        build_wait_script, event_listener_js, ref_resolver_block, same_path, sha256_hex,
+        snapshot_selector_arg, styles_filter_js, validate_drag_strategy,
+    };
     use crate::state::{PluginState, RefEntry};
     use std::path::Path;
 
@@ -4253,5 +4293,47 @@ mod tests {
         assert!(script.contains("document.querySelector"));
         assert!(script.contains("hidden"));
         assert!(script.contains("__connectorElementState"));
+    }
+
+    #[test]
+    fn snapshot_selector_preserves_backslash_escapes() {
+        let selector = r#".md\:flex[data-x='a"b']"#;
+        let arg = snapshot_selector_arg(Some(selector));
+        let decoded: String = serde_json::from_str(&arg).unwrap();
+        assert_eq!(decoded, selector);
+        assert_eq!(snapshot_selector_arg(None), "null");
+    }
+
+    #[test]
+    fn styles_filter_encodes_each_property_as_a_js_string() {
+        let props = vec!["color".to_string(), "x');alert(1);('".to_string()];
+        let js = styles_filter_js(Some(&props));
+        let list = js
+            .strip_prefix("const filter = ")
+            .and_then(|rest| rest.strip_suffix(';'))
+            .unwrap();
+        let decoded: Vec<String> = serde_json::from_str(list).unwrap();
+        assert_eq!(decoded, props);
+        assert_eq!(styles_filter_js(None), "const filter = null;");
+    }
+
+    #[test]
+    fn drag_strategy_accepts_only_known_values() {
+        for known in ["auto", "pointer", "html5dnd"] {
+            assert_eq!(validate_drag_strategy(known).unwrap(), known);
+        }
+        let err = validate_drag_strategy("html5").unwrap_err();
+        assert!(err.contains("Unknown drag strategy 'html5'"), "{err}");
+        assert!(err.contains("auto, pointer, html5dnd"), "{err}");
+        assert!(validate_drag_strategy("auto'; alert(1); '").is_err());
+    }
+
+    #[test]
+    fn event_listener_script_json_encodes_event_name() {
+        let name = r#"app://it's "quoted"\path"#;
+        let js = event_listener_js(name);
+        let encoded = serde_json::to_string(name).unwrap();
+        assert_eq!(js.matches(&encoded).count(), 5, "{js}");
+        assert!(!js.contains(&format!("'{name}'")));
     }
 }

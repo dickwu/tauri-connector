@@ -9,7 +9,7 @@ use connector_client::discovery::{ConnectorInstance, ResolvedConnection};
 use connector_client::ConnectorClient;
 use serde_json::{json, Value};
 
-use crate::snapshot::{build_resolve_and_act_script, RefMap, SnapshotRefs};
+use crate::snapshot::{build_resolve_and_act_script, js_string, RefMap, SnapshotRefs};
 
 static WINDOW_ID: OnceLock<String> = OnceLock::new();
 
@@ -260,11 +260,13 @@ pub async fn drag(
     let source_selector = resolve_to_selector(source, refs)?;
     let target_resolve = resolve_target_js(target, refs)?;
 
-    let escaped_src = source_selector.replace('"', "\\\"");
+    let src = js_string(&source_selector);
+    // Zero steps would divide by zero in the script and never resolve.
+    let steps = steps.max(1);
     let script = format!(
         r#"new Promise((resolve) => {{
-            const el = document.querySelector("{escaped_src}");
-            if (!el) {{ resolve({{ error: 'Source element not found: {escaped_src}' }}); return; }}
+            const el = document.querySelector({src});
+            if (!el) {{ resolve({{ error: 'Source element not found: ' + {src} }}); return; }}
             {target_resolve}
             const srcRect = el.getBoundingClientRect();
             const startX = srcRect.x + srcRect.width / 2;
@@ -355,10 +357,10 @@ fn resolve_target_js(target: &str, refs: &RefMap) -> Result<String, String> {
     }
 
     let selector = resolve_to_selector(target, refs)?;
-    let escaped = selector.replace('"', "\\\"");
+    let selector = js_string(&selector);
     Ok(format!(
-        "const tgt = document.querySelector(\"{escaped}\"); \
-         if (!tgt) {{ resolve({{ error: 'Target not found: {escaped}' }}); return; }} \
+        "const tgt = document.querySelector({selector}); \
+         if (!tgt) {{ resolve({{ error: 'Target not found: ' + {selector} }}); return; }} \
          const tRect = tgt.getBoundingClientRect(); \
          const endX = tRect.x + tRect.width/2; const endY = tRect.y + tRect.height/2;"
     ))
@@ -386,17 +388,17 @@ pub async fn fill(
     target: &str,
     value: &str,
 ) -> Result<(), String> {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    let value = js_string(value);
     let action = format!(
         r#"
       el.focus();
       if (el.select) el.select();
       el.value = "";
       el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-      el.value = "{escaped}";
+      el.value = {value};
       el.dispatchEvent(new Event('input', {{ bubbles: true }}));
       el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-      return {{ action: 'fill', tag: el.tagName.toLowerCase(), value: "{escaped}" }};
+      return {{ action: 'fill', tag: el.tagName.toLowerCase(), value: {value} }};
     "#
     );
     let script = build_resolve_and_act_script(target, refs, &action);
@@ -415,11 +417,11 @@ pub async fn type_text(
     target: &str,
     text: &str,
 ) -> Result<(), String> {
-    let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
+    let chars = js_string(text);
     let action = format!(
         r#"
       el.focus();
-      const chars = "{escaped}";
+      const chars = {chars};
       for (const ch of chars) {{
         el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch, bubbles: true }}));
         el.dispatchEvent(new KeyboardEvent('keypress', {{ key: ch, bubbles: true }}));
@@ -429,7 +431,7 @@ pub async fn type_text(
         }}
         el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch, bubbles: true }}));
       }}
-      return {{ action: 'type', tag: el.tagName.toLowerCase(), text: "{escaped}" }};
+      return {{ action: 'type', tag: el.tagName.toLowerCase(), text: {chars} }};
     "#
     );
     let script = build_resolve_and_act_script(target, refs, &action);
@@ -602,10 +604,10 @@ pub async fn get_prop(
             let Some(t) = target else {
                 return Err("Usage: get count <selector>".to_string());
             };
-            let escaped = t.replace('"', "\\\"");
+            let selector = js_string(t);
             let result = exec_js(
                 client,
-                &format!(r#"document.querySelectorAll("{escaped}").length"#),
+                &format!("document.querySelectorAll({selector}).length"),
                 30_000,
             )
             .await?;
@@ -629,8 +631,7 @@ pub async fn get_prop(
         "styles" => "const cs = getComputedStyle(el); const s = {}; for (let i = 0; i < cs.length; i++) { s[cs[i]] = cs.getPropertyValue(cs[i]); } return s;".to_string(),
         "attr" => {
             let attr = extra.unwrap_or("");
-            let escaped = attr.replace('"', "\\\"");
-            format!(r#"return el.getAttribute("{escaped}");"#)
+            format!("return el.getAttribute({});", js_string(attr))
         }
         _ => return Err(format!("Unknown property: {prop}")),
     };

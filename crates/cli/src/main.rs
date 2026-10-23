@@ -93,7 +93,7 @@ enum Commands {
         #[arg(short, long, default_value_t = 300)]
         duration: u32,
         /// Drag strategy: auto, pointer, html5dnd (default auto)
-        #[arg(long, default_value = "auto")]
+        #[arg(long, default_value = "auto", value_parser = ["auto", "pointer", "html5dnd"])]
         strategy: String,
     },
     /// Focus an element
@@ -1525,6 +1525,25 @@ EXAMPLES:
 #[cfg(test)]
 mod workflow_cli_tests {
     use super::*;
+
+    #[test]
+    fn drag_strategy_rejects_unknown_values() {
+        assert!(Cli::try_parse_from([
+            "tauri-connector",
+            "drag",
+            "#a",
+            "#b",
+            "--strategy",
+            "pointer"
+        ])
+        .is_ok());
+        let err =
+            Cli::try_parse_from(["tauri-connector", "drag", "#a", "#b", "--strategy", "html5"])
+                .err()
+                .unwrap()
+                .to_string();
+        assert!(err.contains("html5dnd"), "{err}");
+    }
 
     #[test]
     fn workflow_commands_parse_without_starting_a_client_executor() {
