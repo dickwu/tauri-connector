@@ -17,6 +17,7 @@ struct MockBackend {
     lose_response: AtomicBool,
     reject_prepare: AtomicBool,
     reject_prepare_number: AtomicUsize,
+    prepare_past_deadline: AtomicBool,
     stall_condition: AtomicBool,
     condition_started: Notify,
     timeout_next_condition: AtomicBool,
@@ -57,6 +58,12 @@ impl Backend for MockBackend {
                         return Ok(
                             json!({"ok":false,"error":{"code":"not_actionable","stage":"preparing","message":"Fixture obstruction"}}),
                         );
+                    }
+                    if self.prepare_past_deadline.load(Ordering::SeqCst) {
+                        // Block inside a single poll until the step budget has passed, then
+                        // succeed: the deadline lands exactly on the post-prepare boundary.
+                        let budget = request["timeoutMs"].as_u64().unwrap();
+                        std::thread::sleep(Duration::from_millis(budget + 20));
                     }
                     self.ready.store(true, Ordering::SeqCst);
                     let mut context = request["context"].clone();
@@ -360,11 +367,49 @@ async fn stalled_condition_is_bounded_by_the_run_deadline() {
             .await
             .unwrap();
         let report = settled(&run).await;
+        // Durable journal acknowledgements and scheduling consume part of this budget,
+        // so the deadline may land in the queue, preparation, the pre-dispatch boundary,
+        // or the stalled condition. Each of those boundaries must report the expiry
+        // the same way and never reach the later write.
         assert_eq!(report["reason"], "condition_timeout");
+        assert!(run.lock().await.started.elapsed() >= Duration::from_millis(80));
+        assert_eq!(backend.dispatches.load(Ordering::SeqCst), 0);
         assert_eq!(backend.effects.load(Ordering::SeqCst), 0);
+        if backend.prepares.load(Ordering::SeqCst) > 0 {
+            assert!(
+                backend.cleanups.load(Ordering::SeqCst) > 0,
+                "A prepared observation must be cleaned up at the deadline"
+            );
+        }
     })
     .await
     .expect("Service contract test exceeded five seconds");
+}
+
+#[tokio::test]
+async fn expired_step_budget_at_prepare_boundary_is_a_timeout_not_a_cancellation() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let fixture = Fixture::new();
+        let manager = fixture.manager();
+        let backend = MockBackend::successful();
+        backend.prepare_past_deadline.store(true, Ordering::SeqCst);
+        let spec = WorkflowSpec::parse(&json!({"schemaVersion":1,"runKey":"prepare-boundary","deadlineMs":5000,"steps":[{"id":"write","op":"click","timeoutMs":100,"target":{"by":"css","value":"button"}}]})).unwrap();
+        let run = manager
+            .create(spec, PRINCIPAL, backend.clone())
+            .await
+            .unwrap();
+        let report = settled(&run).await;
+        assert_eq!(backend.prepares.load(Ordering::SeqCst), 1);
+        assert_eq!(report["status"], "failed");
+        assert_eq!(report["reason"], "condition_timeout");
+        assert_ne!(report["status"], "cancelled");
+        assert_eq!(backend.cleanups.load(Ordering::SeqCst), 1);
+        assert_eq!(backend.dispatches.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.effects.load(Ordering::SeqCst), 0);
+        assert_eq!(report["mayHaveEffects"], false);
+    })
+    .await
+    .expect("Prepare boundary timeout exceeded test timeout");
 }
 
 #[tokio::test]
@@ -648,8 +693,10 @@ async fn concurrent_continue_uses_one_checkpoint_and_dispatches_once() {
     .expect("Continue CAS exceeded test timeout");
 }
 
+/// The run deadline also covers both run phases and every durable journal ack, so it is
+/// kept out of the way; tests that are about the deadline set it explicitly.
 fn two_step_spec(key: &str) -> WorkflowSpec {
-    WorkflowSpec::parse(&json!({"schemaVersion":1,"runKey":key,"deadlineMs":800,"steps":[
+    WorkflowSpec::parse(&json!({"schemaVersion":1,"runKey":key,"deadlineMs":5000,"steps":[
         {"id":"first","op":"click","target":{"by":"css","value":".first"},"expect":{"kind":"element","target":{"by":"css","value":".first-result"},"state":"visible"}},
         {"id":"second","op":"click","target":{"by":"css","value":".second"}}
     ]})).unwrap()
@@ -695,6 +742,90 @@ async fn continuing_partial_run_revalidates_without_replaying_completed_step() {
     })
     .await
     .expect("Partial continue exceeded test timeout");
+}
+
+#[tokio::test]
+async fn revalidation_that_exhausts_the_run_deadline_is_a_timeout_not_a_paused_precondition() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let fixture = Fixture::new();
+        let manager = fixture.manager();
+        let backend = MockBackend::successful();
+        backend.reject_prepare_number.store(2, Ordering::SeqCst);
+        let mut spec = two_step_spec("revalidation-deadline");
+        // The run deadline (not the 3000 ms locator budget) bounds revalidation here.
+        spec.deadline_ms = 1500;
+        let run = manager
+            .create(spec, PRINCIPAL, backend.clone())
+            .await
+            .unwrap();
+        let paused = settled(&run).await;
+        assert_eq!(paused["status"], "paused");
+        assert_eq!(paused["summary"]["completedSteps"], 1);
+        // The revalidation prepare consumes the whole remaining run budget, so the
+        // boundary check runs exactly at expiry with nothing learned about the page.
+        backend.prepare_past_deadline.store(true, Ordering::SeqCst);
+        resume_run(&manager, &run, &continue_args(&paused), backend.clone())
+            .await
+            .unwrap();
+        let report = settled(&run).await;
+        assert_eq!(backend.prepares.load(Ordering::SeqCst), 3);
+        assert_eq!(report["status"], "failed");
+        assert_eq!(report["reason"], "condition_timeout");
+        assert!(
+            !report["allowedNextActions"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("continue")),
+            "An expired run must not advertise continue"
+        );
+        assert_eq!(backend.effects.load(Ordering::SeqCst), 1);
+        assert_eq!(backend.dispatches.load(Ordering::SeqCst), 1);
+    })
+    .await
+    .expect("Revalidation deadline exceeded test timeout");
+}
+
+#[tokio::test]
+async fn cancelling_revalidation_cancels_instead_of_pausing() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let fixture = Fixture::new();
+        let manager = fixture.manager();
+        let backend = MockBackend::successful();
+        backend.reject_prepare_number.store(2, Ordering::SeqCst);
+        let mut spec = two_step_spec("revalidation-cancel");
+        spec.deadline_ms = 5000;
+        let run = manager
+            .create(spec, PRINCIPAL, backend.clone())
+            .await
+            .unwrap();
+        let paused = settled(&run).await;
+        assert_eq!(paused["status"], "paused");
+        backend.satisfied.store(false, Ordering::SeqCst);
+        backend.timeout_next_condition.store(true, Ordering::SeqCst);
+        resume_run(&manager, &run, &continue_args(&paused), backend.clone())
+            .await
+            .unwrap();
+        wait_for_injected_condition_timeout(&backend).await;
+        let run_id = run.lock().await.report["runId"].clone();
+        let bridge = Bridge::start().unwrap();
+        call(
+            "workflow_cancel",
+            &json!({"authToken":PRINCIPAL,"runId":run_id}),
+            &bridge,
+            None,
+            &fixture.state,
+        )
+        .await
+        .unwrap();
+        backend.condition_timeout_release.notify_one();
+        let report = settled(&run).await;
+        assert_eq!(report["status"], "cancelled");
+        assert_eq!(report["reason"], "cancel_requested");
+        assert_eq!(backend.effects.load(Ordering::SeqCst), 1);
+        assert_eq!(backend.dispatches.load(Ordering::SeqCst), 1);
+    })
+    .await
+    .expect("Revalidation cancel exceeded test timeout");
 }
 
 #[tokio::test]
@@ -770,12 +901,18 @@ async fn verification_failure_keeps_effect_and_blocks_successor() {
         let fixture = Fixture::new();
         let manager = fixture.manager();
         let backend = Arc::new(MockBackend::default());
+        // The postcondition times out through the backend gate, not through the run
+        // deadline, so durable checkpoint latency before dispatch cannot change the phase.
+        backend.timeout_next_condition.store(true, Ordering::SeqCst);
         let mut spec = two_step_spec("postcondition");
-        spec.deadline_ms = 100;
+        spec.deadline_ms = 5000;
         let run = manager
             .create(spec, PRINCIPAL, backend.clone())
             .await
             .unwrap();
+        wait_for_injected_condition_timeout(&backend).await;
+        assert_eq!(backend.dispatches.load(Ordering::SeqCst), 1);
+        backend.condition_timeout_release.notify_one();
         let report = settled(&run).await;
         assert_eq!(report["blockedOutcome"]["execution"], "completed");
         assert_eq!(report["blockedOutcome"]["verification"], "failed");

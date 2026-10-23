@@ -785,17 +785,26 @@ impl WorkflowService {
                 Err(error) => Err(error),
             };
             if checked.is_err() {
-                self.stop(
-                    &run,
-                    "paused",
-                    "precondition_failed",
-                    Some(ExecutionOutcome::not_dispatched(WorkflowError::new(
+                // A revalidation cut short by cancellation or by the run deadline proves
+                // nothing about the boundary, and a run past its deadline cannot be
+                // continued, so only a genuine mismatch pauses as a failed precondition.
+                if cancel.load(Ordering::SeqCst) {
+                    self.stop(&run, "cancelled", "cancel_requested", None).await;
+                } else if Instant::now() >= deadline {
+                    self.stop(&run, "failed", "condition_timeout", None).await;
+                } else {
+                    self.stop(
+                        &run,
+                        "paused",
                         "precondition_failed",
-                        "preparing",
-                        "The last verified boundary no longer holds",
-                    ))),
-                )
-                .await;
+                        Some(ExecutionOutcome::not_dispatched(WorkflowError::new(
+                            "precondition_failed",
+                            "preparing",
+                            "The last verified boundary no longer holds",
+                        ))),
+                    )
+                    .await;
+                }
                 return;
             }
         }
@@ -937,17 +946,8 @@ impl WorkflowService {
             }
             if cancel.load(Ordering::SeqCst) || Instant::now() >= step_deadline {
                 cleanup(&*backend, &window, &observation_id, &context).await;
-                self.stop(
-                    &run,
-                    if cancel.load(Ordering::SeqCst) {
-                        "cancelled"
-                    } else {
-                        "failed"
-                    },
-                    "cancelled_before_dispatch",
-                    None,
-                )
-                .await;
+                let (status, reason) = pre_dispatch_stop(cancel.load(Ordering::SeqCst));
+                self.stop(&run, status, reason, None).await;
                 return;
             }
             if writing {
@@ -976,16 +976,13 @@ impl WorkflowService {
             }
             if cancel.load(Ordering::SeqCst) || Instant::now() >= step_deadline {
                 cleanup(&*backend, &window, &observation_id, &context).await;
+                let (status, reason) = pre_dispatch_stop(cancel.load(Ordering::SeqCst));
                 self.stop(
                     &run,
-                    if cancel.load(Ordering::SeqCst) {
-                        "cancelled"
-                    } else {
-                        "failed"
-                    },
-                    "cancelled_before_dispatch",
+                    status,
+                    reason,
                     Some(ExecutionOutcome::not_dispatched(WorkflowError::new(
-                        "cancelled_before_dispatch",
+                        reason,
                         "dispatching",
                         "Dispatch stopped at deadline or cancellation boundary",
                     ))),
@@ -1376,6 +1373,17 @@ impl WorkflowService {
         });
         let _ = self.checkpoint(&mut entry, &format!("run_{status}")).await;
         entry.notify.notify_waiters();
+    }
+}
+
+/// Status and reason for a run stopped at a pre-dispatch boundary. Only an explicit
+/// cancellation is reported as one; an exhausted step or run budget is a timeout,
+/// matching every other deadline boundary in the run.
+fn pre_dispatch_stop(cancelled: bool) -> (&'static str, &'static str) {
+    if cancelled {
+        ("cancelled", "cancelled_before_dispatch")
+    } else {
+        ("failed", "condition_timeout")
     }
 }
 
