@@ -46,12 +46,32 @@ pub async fn call_tool(
     name: &str,
     args: &Value,
 ) -> Value {
+    if name == "driver_session" {
+        let result = handle_driver_session(client, host, port, args).await;
+        return tool_result_content(name, args, result);
+    }
+    call_shared_tool(client, host, port, name, args).await
+}
+
+/// Dispatch any tool except `driver_session` through a shared client.
+///
+/// These tools never mutate the connection, so several can run at once.
+pub async fn call_shared_tool(
+    client: &ConnectorClient,
+    host: &str,
+    port: u16,
+    name: &str,
+    args: &Value,
+) -> Value {
     let result = match name {
-        "driver_session" => handle_driver_session(client, host, port, args).await,
         "batch_actions" => handle_batch_actions(client, host, port, args).await,
         _ => dispatch_tool(client, host, port, name, args).await,
     };
+    tool_result_content(name, args, result)
+}
 
+/// Shape a raw tool result into MCP `tools/call` content.
+fn tool_result_content(name: &str, args: &Value, result: Result<Value, String>) -> Value {
     match result {
         Ok(data) => {
             if name == "webview_select_element" {
