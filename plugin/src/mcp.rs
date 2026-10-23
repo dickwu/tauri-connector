@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::net::TcpListener;
 use std::sync::Arc;
 
 use axum::Router;
@@ -29,6 +28,11 @@ const PROTOCOL_SUPPORTED: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
 const PROTOCOL_LEGACY_SSE: &str = "2024-11-05";
 const HEADER_MCP_SESSION_ID: &str = "mcp-session-id";
 const HEADER_MCP_PROTOCOL_VERSION: &str = "mcp-protocol-version";
+/// Streamable HTTP sessions idle longer than this are dropped. Clients get
+/// 404 on the next request and must re-initialize, as the spec requires.
+const STREAMABLE_SESSION_IDLE_TTL_MS: u64 = 60 * 60 * 1000;
+
+type LegacySessions = Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>;
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -48,7 +52,7 @@ pub struct McpState {
     plugin_state: PluginState,
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     streamable_sessions: Arc<Mutex<HashMap<String, McpSession>>>,
-    legacy_sessions: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>,
+    legacy_sessions: LegacySessions,
 }
 
 /// Start the embedded MCP HTTP server.
@@ -61,8 +65,8 @@ pub async fn start(
     plugin_state: PluginState,
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 ) -> Result<u16, String> {
-    let port = find_available_port(bind_address, port_range.0, port_range.1)
-        .ok_or_else(|| format!("No MCP port in range {}-{}", port_range.0, port_range.1))?;
+    let (std_listener, port) = crate::net::bind_in_range(bind_address, port_range.0, port_range.1)
+        .map_err(|e| format!("MCP bind failed: {e}"))?;
 
     let state = McpState {
         bridge,
@@ -74,8 +78,7 @@ pub async fn start(
 
     let app = router(state);
 
-    let listener = tokio::net::TcpListener::bind(format!("{bind_address}:{port}"))
-        .await
+    let listener = tokio::net::TcpListener::from_std(std_listener)
         .map_err(|e| format!("MCP bind failed: {e}"))?;
 
     println!(
@@ -249,6 +252,13 @@ async fn legacy_sse_get(headers: HeaderMap, State(state): State<McpState>) -> Ax
         .await
         .insert(session_id.clone(), tx);
 
+    // Unregisters the session when the client disconnects and axum drops
+    // the response stream.
+    let guard = LegacySessionGuard {
+        id: session_id.clone(),
+        sessions: state.legacy_sessions.clone(),
+    };
+
     // First event: tell the client where to POST
     let endpoint_event = stream::once(async move {
         let data = format!("/message?sessionId={session_id}");
@@ -256,8 +266,10 @@ async fn legacy_sse_get(headers: HeaderMap, State(state): State<McpState>) -> Ax
     });
 
     // Subsequent events: JSON-RPC responses
-    let response_stream = UnboundedReceiverStream::new(rx)
-        .map(|data| Ok::<_, Infallible>(Event::default().event("message").data(data)));
+    let response_stream = UnboundedReceiverStream::new(rx).map(move |data| {
+        let _ = &guard;
+        Ok::<_, Infallible>(Event::default().event("message").data(data))
+    });
 
     Sse::new(endpoint_event.chain(response_stream))
         .keep_alive(KeepAlive::default())
@@ -275,9 +287,60 @@ async fn legacy_message_post(
         return err.into_response();
     }
 
-    let session_id = params.get("sessionId").cloned().unwrap_or_default();
-    let response = handle_legacy_jsonrpc_request(state, body, Some(session_id)).await;
-    json_string_response(StatusCode::OK, response)
+    // In the legacy HTTP+SSE transport, responses travel only over the SSE
+    // stream; the POST itself is acknowledged with 202 and an empty body.
+    let Some(tx) = legacy_session_sender(&state, params.get("sessionId")).await else {
+        return jsonrpc_http_error(
+            StatusCode::NOT_FOUND,
+            Value::Null,
+            -32001,
+            "Unknown or missing legacy SSE sessionId",
+        );
+    };
+
+    if let Some(response) = handle_legacy_jsonrpc_request(state, body).await {
+        // A closed receiver means the SSE stream is gone; its guard removes
+        // the session, so there is nobody left to deliver to.
+        let _ = tx.send(response);
+    }
+    StatusCode::ACCEPTED.into_response()
+}
+
+async fn legacy_session_sender(
+    state: &McpState,
+    session_id: Option<&String>,
+) -> Option<mpsc::UnboundedSender<String>> {
+    let session_id = session_id?;
+    let sessions = state.legacy_sessions.lock().await;
+    sessions
+        .get(session_id)
+        .filter(|tx| !tx.is_closed())
+        .cloned()
+}
+
+/// Removes a legacy SSE session from the registry when dropped.
+struct LegacySessionGuard {
+    id: String,
+    sessions: LegacySessions,
+}
+
+impl Drop for LegacySessionGuard {
+    fn drop(&mut self) {
+        let id = std::mem::take(&mut self.id);
+        let sessions = self.sessions.clone();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                sessions.lock().await.remove(&id);
+            });
+        }
+    }
+}
+
+/// Drop Streamable HTTP sessions that have been idle past the TTL.
+fn prune_idle_sessions(sessions: &mut HashMap<String, McpSession>, now: u64) {
+    sessions.retain(|_, session| {
+        now.saturating_sub(session.last_seen_ms) <= STREAMABLE_SESSION_IDLE_TTL_MS
+    });
 }
 
 async fn handle_streamable_initialize(
@@ -314,11 +377,11 @@ async fn handle_streamable_initialize(
         initialized: true,
         client_info: params.get("clientInfo").cloned(),
     };
-    state
-        .streamable_sessions
-        .lock()
-        .await
-        .insert(session_id.clone(), session);
+    {
+        let mut sessions = state.streamable_sessions.lock().await;
+        prune_idle_sessions(&mut sessions, now);
+        sessions.insert(session_id.clone(), session);
+    }
 
     let result = initialize_result(&negotiated);
     let mut response = jsonrpc_response(StatusCode::OK, jsonrpc_success(id, result));
@@ -327,16 +390,13 @@ async fn handle_streamable_initialize(
     response
 }
 
-async fn handle_legacy_jsonrpc_request(
-    state: McpState,
-    body: String,
-    session_id: Option<String>,
-) -> String {
+/// Run one legacy JSON-RPC message; `None` for notifications.
+async fn handle_legacy_jsonrpc_request(state: McpState, body: String) -> Option<String> {
     let request: Value = match serde_json::from_str(&body) {
         Ok(v) => v,
         Err(e) => {
             let resp = jsonrpc_error(Value::Null, -32700, &format!("Parse error: {e}"));
-            return serde_json::to_string(&resp).unwrap_or_default();
+            return serde_json::to_string(&resp).ok();
         }
     };
 
@@ -344,26 +404,12 @@ async fn handle_legacy_jsonrpc_request(
     let method = request.get("method").and_then(|v| v.as_str()).unwrap_or("");
 
     // Notifications (no id) — no response
-    if id.is_none() {
-        return String::new();
-    }
-
-    let id = id.unwrap_or(Value::Null);
+    let id = id?;
     let params_val = request.get("params").cloned().unwrap_or(json!({}));
 
     let response =
-        dispatch_jsonrpc_request(state.clone(), id, method, params_val, PROTOCOL_LEGACY_SSE).await;
-
-    let response_str = serde_json::to_string(&response).unwrap_or_default();
-
-    // Also push to SSE stream
-    if let Some(session_id) = session_id
-        && let Some(tx) = state.legacy_sessions.lock().await.get(&session_id)
-    {
-        let _ = tx.send(response_str.clone());
-    }
-
-    response_str
+        dispatch_jsonrpc_request(state, id, method, params_val, PROTOCOL_LEGACY_SSE).await;
+    serde_json::to_string(&response).ok()
 }
 
 async fn dispatch_jsonrpc_request(
@@ -517,7 +563,9 @@ async fn require_streamable_session(
     }
 
     let header_protocol = protocol_version_from_headers(headers);
+    let now = now_ms();
     let mut sessions = state.streamable_sessions.lock().await;
+    prune_idle_sessions(&mut sessions, now);
     let Some(session) = sessions.get_mut(&session_id) else {
         return Err(HttpJsonRpcError::new(
             StatusCode::NOT_FOUND,
@@ -538,7 +586,7 @@ async fn require_streamable_session(
         ));
     }
 
-    session.last_seen_ms = now_ms();
+    session.last_seen_ms = now;
     Ok(session.clone())
 }
 
@@ -759,10 +807,6 @@ fn insert_header(response: &mut AxumResponse, name: &'static str, value: &str) {
         .insert(HeaderName::from_static(name), value);
 }
 
-fn find_available_port(addr: &str, start: u16, end: u16) -> Option<u16> {
-    (start..end).find(|&port| TcpListener::bind((addr, port)).is_ok())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -770,19 +814,31 @@ mod tests {
     use axum::http::{Method, Request};
     use tower::ServiceExt;
 
-    fn test_router() -> Router {
+    fn test_state() -> McpState {
         let bridge = Bridge::start().expect("bridge starts");
         let log_dir =
             std::env::temp_dir().join(format!("tauri-connector-mcp-test-{}", uuid::Uuid::new_v4()));
         let plugin_state = PluginState::new(log_dir).expect("plugin state");
-        let state = McpState {
+        McpState {
             bridge,
             plugin_state,
             app_handle: Arc::new(Mutex::new(None)),
             streamable_sessions: Arc::new(Mutex::new(HashMap::new())),
             legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
-        };
-        router(state)
+        }
+    }
+
+    fn test_router() -> Router {
+        router(test_state())
+    }
+
+    fn legacy_message(session: &str, body: Value) -> Request<Body> {
+        Request::builder()
+            .method(Method::POST)
+            .uri(format!("/message?sessionId={session}"))
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
     }
 
     fn mcp_request(body: Value) -> Request<Body> {
@@ -999,10 +1055,116 @@ mod tests {
                 version != "2025-03-26"
             );
         }
-        let app = test_router();
-        let response=app.oneshot(Request::builder().method(Method::POST).uri("/message?sessionId=legacy-test").header(CONTENT_TYPE,"application/json").body(Body::from(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webview_select_element","arguments":{"action":"get","pickerId":"missing"}}}).to_string())).unwrap()).await.unwrap();
-        let body = body_json(response).await;
+        let state = test_state();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        state
+            .legacy_sessions
+            .lock()
+            .await
+            .insert("legacy-test".into(), tx);
+        let response = router(state)
+            .oneshot(legacy_message(
+                "legacy-test",
+                json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webview_select_element","arguments":{"action":"get","pickerId":"missing"}}}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
         assert!(body["result"].get("structuredContent").is_none());
         assert_eq!(body["result"]["content"][0]["type"], "text");
+    }
+
+    #[tokio::test]
+    async fn legacy_message_replies_once_over_sse_with_empty_post_body() {
+        let state = test_state();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        state.legacy_sessions.lock().await.insert("s1".into(), tx);
+        let response = router(state)
+            .oneshot(legacy_message(
+                "s1",
+                json!({"jsonrpc":"2.0","id":7,"method":"ping"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(bytes.is_empty());
+        let sse: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(sse["id"], 7);
+        assert!(rx.try_recv().is_err(), "response must be delivered once");
+    }
+
+    #[tokio::test]
+    async fn legacy_message_with_unknown_session_is_rejected() {
+        let app = test_router();
+        for uri in ["/message?sessionId=nope", "/message"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(uri)
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(Body::from(
+                            json!({"jsonrpc":"2.0","id":1,"method":"ping"}).to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_sse_session_is_removed_when_stream_is_dropped() {
+        let state = test_state();
+        let sessions = state.legacy_sessions.clone();
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/sse")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(sessions.lock().await.len(), 1);
+        drop(response);
+        for _ in 0..50 {
+            if sessions.lock().await.is_empty() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("legacy session leaked after the SSE stream was dropped");
+    }
+
+    #[test]
+    fn idle_streamable_sessions_are_pruned() {
+        let session = |id: &str, last_seen_ms: u64| McpSession {
+            id: id.into(),
+            created_at_ms: 0,
+            last_seen_ms,
+            protocol_version: PROTOCOL_LATEST.into(),
+            initialized: true,
+            client_info: None,
+        };
+        let now = STREAMABLE_SESSION_IDLE_TTL_MS * 3;
+        let mut sessions = HashMap::from([
+            ("fresh".to_string(), session("fresh", now - 1)),
+            (
+                "edge".to_string(),
+                session("edge", now - STREAMABLE_SESSION_IDLE_TTL_MS),
+            ),
+            ("stale".to_string(), session("stale", 0)),
+        ]);
+        prune_idle_sessions(&mut sessions, now);
+        let mut kept: Vec<_> = sessions.keys().cloned().collect();
+        kept.sort();
+        assert_eq!(kept, ["edge", "fresh"]);
     }
 }
