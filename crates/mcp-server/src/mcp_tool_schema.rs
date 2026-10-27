@@ -153,9 +153,10 @@ pub fn tool_definitions() -> serde_json::Value {
                 }, "required": ["action"] })
             ),
             tool_def("webview_keyboard",
-                "Type text (action: type) or press a named key (action: press, e.g. Enter, Tab, Escape, ArrowDown) with optional modifiers",
+                "Type text (action: type), replace a field's value (action: fill, needs selector) or press a key (action: press: a character or a named key such as Enter, Tab, Escape, Backspace, Delete, ArrowDown, F5, optionally as a combo like Meta+z or Control+Shift+Z). With selector (CSS or snapshot ref) the target is focused first and focus-driven editors such as Monaco are typed into once focus settles; without it keys go to the focused element. Key events carry key, code, keyCode and which. When no handler takes Backspace, Delete, undo/redo or select-all in an editable field, the editing default is performed (reported as defaultAction). Unknown keys fail with invalid_key before anything is dispatched",
                 json!({ "type": "object", "properties": {
-                    "action": { "type": "string", "enum": ["type", "press"] },
+                    "action": { "type": "string", "enum": ["type", "press", "fill"] },
+                    "selector": { "type": "string", "description": "CSS selector or snapshot ref (@e3) to focus first; required for fill" },
                     "text": { "type": "string" },
                     "key": { "type": "string" },
                     "modifiers": { "type": "array", "items": { "type": "string", "enum": ["ctrl", "shift", "alt", "meta"] } },

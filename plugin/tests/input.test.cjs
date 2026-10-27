@@ -142,3 +142,87 @@ test('Monaco type goes through insertText; fill and refused editing are honest n
   const result = await runEditor(refused.f, refused.editor, 'type', 'x');
   assert.equal(result.code, 'not_actionable'); assert.equal(result.dispatched, true);
 });
+
+function keyFixture() {
+  const f = fixture();
+  const commands = [];
+  class KeyboardEvent { constructor(type, init = {}) { this.type = type; Object.assign(this, init); this.defaultPrevented = false; } preventDefault() { if (this.cancelable) this.defaultPrevented = true; } }
+  f.context.KeyboardEvent = KeyboardEvent;
+  f.context.document.execCommand = (name) => { commands.push(name); return true; };
+  f.context.document.activeElement = f.target;
+  return { f, commands };
+}
+test('R2-10 unknown keys are rejected before dispatch and never quarantine', async () => {
+  const { f } = keyFixture();
+  for (const key of ['NotAKey', 'Hyper+a', '']) {
+    const result = await vm.runInNewContext(fs.readFileSync(helperPath, 'utf8'), f.context)(f.target, { action: 'press', key: key || 'Ctrl+' });
+    assert.equal(result.code, 'invalid_key', key); assert.equal(result.dispatched, false);
+    assert.match(result.error, /Unknown key/);
+  }
+  assert.equal(f.target.events.length, 0);
+});
+test('R2-3 R2-9 named keys carry code, keyCode and which; editing keys edit', async () => {
+  const { f, commands } = keyFixture();
+  const press = async (key, modifiers) => vm.runInNewContext(fs.readFileSync(helperPath, 'utf8'), f.context)(f.target, { action: 'press', key, modifiers });
+  const esc = await press('Escape');
+  assert.equal(esc.pressed, 'Escape'); assert.equal(esc.defaultAction, null);
+  // A success result must not carry `code`: the host reads `code` as a failure.
+  assert.equal(esc.code, undefined); assert.equal(esc.keyboardCode, 'Escape');
+  const down = f.target.events.find(e => e.type === 'keydown');
+  assert.equal(down.keyCode, 27); assert.equal(down.which, 27); assert.equal(down.code, 'Escape');
+  assert.equal((await press('Backspace')).defaultAction, 'delete');
+  assert.equal((await press('Delete')).defaultAction, 'forwardDelete');
+  const undo = await press('Meta+z');
+  assert.equal(undo.pressed, 'z'); assert.deepEqual([...undo.modifiers], ['metaKey']); assert.equal(undo.defaultAction, 'undo');
+  const z = f.target.events.filter(e => e.type === 'keydown').pop();
+  assert.equal(z.metaKey, true); assert.equal(z.keyCode, 90); assert.equal(z.code, 'KeyZ');
+  assert.equal((await press('z', { metaKey: true, shiftKey: true })).defaultAction, 'redo');
+  assert.equal((await press('control+y')).defaultAction, 'redo');
+  assert.equal((await press('esc')).pressed, 'Escape');
+  assert.deepEqual(commands, ['delete', 'forwardDelete', 'undo', 'redo', 'redo']);
+  // A handler that takes the key (Monaco's keybindings) suppresses the default.
+  f.target.dispatchEvent = (event) => { if (event.type === 'keydown') event.preventDefault(); return !event.defaultPrevented; };
+  const handled = await press('Backspace');
+  assert.equal(handled.defaultPrevented, true); assert.equal(handled.defaultAction, null);
+});
+function monacoFixture({ focusDelayMs = 40 } = {}) {
+  const f = fixture();
+  const inserted = [];
+  const classes = new Set(['monaco-editor']);
+  const root = { classList: { contains: c => classes.has(c) }, contains: n => n === root || n === textarea || n === lines };
+  const textarea = {
+    tagName: 'TEXTAREA', id: '', isConnected: true, className: 'inputarea',
+    focus() { f.context.document.activeElement = textarea; setTimeout(() => classes.add('focused'), focusDelayMs); },
+    closest: s => s === '.monaco-editor' ? root : null, getAttribute: () => null, matches: () => false,
+  };
+  const lines = { tagName: 'DIV', id: 'lines', isConnected: true, closest: s => s === '.monaco-editor' ? root : null, getAttribute: () => null, matches: () => false };
+  root.querySelector = () => textarea;
+  const container = { tagName: 'DIV', id: 'wrapper', isConnected: true, closest: () => null, querySelectorAll: s => s === '.monaco-editor' ? [root] : [], getAttribute: () => null, matches: () => false };
+  let model = '';
+  f.context.document.execCommand = (name, _ui, value) => {
+    if (name !== 'insertText') return true;
+    // Text inserted before Monaco finished its focus sync is lost.
+    if (!classes.has('focused')) return true;
+    inserted.push(value); model += value; return true;
+  };
+  f.context.window.monaco = { editor: { getEditors: () => [{ getContainerDomNode: () => root, getValue: () => model }] } };
+  return { f, textarea, container, lines, inserted, model: () => model };
+}
+test('R2-3 Monaco typing through a container, its textarea or a line waits for focus to settle', async () => {
+  for (const pick of ['container', 'textarea', 'lines']) {
+    const m = monacoFixture();
+    const result = await runEditor(m.f, m[pick], 'type', 'const a = 1;\nconst b = 2;');
+    assert.equal(result.code, undefined, pick + ' ' + JSON.stringify(result));
+    assert.equal(result.editor, 'monaco'); assert.equal(m.model(), 'const a = 1;\nconst b = 2;', pick);
+    assert.equal(result.verified, true);
+    assert.deepEqual([...m.inserted], ['const a = 1;', '\n', 'const b = 2;'], pick);
+  }
+});
+test('R2-3 an already focused Monaco editor types without a settle delay', async () => {
+  const m = monacoFixture({ focusDelayMs: 0 });
+  m.textarea.focus(); await new Promise(r => setTimeout(r, 5));
+  const started = Date.now();
+  const result = await runEditor(m.f, m.f.context.document.activeElement, 'type', 'x'.repeat(130));
+  assert.equal(result.verified, true); assert.equal(m.inserted.length, 3);
+  assert.ok(Date.now() - started < 250);
+});

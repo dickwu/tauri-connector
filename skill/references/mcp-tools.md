@@ -38,16 +38,21 @@ Perform gestures on elements: click, double-click, focus, scroll, hover, drag.
 
 ### webview_keyboard
 
-Type text or press keys with optional modifiers.
+Type text, fill a field, or press keys/combos.
 
 | Param | Type | Required | Description |
 |---|---|---|---|
-| `action` | string | yes | `type` or `press` |
-| `text` | string | | Text to type character-by-character (for `type` action) |
-| `key` | string | | Key name for `press`: `Enter`, `Tab`, `Escape`, `Backspace`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, `Home`, `End`, `PageUp`, `PageDown`, `Delete`, `Space`, `F1`-`F12`, or any single character |
-| `modifiers` | string[] | | `ctrl`, `shift`, `alt`, `meta` |
+| `action` | string | yes | `type`, `press` or `fill` |
+| `text` | string | | Text for `type`/`fill` |
+| `key` | string | | Key for `press`: named keys (`Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `Space`, arrows, `Home`, `End`, `PageUp`, `PageDown`, `Insert`, `F1`-`F24`), modifier names, aliases (`Esc`, `Return`, `Del`, `Up`, `Cmd`, `Ctrl`, `Option`), any single character, or a combo such as `Meta+z` |
+| `modifiers` | string[] | | `ctrl`, `shift`, `alt`, `meta` (merged with combo modifiers) |
+| `selector` | string | | CSS selector that must match exactly one element; the target is focused first. Required for `fill`. Without it `type`/`press` go to the focused element |
 
-`type` into a contenteditable host or a Monaco editor goes through `document.execCommand('insertText')` (result `method: "execCommand"`, `editor: "contenteditable" | "monaco"`). Monaco results carry `verified: false` -- confirm the model with `wait`/`expect`. `fill` on Monaco, or an editor that refuses `insertText`, returns `not_actionable` instead of a fake success. Failures found before any event is dispatched (no focused target, disabled/read-only target, unsupported element, unknown action) return `not_dispatched` and do not quarantine; failures after dispatch carry the page effect monitor's `effect`.
+`type` into an input or textarea fires per-character key events with native value updates. A contenteditable host gets `document.execCommand('insertText')`. A Monaco editor -- the `.monaco-editor` container, its hidden `textarea.inputarea` / `.native-edit-context` ("Editor content"), or a wrapper containing exactly one editor -- is focused, given a short settle for Monaco's focus sync, and fed line by line through `insertText` (textarea mode, e.g. WKWebView) or the EditContext API (`TextUpdateEvent`, Chromium). Results carry `editor: "contenteditable" | "monaco"`, `method: "execCommand" | "editContext"` and `verified` (true when `window.monaco` lets the model be read back; otherwise confirm with `wait`/`expect`). `fill` uses the native value setter plus `input`/`change` so React controlled inputs update; `fill` on Monaco, or an editor that refuses `insertText`, returns `not_actionable` instead of a fake success.
+
+`press` events carry `key`, `code` and legacy `keyCode`/`which` (Escape = 27), so Monaco keybindings and AntD/rc-dialog Escape handlers react on the first press. If the page does not `preventDefault()` the keydown on an editable target, the browser default is applied: `Backspace`/`Delete` delete, `Meta/Ctrl+z` undo, `Meta/Ctrl+Shift+z` / `Ctrl+y` redo, `Meta/Ctrl+a` select all. The result is `{pressed, keyboardCode, modifiers, defaultPrevented, defaultAction, target}`. An unknown key (`NotAKey`) returns `invalid_key`.
+
+Failures found before any event is dispatched (invalid key, no focused target, selector matching zero or several elements, stale ref, disabled/read-only target, unsupported element, unknown action, `fill` without `selector`) return `not_dispatched` and do not quarantine; failures after dispatch carry the page effect monitor's `effect`.
 
 ### webview_wait_for
 
@@ -550,7 +555,7 @@ Expressions are scalar literals, `{"literal":<any JSON>}`, `{"fromInput":{"key":
 
 Conditions: `element(target,state)`, `valueEquals(target,expected)`, `textContains(target,expected)`, `attributeEquals(target,name,expected)`, `result(stepId,pointer,operator,expected?)`, and `all/any(conditions)`. Element states are visible/hidden/attached/detached/enabled/editable. Result operators are eq/exists/nonEmptyString. State-only observations cannot prove business persistence or action causality.
 
-A `query` on a password input, on anything inside `[data-sensitive="true"]` / `[data-connector-sensitive="true"]`, or on an element (or requested attribute) whose `id`/`name`/`autocomplete` looks like a credential (`password`, `secret`, `token`, `auth…`, `cookie`, `credential`, `api-key`, `one-time-code`) fails with `capability_unavailable`; reports and journals also redact credential-named keys as `[redacted]`. Scoped failure evidence is structural only -- tag, role, visible/enabled/editable for at most 40 elements, never text, values, or ids -- so capture any value you need with a `query` step. Actionability for `click`/`fill`/`type` requires visible, enabled (and editable for input), inside the viewport, and not covered by another element at the hit point; otherwise the step fails with `not_actionable` before dispatch.
+A `query` on a password input, on anything inside `[data-sensitive="true"]` / `[data-connector-sensitive="true"]`, or on an element (or requested attribute) whose `id`/`name`/`autocomplete` looks like a credential (`password`, `secret`, `token`, `auth…`, `cookie`, `credential`, `api-key`, `one-time-code`) fails with `capability_unavailable`; reports and journals also redact credential-named keys as `[redacted]`. Scoped failure evidence is structural only -- tag, role, visible/enabled/editable for at most 40 elements, never text, values, or ids -- so capture any value you need with a `query` step. Actionability for `click`/`fill`/`type` requires visible, enabled (and editable for input), inside the viewport, and not covered by another element at the hit point; otherwise the step fails with `not_actionable` before dispatch. The error names the `reason` (`not_visible`, `disabled`, `not_editable`, `outside_viewport`, `covered`). For `fill`/`type` on Monaco's hidden input surface the visible `.monaco-editor` root is checked instead, so a locator on the "Editor content" label can type.
 
 For a retained reference, call `workflow_get(runId: ..., evidenceId: ..., offset: 0)`. It returns minimal run metadata plus `evidencePage: { id, offset, content, nextOffset, totalBytes }`. `content` is a bounded JSON text chunk; follow `nextOffset` to retrieve later chunks and reassemble the text. Offsets count UTF-8 bytes; `offset` requires `evidenceId`; `nextOffset: null` marks the final chunk. This path makes each retained evidence reference readable even when the report summary is truncated.
 

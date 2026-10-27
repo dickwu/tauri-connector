@@ -1094,6 +1094,8 @@ fn pre_dispatch_failure(result: &serde_json::Value) -> Option<ExecutionOutcome> 
 
 // ============ Drag and Drop ============
 
+const DRAG_JS: &str = include_str!("../js/drag.js");
+
 #[allow(clippy::too_many_arguments)]
 pub async fn drag(
     id: &str,
@@ -1177,63 +1179,16 @@ pub async fn drag(
         }
     };
 
+    let options = serde_json::json!({
+        "steps": steps,
+        "durationMs": duration_ms,
+        "dragStrategy": drag_strategy,
+    });
     let script = format!(
         r#"new Promise((resolve) => {{
             {source_js}
             {target_js}
-            const srcRect = el.getBoundingClientRect();
-            const startX = srcRect.x + srcRect.width / 2;
-            const startY = srcRect.y + srcRect.height / 2;
-            const dragStrat = '{drag_strategy}';
-            const useHtml5 = dragStrat === 'html5dnd' || (dragStrat === 'auto' && (el.draggable === true || el.getAttribute('draggable') === 'true'));
-            const totalSteps = {steps};
-            const stepDelay = {duration_ms} / totalSteps;
-            const opts = {{ bubbles: true, cancelable: true, view: window }};
-            if (useHtml5) {{
-                const dt = new DataTransfer();
-                el.dispatchEvent(new DragEvent('dragstart', {{ ...opts, dataTransfer: dt, clientX: startX, clientY: startY }}));
-                let step = 0;
-                const doStep = () => {{
-                    step++;
-                    const t = step / totalSteps;
-                    const mx = startX + (endX - startX) * t;
-                    const my = startY + (endY - startY) * t;
-                    const cur = document.elementFromPoint(mx, my) || document.body;
-                    cur.dispatchEvent(new DragEvent('dragenter', {{ ...opts, dataTransfer: dt, clientX: mx, clientY: my }}));
-                    cur.dispatchEvent(new DragEvent('dragover', {{ ...opts, dataTransfer: dt, clientX: mx, clientY: my }}));
-                    if (step < totalSteps) {{
-                        setTimeout(doStep, stepDelay);
-                    }} else {{
-                        const dropEl = document.elementFromPoint(endX, endY) || document.body;
-                        dropEl.dispatchEvent(new DragEvent('drop', {{ ...opts, dataTransfer: dt, clientX: endX, clientY: endY }}));
-                        el.dispatchEvent(new DragEvent('dragend', {{ ...opts, dataTransfer: dt, clientX: endX, clientY: endY }}));
-                        resolve({{ action: 'drag', strategy: 'html5dnd', from: {{ x: startX, y: startY }}, to: {{ x: endX, y: endY }}, steps: totalSteps, sourceTag: el.tagName.toLowerCase(), targetTag: dropEl.tagName.toLowerCase() }});
-                    }}
-                }};
-                setTimeout(doStep, stepDelay);
-            }} else {{
-                el.dispatchEvent(new PointerEvent('pointerdown', {{ ...opts, clientX: startX, clientY: startY, button: 0, pointerId: 1 }}));
-                el.dispatchEvent(new MouseEvent('mousedown', {{ ...opts, clientX: startX, clientY: startY, button: 0 }}));
-                let step = 0;
-                const doStep = () => {{
-                    step++;
-                    const t = step / totalSteps;
-                    const mx = startX + (endX - startX) * t;
-                    const my = startY + (endY - startY) * t;
-                    const cur = document.elementFromPoint(mx, my) || document.body;
-                    cur.dispatchEvent(new PointerEvent('pointermove', {{ ...opts, clientX: mx, clientY: my, pointerId: 1 }}));
-                    cur.dispatchEvent(new MouseEvent('mousemove', {{ ...opts, clientX: mx, clientY: my }}));
-                    if (step < totalSteps) {{
-                        setTimeout(doStep, stepDelay);
-                    }} else {{
-                        const dropEl = document.elementFromPoint(endX, endY) || document.body;
-                        dropEl.dispatchEvent(new PointerEvent('pointerup', {{ ...opts, clientX: endX, clientY: endY, button: 0, pointerId: 1 }}));
-                        dropEl.dispatchEvent(new MouseEvent('mouseup', {{ ...opts, clientX: endX, clientY: endY, button: 0 }}));
-                        resolve({{ action: 'drag', strategy: 'pointer', from: {{ x: startX, y: startY }}, to: {{ x: endX, y: endY }}, steps: totalSteps, sourceTag: el.tagName.toLowerCase(), targetTag: dropEl.tagName.toLowerCase() }});
-                    }}
-                }};
-                setTimeout(doStep, stepDelay);
-            }}
+            ({DRAG_JS})(el, endX, endY, {options}).then(resolve);
         }})"#
     );
 
@@ -1247,21 +1202,41 @@ pub async fn drag(
     }
 }
 
+/// Types, fills or presses keys. With a selector the target is resolved and
+/// focused first (the same path as the locator and act-and-verify), which is
+/// what Monaco and other focus-driven editors need; without one, keys go to
+/// the focused element.
+#[allow(clippy::too_many_arguments)]
 pub async fn keyboard(
     id: &str,
     action: &str,
+    selector: Option<&str>,
     text: Option<&str>,
     key: Option<&str>,
     modifiers: Option<&[String]>,
     window_id: &str,
     bridge: &Bridge,
+    state: &PluginState,
 ) -> Response {
-    if !matches!(action, "type" | "press") {
-        return Response::not_dispatched(
-            id.to_string(),
-            "invalid_spec",
-            format!("Unknown keyboard action: {action}. Use: type, press"),
-        );
+    let selector = selector.filter(|value| !value.trim().is_empty());
+    let allowed = if selector.is_some() {
+        matches!(action, "type" | "press" | "fill")
+    } else {
+        matches!(action, "type" | "press")
+    };
+    if !allowed {
+        let message = if action == "fill" {
+            "fill needs a selector: it replaces the value of a specific field".to_string()
+        } else {
+            format!("Unknown keyboard action: {action}. Use: type, press, or fill with a selector")
+        };
+        return Response::not_dispatched(id.to_string(), "invalid_spec", message);
+    }
+    if selector.is_some() {
+        return targeted_input(
+            id, action, selector, text, key, modifiers, window_id, bridge, state,
+        )
+        .await;
     }
     let options = input_options(action, text, key, modifiers);
     let script = input_script("const el = document.activeElement;", &options);
@@ -1348,14 +1323,24 @@ async fn targeted_input(
     selector: Option<&str>,
     text: Option<&str>,
     key: Option<&str>,
+    modifiers: Option<&[String]>,
     window_id: &str,
     bridge: &Bridge,
     state: &PluginState,
 ) -> Response {
     let resolver = if let Some(selector) = selector {
-        let selector = match cached_ref(state, window_id, selector).await {
-            Ok(Some((ref_id, _, _, _))) => format!("[data-connector-ref={}]", js_string(&ref_id)),
-            Ok(None) => selector.to_string(),
+        match cached_ref(state, window_id, selector).await {
+            Ok(Some((ref_id, entry, _, _))) => format!(
+                "{} if (!el) return {{code: 'stale_ref', error: {}, dispatched: false}};",
+                ref_resolver_block("el", &ref_id, &entry),
+                js_string(&format!(
+                    "ref={ref_id} no longer matches an element; run snapshot again."
+                ))
+            ),
+            Ok(None) => format!(
+                "const matches = document.querySelectorAll({}); if (matches.length !== 1) return {{code: matches.length ? 'ambiguous_target' : 'target_not_found', error: 'Expected exactly one input target', count: matches.length, dispatched: false}}; const el = matches[0];",
+                js_string(selector)
+            ),
             Err(error) => {
                 return Response::outcome_error(
                     id.to_string(),
@@ -1366,11 +1351,7 @@ async fn targeted_input(
                     )),
                 );
             }
-        };
-        format!(
-            "const matches = document.querySelectorAll({}); if (matches.length !== 1) return {{code: matches.length ? 'ambiguous_target' : 'target_not_found', error: 'Expected exactly one input target', count: matches.length, dispatched: false}}; const el = matches[0];",
-            js_string(&selector)
-        )
+        }
     } else if action == "press" {
         "const el = document.activeElement;".to_string()
     } else {
@@ -1383,7 +1364,7 @@ async fn targeted_input(
             )),
         );
     };
-    let script = input_script(&resolver, &input_options(action, text, key, None));
+    let script = input_script(&resolver, &input_options(action, text, key, modifiers));
     execute_input(id, &script, window_id, bridge).await
 }
 
@@ -3763,7 +3744,10 @@ pub async fn webview_act_and_verify(
 
     let action_result = match action {
         "fill" | "type" | "press" => {
-            targeted_input(id, action, selector, text, key, window_id, bridge, state).await
+            targeted_input(
+                id, action, selector, text, key, None, window_id, bridge, state,
+            )
+            .await
         }
         "drag" => {
             drag(
@@ -4389,7 +4373,22 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("connector-args-{}", uuid::Uuid::new_v4()));
         let state = PluginState::new(dir.clone()).unwrap();
         let bridge = crate::bridge::Bridge::start().unwrap();
-        let keyboard = super::keyboard("k", "bogus", None, None, None, "main", &bridge).await;
+        let keyboard = super::keyboard(
+            "k", "bogus", None, None, None, None, "main", &bridge, &state,
+        )
+        .await;
+        let unscoped_fill = super::keyboard(
+            "k",
+            "fill",
+            None,
+            Some("x"),
+            None,
+            None,
+            "main",
+            &bridge,
+            &state,
+        )
+        .await;
         let no_target = super::interact(
             "i", "click", None, "css", None, None, None, None, "main", &bridge, &state,
         )
@@ -4408,7 +4407,7 @@ mod tests {
             &state,
         )
         .await;
-        for response in [keyboard, no_target, bad_action] {
+        for response in [keyboard, unscoped_fill, no_target, bad_action] {
             assert!(!response.requires_quarantine());
             let outcome = response.outcome.expect("typed outcome");
             assert_eq!(outcome.execution, ExecutionStatus::NotDispatched);

@@ -59,7 +59,11 @@
             const value = query.value || '';
             if (action && action !== 'text' && count > 1 && !query.first && !query.last && query.nth == null) return {count, code:'ambiguous_target', error:'Locator matched multiple elements; provide a unique locator or explicit index', dispatched:false};
             if (action && action !== 'text') {
-                if (!semantic.checkActionability(el,action).actionable) return {count,index,code:'not_actionable',error:'Target is not actionable',dispatched:false};
+                // Monaco's input surface is a 1px hidden textarea under the
+                // rendered lines; the editor itself is what must be actionable.
+                const editorRoot = (action === 'fill' || action === 'type') && typeof el.closest === 'function' ? el.closest('.monaco-editor') : null;
+                const check = editorRoot ? semantic.checkActionability(editorRoot, 'click') : semantic.checkActionability(el, action);
+                if (!check.actionable) return {count,index,code:'not_actionable',reason:check.reason,error:'Target is not actionable (' + check.reason + ')',dispatched:false};
                 const current = findMatches();
                 if (current.length !== count || current[index] !== el) return {count,index,code:'target_changed',error:'Target changed before dispatch',dispatched:false};
             }

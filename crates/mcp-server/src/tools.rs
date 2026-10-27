@@ -538,6 +538,9 @@ async fn handle_keyboard(client: &ConnectorClient, args: &Value) -> Result<Value
         "action": action,
         "window_id": wid,
     });
+    if let Some(s) = str_arg(args, "selector") {
+        cmd["selector"] = json!(s);
+    }
     if let Some(s) = str_arg(args, "text") {
         cmd["text"] = json!(s);
     }

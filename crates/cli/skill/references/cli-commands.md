@@ -217,7 +217,7 @@ tauri-connector focus <target>
 
 ### fill
 
-Clear input and set value, firing `input` and `change` events.
+Replace an input/textarea value through the native value setter, firing `input` and `change` so React/Vue controlled inputs update (same path as `webview_keyboard` `fill` and the locator `fill`). Monaco and other editors that cannot be cleared reliably return `not_actionable` -- use `type` there.
 
 ```bash
 tauri-connector fill <target> <text>
@@ -225,11 +225,13 @@ tauri-connector fill <target> <text>
 
 ### type
 
-Type text character-by-character, firing `keydown`/`keypress`/`keyup` per character.
+Type text into the target through the plugin's editor-aware input helper: inputs and textareas get per-character key events plus native value updates, contenteditable hosts get `insertText`, and Monaco editors (the `.monaco-editor` container, its hidden `textarea.inputarea` / `.native-edit-context`, or a wrapper holding exactly one editor) are focused and fed line by line through `insertText` or the EditContext API. The result reports `editor`, `method` and `verified` (true when the Monaco model could be read back).
 
 ```bash
 tauri-connector type <target> <text>
 ```
+
+`<target>` is an `@eN` ref or a CSS selector that must match exactly one element. A ref the plugin no longer has cached is retried once with the CLI's locally cached selector.
 
 ### check / uncheck
 
@@ -272,13 +274,15 @@ tauri-connector scrollintoview <target>
 
 ### press
 
-Press a key on the currently focused element.
+Press a key (or combo) on the currently focused element.
 
 ```bash
 tauri-connector press <key>
+tauri-connector press Meta+z
+tauri-connector press Control+Shift+ArrowLeft
 ```
 
-Keys: `Enter`, `Tab`, `Escape`, `Backspace`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, `Home`, `End`, `PageUp`, `PageDown`, `Delete`, `Space`, `F1`-`F12`, or any single character.
+Keys: `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `Space`, arrows, `Home`, `End`, `PageUp`, `PageDown`, `Insert`, `F1`-`F24`, modifier names, or any single character; aliases such as `Esc`, `Return`, `Del`, `Up`, `Cmd`, `Ctrl`, `Option` are accepted. Combos join modifiers with `+`. Events carry `key`, `code` and legacy `keyCode`/`which` (Escape = 27), so keybinding libraries such as Monaco and rc-dialog/AntD recognise them on the first press. When the page does not `preventDefault()` the keydown on an editable target, the browser default is applied (`Backspace`/`Delete` delete, `Meta/Ctrl+z` undo, `Meta/Ctrl+Shift+z` / `Ctrl+y` redo, `Meta/Ctrl+a` select all); the result reports `keyboardCode`, `defaultPrevented` and `defaultAction`. An unknown key name (e.g. `NotAKey`) fails with `invalid_key` before any event is dispatched, so it never quarantines the lease.
 
 ---
 
@@ -298,7 +302,7 @@ tauri-connector drag <source> <target> [FLAGS]
 
 Strategy details:
 - **auto**: Checks `el.draggable` -- uses `html5dnd` if true, `pointer` otherwise
-- **pointer**: `pointerdown` -> paced `pointermove` -> `pointerup` with mouse event mirrors. Works with dnd-kit, SortableJS, framer-motion, custom sliders, resize handles.
+- **pointer**: `pointerdown` -> paced `pointermove` -> `pointerup` with mouse event mirrors. Down and every move carry `buttons: 1` (primary button held); up carries `buttons: 0`. Works with dnd-kit, SortableJS, framer-motion, custom sliders, resize handles.
 - **html5dnd**: `dragstart` -> paced `dragenter`/`dragover` -> `drop` + `dragend` with DataTransfer. Works with `draggable="true"`, react-beautiful-dnd.
 
 Examples:

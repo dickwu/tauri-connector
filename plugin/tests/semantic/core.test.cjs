@@ -167,6 +167,36 @@ async function corpus() {
     ok(a.includes('- text "Total: $42"'),a); ok(!a.includes('text "Save"'),'duplicate text for named button'); ok(!a.includes('hunter2'));
     ok(!window.__CONNECTOR_SNAPSHOT__({mode:'ai'}).snapshot.includes('- text '),'ai mode shows text leaves');
   });
+  await test('R2-3 locator type reaches a Monaco-style hidden textarea through the editor', async () => {
+    fixture('<div class="monaco-editor" id="ed" style="position:relative;width:300px;height:100px"><textarea aria-label="Editor content" class="inputarea" style="position:absolute;left:0;top:0;width:1px;height:1px;opacity:0"></textarea><div class="view-lines" style="position:absolute;inset:0;background:#fff;z-index:1"></div></div>');
+    const ed=document.querySelector('#ed'),ta=ed.querySelector('textarea');
+    ta.addEventListener('focus',()=>setTimeout(()=>ed.classList.add('focused'),20));
+    const res=await window.__semanticLocate({label:'Editor content',action:'type',value:'let a = 1;'},window.__connectorInput,window.__connectorClick);
+    eq(res.code,undefined); eq(ta.value,'let a = 1;'); eq(document.activeElement,ta);
+    fixture('<button id="covered" style="position:absolute;left:0;top:0;width:50px;height:20px">Go</button><div style="position:absolute;left:0;top:0;width:100px;height:100px"></div>');
+    const covered=await window.__semanticLocate({role:'button',name:'Go',action:'click'},window.__connectorInput,window.__connectorClick);
+    eq(covered.code,'not_actionable'); eq(covered.reason,'covered'); ok(/covered/.test(covered.error));
+  });
+  await test('R2-3 R2-9 press edits a textarea and carries legacy key codes', async () => {
+    const ta=fixture('<textarea id="t"></textarea>'); ta.focus(); document.execCommand('insertText',false,'abc');
+    let esc=null; ta.addEventListener('keydown',e=>{if(e.key==='Escape')esc=[e.keyCode,e.which,e.code];});
+    const press=key=>window.__connectorInput(document.activeElement,{action:'press',key});
+    eq((await press('Backspace')).defaultAction,'delete'); eq(ta.value,'ab');
+    eq((await press('Control+z')).defaultAction,'undo'); eq(ta.value,'abc');
+    await press('Escape'); eq(esc,[27,27,'Escape']);
+    const bad=await press('NotAKey'); eq(bad.code,'invalid_key'); eq(bad.dispatched,false);
+  });
+  await test('R2-7 pointer drags hold the primary button from down to up', async () => {
+    fixture('<div id="src" style="position:absolute;left:0;top:0;width:40px;height:40px"></div><div id="dst" style="position:absolute;left:200px;top:0;width:40px;height:40px"></div>');
+    const seen=[]; for (const type of ['pointerdown','mousedown','pointermove','mousemove','pointerup','mouseup']) document.addEventListener(type,e=>seen.push([type,e.buttons,e.which,e.pointerType||null]),true);
+    const r=await window.__connectorDrag(document.querySelector('#src'),220,20,{steps:2,durationMs:0,dragStrategy:'pointer'});
+    eq(r.strategy,'pointer'); eq(r.targetTag,'div');
+    const by=t=>seen.filter(e=>e[0]===t);
+    eq(by('pointerdown')[0].slice(1),[1,1,'mouse']); eq(by('mousedown')[0].slice(1,3),[1,1]);
+    ok(by('pointermove').length===2 && by('pointermove').every(e=>e[1]===1),'pointermove without buttons '+JSON.stringify(seen));
+    ok(by('mousemove').every(e=>e[1]===1 && e[2]===1),'mousemove without buttons');
+    eq(by('pointerup')[0][1],0); eq(by('mouseup')[0].slice(1,3),[0,1]);
+  });
   return {tests:results.length,failures:results.filter(x=>!x.passed).length,evidenceKind:'browser_chromium',results};
 }
 (async()=>{
@@ -176,6 +206,8 @@ async function corpus() {
   const handlers=await readFile(join(__dirname,'../../src/handlers.rs'),'utf8');
   const textJs=await readFile(join(__dirname,'../../js/text.js'),'utf8');
   const clickJs=await readFile(join(__dirname,'../../js/click.js'),'utf8');
+  const inputJs=await readFile(join(__dirname,'../../js/input.js'),'utf8');
+  const dragJs=await readFile(join(__dirname,'../../js/drag.js'),'utf8');
   const waitState=handlers.split('const __connectorElementState = ')[1].split('            }};')[0].replaceAll('{{','{').replaceAll('}}','}')+'}';
   const snapshot=bridge.split('// === Unified Snapshot Engine ===')[1].split('// === Auto-push DOM via Tauri IPC')[0].replaceAll('{{','{').replaceAll('}}','}').replace('{semantic_source}',semantic);
   const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><html><body></body></html>');});
@@ -184,7 +216,7 @@ async function corpus() {
   try {
     browser=await chromium.launch({headless:true});const page=await browser.newPage();
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    const result=await page.evaluate(`(async()=>{${semantic};${snapshot};window.__semanticLocate=${locator};window.__semanticWaitState=${waitState};window.__connectorText=${textJs};window.__connectorClick=${clickJs};return (${corpus.toString()})();})()`);
+    const result=await page.evaluate(`(async()=>{${semantic};${snapshot};window.__semanticLocate=${locator};window.__semanticWaitState=${waitState};window.__connectorText=${textJs};window.__connectorClick=${clickJs};window.__connectorInput=${inputJs};window.__connectorDrag=${dragJs};return (${corpus.toString()})();})()`);
     console.log(JSON.stringify({...result,browser:browser.version()},null,2));if(result.failures)process.exitCode=1;
   } finally {await browser?.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

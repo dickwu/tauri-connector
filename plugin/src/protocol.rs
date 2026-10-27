@@ -164,6 +164,10 @@ pub enum Command {
     Keyboard {
         #[serde(default = "default_keyboard_action")]
         action: String,
+        /// CSS selector or snapshot ref to focus first; without it keys go to
+        /// the focused element.
+        #[serde(default)]
+        selector: Option<String>,
         #[serde(default)]
         text: Option<String>,
         #[serde(default)]

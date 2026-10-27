@@ -437,6 +437,7 @@ async fn handle_command_unleased(
         }
         Command::Keyboard {
             action,
+            selector,
             text,
             key,
             modifiers,
@@ -445,11 +446,13 @@ async fn handle_command_unleased(
             handlers::keyboard(
                 &id,
                 &action,
+                selector.as_deref(),
                 text.as_deref(),
                 key.as_deref(),
                 modifiers.as_deref(),
                 &window_id,
                 bridge,
+                state,
             )
             .await
         }

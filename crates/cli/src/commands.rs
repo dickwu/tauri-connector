@@ -292,7 +292,8 @@ pub async fn hover(client: &ConnectorClient, refs: &RefMap, target: &str) -> Res
     Ok(())
 }
 
-/// Drag an element to a target.
+/// Drag an element to a target (`@ref`, CSS selector or "x,y"). Runs the
+/// plugin's drag so the CLI and MCP dispatch the same event sequence.
 pub async fn drag(
     client: &ConnectorClient,
     refs: &RefMap,
@@ -302,80 +303,95 @@ pub async fn drag(
     duration_ms: u32,
     drag_strategy: &str,
 ) -> Result<(), String> {
-    let source_selector = resolve_to_selector(source, refs)?;
-    let target_resolve = resolve_target_js(target, refs)?;
+    let point = target
+        .split_once(',')
+        .and_then(|(x, y)| Some((x.trim().parse::<f64>().ok()?, y.trim().parse::<f64>().ok()?)));
+    let build = |resolve: &dyn Fn(&str) -> Result<String, String>| -> Result<Value, String> {
+        let mut cmd = json!({
+            "type": "interact",
+            "action": "drag",
+            "selector": resolve(source)?,
+            "steps": steps.max(1),
+            "duration_ms": duration_ms,
+            "drag_strategy": drag_strategy,
+            "window_id": window_id(),
+        });
+        match point {
+            Some((x, y)) => {
+                cmd["target_x"] = json!(x);
+                cmd["target_y"] = json!(y);
+            }
+            None => cmd["target_selector"] = json!(resolve(target)?),
+        }
+        Ok(cmd)
+    };
+    let timeout = duration_ms as u64 + 15_000;
+    print_json_result(send_with_ref_fallback(client, refs, build, timeout).await)
+}
 
-    let src = js_string(&source_selector);
-    // Zero steps would divide by zero in the script and never resolve.
-    let steps = steps.max(1);
-    let script = format!(
-        r#"new Promise((resolve) => {{
-            const el = document.querySelector({src});
-            if (!el) {{ resolve({{ error: 'Source element not found: ' + {src} }}); return; }}
-            {target_resolve}
-            const srcRect = el.getBoundingClientRect();
-            const startX = srcRect.x + srcRect.width / 2;
-            const startY = srcRect.y + srcRect.height / 2;
-            const dragStrat = '{drag_strategy}';
-            const useHtml5 = dragStrat === 'html5dnd' || (dragStrat === 'auto' && (el.draggable === true || el.getAttribute('draggable') === 'true'));
-            const totalSteps = {steps};
-            const stepDelay = {duration_ms} / totalSteps;
-            const opts = {{ bubbles: true, cancelable: true, view: window }};
-            if (useHtml5) {{
-                const dt = new DataTransfer();
-                el.dispatchEvent(new DragEvent('dragstart', {{ ...opts, dataTransfer: dt, clientX: startX, clientY: startY }}));
-                let step = 0;
-                const doStep = () => {{
-                    step++;
-                    const t = step / totalSteps;
-                    const mx = startX + (endX - startX) * t;
-                    const my = startY + (endY - startY) * t;
-                    const cur = document.elementFromPoint(mx, my) || document.body;
-                    cur.dispatchEvent(new DragEvent('dragenter', {{ ...opts, dataTransfer: dt, clientX: mx, clientY: my }}));
-                    cur.dispatchEvent(new DragEvent('dragover', {{ ...opts, dataTransfer: dt, clientX: mx, clientY: my }}));
-                    if (step < totalSteps) {{
-                        setTimeout(doStep, stepDelay);
-                    }} else {{
-                        const dropEl = document.elementFromPoint(endX, endY) || document.body;
-                        dropEl.dispatchEvent(new DragEvent('drop', {{ ...opts, dataTransfer: dt, clientX: endX, clientY: endY }}));
-                        el.dispatchEvent(new DragEvent('dragend', {{ ...opts, dataTransfer: dt, clientX: endX, clientY: endY }}));
-                        resolve({{ action: 'drag', strategy: 'html5dnd', from: {{ x: startX, y: startY }}, to: {{ x: endX, y: endY }}, steps: totalSteps, sourceTag: el.tagName.toLowerCase(), targetTag: dropEl.tagName.toLowerCase() }});
-                    }}
-                }};
-                setTimeout(doStep, stepDelay);
-            }} else {{
-                el.dispatchEvent(new PointerEvent('pointerdown', {{ ...opts, clientX: startX, clientY: startY, button: 0, pointerId: 1 }}));
-                el.dispatchEvent(new MouseEvent('mousedown', {{ ...opts, clientX: startX, clientY: startY, button: 0 }}));
-                let step = 0;
-                const doStep = () => {{
-                    step++;
-                    const t = step / totalSteps;
-                    const mx = startX + (endX - startX) * t;
-                    const my = startY + (endY - startY) * t;
-                    const cur = document.elementFromPoint(mx, my) || document.body;
-                    cur.dispatchEvent(new PointerEvent('pointermove', {{ ...opts, clientX: mx, clientY: my, pointerId: 1 }}));
-                    cur.dispatchEvent(new MouseEvent('mousemove', {{ ...opts, clientX: mx, clientY: my }}));
-                    if (step < totalSteps) {{
-                        setTimeout(doStep, stepDelay);
-                    }} else {{
-                        const dropEl = document.elementFromPoint(endX, endY) || document.body;
-                        dropEl.dispatchEvent(new PointerEvent('pointerup', {{ ...opts, clientX: endX, clientY: endY, button: 0, pointerId: 1 }}));
-                        dropEl.dispatchEvent(new MouseEvent('mouseup', {{ ...opts, clientX: endX, clientY: endY, button: 0 }}));
-                        resolve({{ action: 'drag', strategy: 'pointer', from: {{ x: startX, y: startY }}, to: {{ x: endX, y: endY }}, steps: totalSteps, sourceTag: el.tagName.toLowerCase(), targetTag: dropEl.tagName.toLowerCase() }});
-                    }}
-                }};
-                setTimeout(doStep, stepDelay);
-            }}
-        }})"#
-    );
+/// Sends a command built from the raw targets, so the plugin resolves
+/// `@refs` from its own snapshot cache. When the plugin has no matching ref
+/// (a refusal before anything is dispatched), retries once with the
+/// selectors from the CLI's local ref cache.
+async fn send_with_ref_fallback(
+    client: &ConnectorClient,
+    refs: &RefMap,
+    build: impl Fn(&dyn Fn(&str) -> Result<String, String>) -> Result<Value, String>,
+    timeout_ms: u64,
+) -> Result<Value, String> {
+    let raw = build(&|target: &str| Ok(target.to_string()))?;
+    let local = build(&|target: &str| resolve_to_selector(target, refs)).ok();
+    let result = client.send_with_timeout(raw.clone(), timeout_ms).await;
+    match (&result, local) {
+        (Err(error), Some(local)) if local != raw && is_pre_dispatch_ref_miss(error) => {
+            client.send_with_timeout(local, timeout_ms).await
+        }
+        _ => result,
+    }
+}
 
-    let timeout = duration_ms as u64 + 10_000;
-    let result = exec_js(client, &script, timeout).await?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&result).unwrap_or_default()
-    );
-    Ok(())
+/// True for the plugin's ref-resolution refusals, which happen before any
+/// event is dispatched and are therefore safe to retry.
+fn is_pre_dispatch_ref_miss(error: &str) -> bool {
+    if error.contains("No snapshot refs cached") || error.contains("Could not resolve ref=") {
+        return true;
+    }
+    serde_json::from_str::<Value>(error)
+        .ok()
+        .and_then(|value| {
+            let outcome = value.get("outcome")?;
+            let code = outcome.pointer("/error/code")?.as_str()?;
+            let execution = outcome.get("execution")?.as_str()?;
+            Some(code == "stale_ref" && execution == "not_dispatched")
+        })
+        .unwrap_or(false)
+}
+
+/// Fill, type or press through the plugin's input helper: it focuses the
+/// target, waits for focus-driven editors such as Monaco to settle and uses
+/// the native value setter plus input/change events for form fields.
+async fn keyboard_input(
+    client: &ConnectorClient,
+    refs: &RefMap,
+    action: &str,
+    target: Option<&str>,
+    text: Option<&str>,
+    key: Option<&str>,
+) -> Result<(), String> {
+    let build = |resolve: &dyn Fn(&str) -> Result<String, String>| -> Result<Value, String> {
+        let mut cmd = json!({ "type": "keyboard", "action": action, "window_id": window_id() });
+        if let Some(target) = target {
+            cmd["selector"] = json!(resolve(target)?);
+        }
+        if let Some(text) = text {
+            cmd["text"] = json!(text);
+        }
+        if let Some(key) = key {
+            cmd["key"] = json!(key);
+        }
+        Ok(cmd)
+    };
+    print_json_result(send_with_ref_fallback(client, refs, build, 30_000).await)
 }
 
 /// Resolve a @ref or CSS selector to a CSS selector string.
@@ -389,26 +405,6 @@ fn resolve_to_selector(target: &str, refs: &RefMap) -> Result<String, String> {
         }
         None => Ok(target.to_string()),
     }
-}
-
-/// Build JS that resolves a drag target to endX/endY variables.
-/// Accepts @ref, CSS selector, or "x,y" coordinates.
-fn resolve_target_js(target: &str, refs: &RefMap) -> Result<String, String> {
-    // Check for coordinate pair like "300,400"
-    if let Some((x_str, y_str)) = target.split_once(',') {
-        if let (Ok(x), Ok(y)) = (x_str.trim().parse::<f64>(), y_str.trim().parse::<f64>()) {
-            return Ok(format!("const endX = {x}; const endY = {y};"));
-        }
-    }
-
-    let selector = resolve_to_selector(target, refs)?;
-    let selector = js_string(&selector);
-    Ok(format!(
-        "const tgt = document.querySelector({selector}); \
-         if (!tgt) {{ resolve({{ error: 'Target not found: ' + {selector} }}); return; }} \
-         const tRect = tgt.getBoundingClientRect(); \
-         const endX = tRect.x + tRect.width/2; const endY = tRect.y + tRect.height/2;"
-    ))
 }
 
 /// Focus an element.
@@ -426,66 +422,25 @@ pub async fn focus(client: &ConnectorClient, refs: &RefMap, target: &str) -> Res
     Ok(())
 }
 
-/// Clear and fill an input element.
+/// Replace an input's value through the native setter with input/change
+/// events, the path React-controlled fields observe.
 pub async fn fill(
     client: &ConnectorClient,
     refs: &RefMap,
     target: &str,
     value: &str,
 ) -> Result<(), String> {
-    let value = js_string(value);
-    let action = format!(
-        r#"
-      el.focus();
-      if (el.select) el.select();
-      el.value = "";
-      el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-      el.value = {value};
-      el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-      el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-      return {{ action: 'fill', tag: el.tagName.toLowerCase(), value: {value} }};
-    "#
-    );
-    let script = build_resolve_and_act_script(target, refs, &action);
-    let result = exec_js(client, &script, 30_000).await?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&result).unwrap_or_default()
-    );
-    Ok(())
+    keyboard_input(client, refs, "fill", Some(target), Some(value), None).await
 }
 
-/// Type text character by character.
+/// Type text into a field, contenteditable or Monaco editor.
 pub async fn type_text(
     client: &ConnectorClient,
     refs: &RefMap,
     target: &str,
     text: &str,
 ) -> Result<(), String> {
-    let chars = js_string(text);
-    let action = format!(
-        r#"
-      el.focus();
-      const chars = {chars};
-      for (const ch of chars) {{
-        el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch, bubbles: true }}));
-        el.dispatchEvent(new KeyboardEvent('keypress', {{ key: ch, bubbles: true }}));
-        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
-          el.value += ch;
-          el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-        }}
-        el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch, bubbles: true }}));
-      }}
-      return {{ action: 'type', tag: el.tagName.toLowerCase(), text: {chars} }};
-    "#
-    );
-    let script = build_resolve_and_act_script(target, refs, &action);
-    let result = exec_js(client, &script, 30_000).await?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&result).unwrap_or_default()
-    );
-    Ok(())
+    keyboard_input(client, refs, "type", Some(target), Some(text), None).await
 }
 
 /// Check a checkbox.
@@ -608,22 +563,10 @@ pub async fn scroll_into_view(
     Ok(())
 }
 
-/// Press a key on the focused element.
+/// Press a key or combo (Enter, Escape, Meta+z) on the focused element.
+/// Unknown keys are refused by the plugin before anything is dispatched.
 pub async fn press(client: &ConnectorClient, key: &str) -> Result<(), String> {
-    let script = format!(
-        r#"(() => {{
-      const el = document.activeElement || document.body;
-      el.dispatchEvent(new KeyboardEvent('keydown', {{ key: '{key}', bubbles: true }}));
-      el.dispatchEvent(new KeyboardEvent('keyup', {{ key: '{key}', bubbles: true }}));
-      return {{ action: 'press', key: '{key}', target: el.tagName.toLowerCase() }};
-    }})()"#
-    );
-    let result = exec_js(client, &script, 30_000).await?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&result).unwrap_or_default()
-    );
-    Ok(())
+    keyboard_input(client, &RefMap::new(), "press", None, None, Some(key)).await
 }
 
 /// Get a property from an element or the page.
@@ -2078,6 +2021,22 @@ mod tests {
     use super::sha256_hex;
     use super::{prepare_batch_spec_value, read_batch_spec_input};
     use serde_json::json;
+
+    #[test]
+    fn only_pre_dispatch_ref_misses_are_retried_with_local_selectors() {
+        assert!(super::is_pre_dispatch_ref_miss(
+            "No snapshot refs cached for window 'main'. Run webview_dom_snapshot(mode:'ai') again."
+        ));
+        let stale = json!({"error": "ref gone", "outcome": {"execution": "not_dispatched", "error": {"code": "stale_ref"}}});
+        assert!(super::is_pre_dispatch_ref_miss(&stale.to_string()));
+        let dispatched = json!({"error": "x", "outcome": {"execution": "failed", "error": {"code": "stale_ref"}}});
+        assert!(!super::is_pre_dispatch_ref_miss(&dispatched.to_string()));
+        let other = json!({"error": "x", "outcome": {"execution": "not_dispatched", "error": {"code": "not_actionable"}}});
+        assert!(!super::is_pre_dispatch_ref_miss(&other.to_string()));
+        assert!(!super::is_pre_dispatch_ref_miss(
+            "outcome_unknown: Request timeout"
+        ));
+    }
 
     #[test]
     fn split_snapshots_report_and_cache_every_ref() {

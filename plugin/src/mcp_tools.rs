@@ -267,14 +267,17 @@ pub(crate) async fn dispatch_raw(
                 .get("modifiers")
                 .and_then(|v| serde_json::from_value(v.clone()).ok());
             let wid = window_id(args);
+            let selector = str_arg(args, "selector");
             handlers::keyboard(
                 id,
                 &action,
+                selector.as_deref(),
                 text.as_deref(),
                 key.as_deref(),
                 modifiers.as_deref(),
                 &wid,
                 bridge,
+                state,
             )
             .await
         }
