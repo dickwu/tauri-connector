@@ -264,11 +264,17 @@ fn main() {
             token.len() >= 32,
             "fixture workflow token must be at least 32 bytes"
         );
+        // CONNECTOR_FIXTURE_PORT moves the fixture into the default discovery
+        // scan range (9555-9655) for port-scan checks; MCP uses port + 1.
+        let port = std::env::var("CONNECTOR_FIXTURE_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(19555);
         builder
             .plugin(
                 tauri_plugin_connector::ConnectorBuilder::new()
-                    .port_range(19555, 19555)
-                    .mcp_port_range(19556, 19556)
+                    .port_range(port, port)
+                    .mcp_port_range(port + 1, port + 1)
                     .workflow_token(token)
                     .build(),
             )
@@ -285,6 +291,22 @@ fn main() {
     if std::env::var("CONNECTOR_FIXTURE_BACKGROUND").as_deref() == Ok("1") {
         for window in &mut context.config_mut().app.windows {
             window.focus = false;
+        }
+    }
+    // CONNECTOR_FIXTURE_CSP=strict: a production-like CSP with no
+    // 'unsafe-eval' and no websocket connect-src, so the page cannot eval or
+    // reach the connector bridge socket.
+    if std::env::var("CONNECTOR_FIXTURE_CSP").as_deref() == Ok("strict") {
+        context.config_mut().app.security.csp = Some(tauri::utils::config::Csp::Policy(
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src ipc: http://ipc.localhost".into(),
+        ));
+    }
+    // CONNECTOR_FIXTURE_OVERLAY=1: macOS Overlay title bar, where the web
+    // content extends under the traffic lights.
+    if std::env::var("CONNECTOR_FIXTURE_OVERLAY").as_deref() == Ok("1") {
+        for window in &mut context.config_mut().app.windows {
+            window.title_bar_style = tauri::TitleBarStyle::Overlay;
+            window.hidden_title = true;
         }
     }
     if let Ok(identifier) = std::env::var("CONNECTOR_FIXTURE_ID") {
