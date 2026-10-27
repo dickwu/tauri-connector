@@ -812,8 +812,13 @@ async fn run_cli(cli: Cli) {
             json: *json,
             no_runtime: *no_runtime,
         };
+        let json = opts.json;
         if let Err(e) = doctor::run(opts).await {
-            eprintln!("{e}");
+            // --json keeps every stream machine-readable: the verdict is in
+            // `summary.passed` and the exit status.
+            if !json {
+                eprintln!("{e}");
+            }
             std::process::exit(1);
         }
         return;

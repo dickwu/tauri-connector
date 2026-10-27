@@ -475,7 +475,15 @@ fn check_runtime_add_capability(root: &Path) -> Check {
             "ensure src-tauri/src/lib.rs or main.rs is readable",
         );
     }
-    if has_runtime_add_capability(&src) {
+    let build_dirs = build_rs_capability_dirs(root);
+    if let Some(dir) = build_dirs
+        .iter()
+        .find(|d| capability_in_dir(root, d, "connector:default"))
+    {
+        Check::ok(format!(
+            "Capability loaded by build.rs capabilities_path_pattern (src-tauri/{dir}/)"
+        ))
+    } else if has_runtime_add_capability(&src) {
         Check::ok(
             "Capability loaded at runtime via app.add_capability(include_str!(\"../capabilities-dev/...\"))",
         )
@@ -494,6 +502,41 @@ fn check_runtime_add_capability(root: &Path) -> Check {
             ),
         )
     }
+}
+
+/// Directories (relative to `src-tauri/`) named by
+/// `tauri_build::Attributes::capabilities_path_pattern("...")` calls in
+/// `src-tauri/build.rs`, e.g. `"./capabilities-dev/**/*"` -> `capabilities-dev`.
+fn build_rs_capability_dirs(root: &Path) -> Vec<String> {
+    fs::read_to_string(root.join("src-tauri").join("build.rs"))
+        .map(|text| capability_dirs_from_build_rs(&text))
+        .unwrap_or_default()
+}
+
+fn capability_dirs_from_build_rs(text: &str) -> Vec<String> {
+    let mut dirs = Vec::new();
+    for (idx, _) in text.match_indices("capabilities_path_pattern") {
+        let rest = &text[idx + "capabilities_path_pattern".len()..];
+        let Some(rest) = rest.trim_start().strip_prefix('(') else {
+            continue;
+        };
+        let Some(rest) = rest.trim_start().strip_prefix('"') else {
+            continue;
+        };
+        let Some(end) = rest.find('"') else {
+            continue;
+        };
+        let dir = rest[..end]
+            .split('/')
+            .filter(|part| !part.is_empty() && *part != ".")
+            .take_while(|part| !part.contains('*') && !part.ends_with(".json"))
+            .collect::<Vec<_>>()
+            .join("/");
+        if !dir.is_empty() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs
 }
 
 /// Three-substring heuristic: a project that contains all three substrings
@@ -868,17 +911,23 @@ fn check_plugin_registration(root: &Path) -> Check {
 ///   canonical home; we still accept matches in `capabilities/` for migration.
 /// - `Legacy`/`None`: `capabilities/` is canonical.
 fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
-    let dirs: &[(&str, _)] = &[
+    let build_dirs = build_rs_capability_dirs(root);
+    let mut dirs: Vec<(&str, PathBuf)> = vec![
         ("capabilities", root.join("src-tauri").join("capabilities")),
         (
             "capabilities-dev",
             root.join("src-tauri").join("capabilities-dev"),
         ),
     ];
+    for dir in &build_dirs {
+        if dir != "capabilities" && dir != "capabilities-dev" {
+            dirs.push(("build.rs", root.join("src-tauri").join(dir)));
+        }
+    }
 
     let mut checked_any = false;
     let mut found_in: Option<(&str, PathBuf)> = None;
-    for (label, dir) in dirs {
+    for (label, dir) in &dirs {
         if !dir.is_dir() {
             continue;
         }
@@ -903,7 +952,7 @@ fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
                 continue;
             };
             if permissions_contain(&value, "connector:default") {
-                found_in = Some((label, path));
+                found_in = Some((*label, path));
                 break;
             }
         }
@@ -915,6 +964,13 @@ fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
     match found_in {
         Some((dir_label, p)) => {
             let label_text = format!("Permission \"connector:default\" in {}", rel(root, &p));
+            let loaded_by_build_rs = dir_label == "build.rs"
+                || build_dirs.iter().any(|d| d.as_str() == dir_label);
+            if loaded_by_build_rs {
+                return Check::ok(label_text).with_detail(
+                    "loaded by tauri_build capabilities_path_pattern in src-tauri/build.rs",
+                );
+            }
             // Surface a Warn when the location does not match the active pattern.
             match (pattern, dir_label) {
                 (SetupPattern::FeatureGated, "capabilities")
@@ -1042,10 +1098,10 @@ fn check_with_global_tauri(root: &Path) -> Check {
     if with_global {
         Check::ok("app.withGlobalTauri: true").with_detail(display)
     } else {
-        Check::fail(
-            "app.withGlobalTauri is not true",
+        Check::warn(
+            "app.withGlobalTauri is not true (optional)",
             format!(
-                "set `\"withGlobalTauri\": true` under `\"app\"` in {display} (required for the eval+event fallback):\n{}",
+                "the connector bridge works without it; set `\"withGlobalTauri\": true` under `\"app\"` in {display} only if you want the eval+event fallback:\n{}",
                 indent_snippet(SNIPPET_WITH_GLOBAL_TAURI)
             ),
         )
@@ -1076,9 +1132,9 @@ fn check_snapdom(root: &Path) -> Check {
     if has {
         Check::ok("Frontend dependency: @zumer/snapdom").with_detail(display)
     } else {
-        Check::fail(
-            "Frontend dependency `@zumer/snapdom` is missing",
-            "install the screenshot fallback library:\n  $ npm install @zumer/snapdom\n  $ # or: bun add @zumer/snapdom\n  $ # or: pnpm add @zumer/snapdom",
+        Check::warn(
+            "Frontend dependency `@zumer/snapdom` is missing (optional)",
+            "native webview capture works without it; install it only for the DOM-render screenshot fallback:\n  $ npm install @zumer/snapdom\n  $ # or: bun add @zumer/snapdom\n  $ # or: pnpm add @zumer/snapdom",
         )
     }
 }
@@ -1106,8 +1162,8 @@ fn check_mcp_json(root: &Path) -> Check {
     let text = match fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => {
-            return Check::fail(
-                ".mcp.json missing",
+            return Check::warn(
+                ".mcp.json missing (optional: only needed for MCP clients)",
                 format!(
                     "create {display} at the project root:\n{}",
                     indent_snippet(SNIPPET_MCP_JSON)
@@ -1117,7 +1173,7 @@ fn check_mcp_json(root: &Path) -> Check {
     };
 
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
-        return Check::fail(
+        return Check::warn(
             ".mcp.json is not valid JSON",
             format!("fix the JSON in {display}:\n  $ jq . {display}"),
         );
@@ -1142,7 +1198,7 @@ fn check_mcp_entry(entry: Option<&Value>, display: &str) -> Check {
                     ),
                 );
             }
-            Check::fail(
+            Check::warn(
                 ".mcp.json `tauri-connector` entry has no `url` or `command`",
                 format!(
                     "set the embedded MCP Streamable HTTP url in {display}:\n{}",
@@ -1150,8 +1206,8 @@ fn check_mcp_entry(entry: Option<&Value>, display: &str) -> Check {
                 ),
             )
         }
-        _ => Check::fail(
-            ".mcp.json has no `tauri-connector` entry",
+        _ => Check::warn(
+            ".mcp.json has no `tauri-connector` entry (optional: only needed for MCP clients)",
             format!(
                 "add a `tauri-connector` entry under `mcpServers` in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/mcp\" }}"
             ),
@@ -2125,6 +2181,62 @@ tauri-plugin-connector = "0.8"
         let check = check_mcp_entry(Some(&value), ".mcp.json");
         assert_eq!(check.status, Status::Warn);
         assert!(check.fix.unwrap().contains("127.0.0.1:9556/mcp"));
+    }
+
+    #[test]
+    fn build_rs_capability_patterns_name_their_directories() {
+        let text = r#"
+fn main() {
+    let attrs = tauri_build::Attributes::new()
+        .capabilities_path_pattern("./capabilities-dev/**/*");
+    #[cfg(x)]
+    let attrs = attrs.capabilities_path_pattern( "perm/dev/*.json" );
+    tauri_build::try_build(attrs).unwrap();
+}
+"#;
+        assert_eq!(
+            capability_dirs_from_build_rs(text),
+            vec!["capabilities-dev".to_string(), "perm/dev".to_string()]
+        );
+        assert!(capability_dirs_from_build_rs("fn main() { tauri_build::build() }").is_empty());
+    }
+
+    #[test]
+    fn build_rs_loaded_dev_capability_passes_and_optional_checks_only_warn() {
+        let root = std::env::temp_dir().join(format!(
+            "tauri-connector-doctor-buildrs-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let tauri = root.join("src-tauri");
+        std::fs::create_dir_all(tauri.join("capabilities-dev")).unwrap();
+        std::fs::create_dir_all(tauri.join("src")).unwrap();
+        std::fs::write(
+            tauri.join("build.rs"),
+            r#"fn main() { tauri_build::try_build(tauri_build::Attributes::new().capabilities_path_pattern("./capabilities-dev/**/*")).unwrap() }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            tauri.join("capabilities-dev").join("dev.json"),
+            r#"{"identifier":"dev","permissions":["connector:default"]}"#,
+        )
+        .unwrap();
+        std::fs::write(tauri.join("src").join("lib.rs"), "fn run() {}").unwrap();
+        std::fs::write(tauri.join("tauri.conf.json"), r#"{"app":{}}"#).unwrap();
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+
+        let caps = check_capabilities(&root, SetupPattern::FeatureGated);
+        assert_eq!(caps.status, Status::Ok, "{}", caps.label);
+        let runtime = check_runtime_add_capability(&root);
+        assert_eq!(runtime.status, Status::Ok, "{}", runtime.label);
+        for check in [
+            check_with_global_tauri(&root),
+            check_snapdom(&root),
+            check_mcp_json(&root),
+        ] {
+            assert_eq!(check.status, Status::Warn, "{}", check.label);
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
