@@ -942,6 +942,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     let window_id = serde_json::to_string(window_id).expect("window label serializes");
     let semantic_source = include_str!("semantic/core.js");
     let effects_source = include_str!("effects.js");
+    let console_format_source = include_str!("../js/console-format.js");
     format!(
         r#"(function() {{
   if (window.top !== window) return;
@@ -969,17 +970,17 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
   }} catch (_) {{}}
 
   // Intercept console methods for log capture
+  const formatConsole = {console_format_source};
   const origConsole = {{}};
   ['log', 'warn', 'error', 'info', 'debug'].forEach(function(level) {{
     origConsole[level] = console[level];
     console[level] = function() {{
-      const args = Array.from(arguments).map(function(a) {{
-        try {{ return typeof a === 'string' ? a : JSON.stringify(a); }}
-        catch (_) {{ return String(a); }}
-      }});
+      let message;
+      try {{ message = formatConsole(arguments); }}
+      catch (_) {{ message = Array.from(arguments).map(String).join(' '); }}
       consoleLogs.push({{
         level: level,
-        message: args.join(' '),
+        message: message,
         timestamp: Date.now()
       }});
       if (consoleLogs.length > MAX_LOGS) consoleLogs.shift();

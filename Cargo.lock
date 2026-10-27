@@ -776,6 +776,7 @@ dependencies = [
 name = "connector-cli"
 version = "0.17.1"
 dependencies = [
+ "chrono",
  "clap",
  "connector-client",
  "connector-mcp-server",

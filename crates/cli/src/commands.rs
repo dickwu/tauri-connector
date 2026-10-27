@@ -778,11 +778,11 @@ pub async fn logs(
             let ts = entry.get("timestamp").and_then(|v| v.as_u64()).unwrap_or(0);
             let lvl = entry.get("level").and_then(|v| v.as_str()).unwrap_or("LOG");
             let msg = entry.get("message").and_then(|v| v.as_str()).unwrap_or("");
-            let secs = ts / 1000;
-            let h = (secs / 3600) % 24;
-            let m = (secs / 60) % 60;
-            let s = secs % 60;
-            println!("{h:02}:{m:02}:{s:02} {:<5} {msg}", lvl.to_uppercase());
+            println!(
+                "{} {:<5} {msg}",
+                format_log_time(ts, &chrono::Local),
+                lvl.to_uppercase()
+            );
         }
     } else {
         println!(
@@ -791,6 +791,21 @@ pub async fn logs(
         );
     }
     Ok(())
+}
+
+/// Console timestamps are epoch milliseconds; print them in the caller's local
+/// time with the UTC offset so they line up with app and system logs.
+fn format_log_time<Tz: chrono::TimeZone>(ms: u64, zone: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    match chrono::DateTime::from_timestamp_millis(ms as i64) {
+        Some(utc) => utc
+            .with_timezone(zone)
+            .format("%H:%M:%S%.3f %:z")
+            .to_string(),
+        None => format!("{ms}ms"),
+    }
 }
 
 /// Get app backend state.
@@ -1913,6 +1928,18 @@ mod tests {
     use super::sha256_hex;
     use super::{prepare_batch_spec_value, read_batch_spec_input};
     use serde_json::json;
+
+    #[test]
+    fn log_times_are_local_with_an_offset_label() {
+        let winnipeg = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
+        // 2026-10-27T16:18:05.250Z
+        let ms = 1_793_117_885_250;
+        assert_eq!(super::format_log_time(ms, &winnipeg), "11:18:05.250 -05:00");
+        assert_eq!(
+            super::format_log_time(ms, &chrono::Utc),
+            "16:18:05.250 +00:00"
+        );
+    }
 
     #[test]
     fn batch_spec_inline_json_is_used_verbatim() {

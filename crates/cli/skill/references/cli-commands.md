@@ -452,6 +452,8 @@ tauri-connector logs [FLAGS]
 | `--level` | `-l` | | Comma-separated: `log`, `info`, `warn`, `error`, `debug` |
 | `--pattern` | `-p` | | Regex match |
 
+Each line is `HH:MM:SS.mmm ±HH:MM LEVEL message` in the machine's local time with its UTC offset. Messages are formatted like devtools: `%s %d %i %f %o %O` are substituted, `%c` and its CSS argument are dropped, and `Error` arguments print as `Name: message` plus the stack. IPC calls appear in `ipc` logs only after `ipc monitor` (or capture) has been started.
+
 ### runtime
 
 Read runtime-level frontend captures: window errors, unhandled promise rejections, network failures/statuses, navigation changes, and resource load failures.
