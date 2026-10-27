@@ -543,6 +543,10 @@ fn logical_inner_size(app: &tauri::AppHandle, window_id: &str) -> Option<(f64, f
 /// view (use the full bounds). Picking the safe-area size there cropped the
 /// bottom inset off a full-height page (1200x800 viewport -> 2400x1536).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(
+    not(all(feature = "native-screenshot", target_os = "macos")),
+    allow(dead_code)
+)]
 pub(crate) fn webview_snapshot_extent(
     bounds: (f64, f64),
     safe_area: Option<(f64, f64)>,
