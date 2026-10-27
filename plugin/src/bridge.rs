@@ -185,6 +185,9 @@ pub struct BridgeClient {
     /// socket must not remove a newer client registered under the same label.
     pub conn_id: String,
     pub tx: mpsc::UnboundedSender<String>,
+    /// The page reported that its CSP blocks string compilation (no
+    /// 'unsafe-eval'), so commands are delivered as native eval code.
+    pub eval_blocked: bool,
 }
 
 /// Manages the internal WebSocket bridge to the webview.
@@ -204,6 +207,8 @@ pub struct Bridge {
     runtime: Arc<crate::runtime::RuntimeManager>,
     /// Lifts resource quarantine when a timed-out request settles later.
     late_hook: Arc<StdMutex<Option<LateSettlementHook>>>,
+    /// Test seam: when set, native deliveries go here instead of a webview.
+    native_sink: Arc<StdMutex<Option<mpsc::UnboundedSender<String>>>>,
 }
 
 /// Inclusive port range for the internal bridge listener.
@@ -233,6 +238,7 @@ impl Bridge {
             app_handle: Arc::new(Mutex::new(None)),
             runtime: Arc::new(crate::runtime::RuntimeManager::default()),
             late_hook: Arc::new(StdMutex::new(None)),
+            native_sink: Arc::new(StdMutex::new(None)),
         };
 
         let bridge_clone = bridge.clone();
@@ -378,6 +384,35 @@ impl Bridge {
         request_id: &str,
         authorize: Option<&(dyn Fn() -> bool + Send + Sync)>,
     ) -> Result<serde_json::Value, BridgeError> {
+        self.execute_page_script(
+            &PageScript::trusted(script),
+            timeout_ms,
+            window_id,
+            request_id,
+            authorize,
+        )
+        .await
+    }
+
+    /// Whether the window's page reported a CSP that blocks string
+    /// compilation. `None` when no bridge client is connected.
+    pub async fn eval_blocked(&self, window_id: &str) -> Option<bool> {
+        self.clients
+            .lock()
+            .await
+            .get(window_id)
+            .map(|client| client.eval_blocked)
+    }
+
+    /// Run a script that has several page forms (see [`PageScript`]).
+    pub async fn execute_page_script(
+        &self,
+        script: &PageScript,
+        timeout_ms: u64,
+        window_id: &str,
+        request_id: &str,
+        authorize: Option<&(dyn Fn() -> bool + Send + Sync)>,
+    ) -> Result<serde_json::Value, BridgeError> {
         let request = DispatchRequest {
             id: request_id,
             deadline: Instant::now() + Duration::from_millis(timeout_ms),
@@ -395,7 +430,7 @@ impl Bridge {
 
     async fn execute_js_ws(
         &self,
-        script: &str,
+        script: &PageScript,
         window_id: &str,
         request: &DispatchRequest<'_>,
     ) -> Result<serde_json::Value, BridgeError> {
@@ -417,10 +452,36 @@ impl Bridge {
         // a request inserted for a connection that it has already removed.
         let cmd = BridgeCommand {
             id: request.id.to_string(),
-            script: script.to_string(),
+            script: script.ws.clone(),
         };
         let msg = serde_json::to_string(&cmd)
             .map_err(|error| request.not_dispatched(error.to_string()))?;
+        // A strict CSP blocks the page from compiling the command string, so
+        // it is delivered as native eval code; the reply still uses this socket.
+        let native = client
+            .eval_blocked
+            .then(|| native_scripts(script, request.id, &NativeReply::Bridge));
+        let sink = self.native_sink.lock().unwrap().clone();
+        let app = if native.is_some() && sink.is_none() {
+            tokio::time::timeout_at(request.deadline, self.app_handle.lock())
+                .await
+                .map_err(|_| request.not_dispatched("Deadline expired while selecting webview"))?
+                .clone()
+        } else {
+            None
+        };
+        let window = match (&native, &sink, &app) {
+            (Some(_), None, Some(app)) => {
+                use tauri::Manager;
+                Some(app.get_webview_window(window_id).ok_or_else(|| {
+                    request.not_dispatched(format!("Window '{window_id}' not found"))
+                })?)
+            }
+            (Some(_), None, None) => {
+                return Err(request.not_dispatched("App handle not set for native delivery"));
+            }
+            _ => None,
+        };
         request.ensure_budget()?;
         let (tx, mut rx) = oneshot::channel();
         let registration_id = uuid::Uuid::new_v4();
@@ -450,12 +511,28 @@ impl Bridge {
         }));
         // A rejected enqueue proves this command never entered the transport.
         request.ensure_budget()?;
-        let transmitted_bytes = msg.len();
-        client
-            .tx
-            .send(msg)
-            .map_err(|_| request.not_dispatched("Bridge client channel closed"))?;
-        self.runtime.record_transmission(script, transmitted_bytes);
+        if let Some(scripts) = native {
+            let transmitted_bytes = scripts.iter().map(String::len).sum();
+            for js in &scripts {
+                let delivered = match (&sink, &window) {
+                    (Some(sink), _) => sink.send(js.clone()).map_err(|e| e.to_string()),
+                    (None, Some(window)) => window.eval(js).map_err(|e| e.to_string()),
+                    (None, None) => Err("no native delivery target".into()),
+                };
+                // The webview may already hold part of the sequence; never replay.
+                delivered.map_err(|e| request.unknown(format!("eval inject failed: {e}")))?;
+            }
+            self.runtime
+                .record_transmission(&script.ws, transmitted_bytes);
+        } else {
+            let transmitted_bytes = msg.len();
+            client
+                .tx
+                .send(msg)
+                .map_err(|_| request.not_dispatched("Bridge client channel closed"))?;
+            self.runtime
+                .record_transmission(&script.ws, transmitted_bytes);
+        }
         drop(clients);
         // Once queued, even a socket send failure cannot safely trigger replay.
         match tokio::time::timeout_at(request.deadline, &mut rx).await {
@@ -483,7 +560,7 @@ impl Bridge {
 
     async fn execute_js_via_eval(
         &self,
-        script: &str,
+        script: &PageScript,
         window_id: &str,
         request: &DispatchRequest<'_>,
     ) -> Result<serde_json::Value, BridgeError> {
@@ -532,10 +609,18 @@ impl Bridge {
             }
         });
         let mut listener = CleanupGuard(Some(|| app.unlisten(listener_id)));
-        let js = eval_script(script, &id, &event_name);
+        let scripts = native_scripts(script, &id, &NativeReply::Event(&event_name));
+        let sink = self.native_sink.lock().unwrap().clone();
         self.enqueue_eval(request, || {
-            self.runtime.record_transmission(script, js.len());
-            window.eval(&js).map_err(|error| error.to_string())
+            self.runtime
+                .record_transmission(&script.ws, scripts.iter().map(String::len).sum());
+            for js in &scripts {
+                match &sink {
+                    Some(sink) => sink.send(js.clone()).map_err(|e| e.to_string())?,
+                    None => window.eval(js).map_err(|error| error.to_string())?,
+                }
+            }
+            Ok(())
         })
         .await?;
         match tokio::time::timeout_at(request.deadline, &mut rx).await {
@@ -758,6 +843,7 @@ impl Bridge {
                 serde_json::json!({
                     "windowId": client.window_id,
                     "connected": true,
+                    "evalBlocked": client.eval_blocked,
                     "ageMs": now.saturating_sub(client.connected_at_ms),
                 })
             })
@@ -922,6 +1008,10 @@ async fn handle_bridge_message(
             bridge_key: value["bridgeKey"].as_str().unwrap_or_default().into(),
             conn_id: conn_id.to_string(),
             tx: tx.clone(),
+            eval_blocked: value
+                .get("evalBlocked")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
         };
         let mut clients = clients.lock().await;
         // Destruction/navigation may happen while hello waits for dispatch.
@@ -932,8 +1022,15 @@ async fn handle_bridge_message(
         let connection = connections.entry(window_id.clone()).or_default();
         connection.bridge_key = client.bridge_key.clone();
         connection.set_connection(Some(conn_id.to_string()));
+        let client_eval_blocked = client.eval_blocked;
         clients.insert(window_id.clone(), client);
-        println!("[connector][bridge] Registered window bridge: {window_id}");
+        if client_eval_blocked {
+            println!(
+                "[connector][bridge] Registered window bridge: {window_id} (CSP blocks eval; using native delivery)"
+            );
+        } else {
+            println!("[connector][bridge] Registered window bridge: {window_id}");
+        }
         return Some(window_id);
     }
 
@@ -986,30 +1083,183 @@ fn reject_connection_pending(pending: &PendingMap, conn_id: &str) {
     }
 }
 
-/// Pass code as JSON data. Template-literal interpolation would execute `${...}`
-/// from callers before the script itself and cannot be fixed by escaping ticks.
-fn eval_script(script: &str, id: &str, event_name: &str) -> String {
-    let script = serde_json::to_string(script).expect("strings serialize");
+/// One script in the forms the page can run it in.
+///
+/// Over the WebSocket the page compiles `ws` with `AsyncFunction`, which a
+/// Content Security Policy without `'unsafe-eval'` blocks. Native delivery
+/// (`webview.eval`, not subject to CSP) instead inlines each candidate as
+/// code, one eval per candidate in order; the first that parses runs, and a
+/// final step reports a syntax error with no effect when none parsed.
+#[derive(Clone, Debug)]
+pub struct PageScript {
+    ws: String,
+    candidates: Vec<InlineCandidate>,
+}
+
+#[derive(Clone, Debug)]
+struct InlineCandidate {
+    /// An expression; inlined as `async function(){ return (<expression>); }`.
+    expression: String,
+    /// Only usable when the page may compile strings (it calls eval itself).
+    needs_eval: bool,
+}
+
+impl PageScript {
+    /// A connector-built expression; the same source works in every form.
+    pub fn trusted(script: &str) -> Self {
+        Self {
+            ws: script.to_string(),
+            candidates: vec![InlineCandidate {
+                expression: script.to_string(),
+                needs_eval: false,
+            }],
+        }
+    }
+
+    /// `ws` compiles strings in the page; it is also the first native
+    /// candidate when eval is allowed. `inline` are CSP-safe fallbacks.
+    pub fn with_inline(ws: String, inline: Vec<String>) -> Self {
+        let mut candidates = vec![InlineCandidate {
+            expression: ws.clone(),
+            needs_eval: true,
+        }];
+        candidates.extend(inline.into_iter().map(|expression| InlineCandidate {
+            expression,
+            needs_eval: false,
+        }));
+        Self { ws, candidates }
+    }
+}
+
+/// Where a natively delivered script sends its result.
+enum NativeReply<'a> {
+    /// The page bridge's `__CONNECTOR_RUN__`, replying on its WebSocket.
+    Bridge,
+    /// A self-contained runner replying through a Tauri event.
+    Event(&'a str),
+}
+
+/// Native delivery scripts for tests; `event` selects the event runner.
+#[cfg(test)]
+pub(crate) fn test_native_scripts(
+    script: &PageScript,
+    id: &str,
+    event: Option<&str>,
+) -> Vec<String> {
+    match event {
+        Some(event) => native_scripts(script, id, &NativeReply::Event(event)),
+        None => native_scripts(script, id, &NativeReply::Bridge),
+    }
+}
+
+/// Node harness simulating a page whose CSP blocks string compilation when
+/// `strings` is false. Input: JSON `[{id, strings, scripts}]` on stdin.
+/// Each script is evaluated separately, like `webview.eval`; parse errors
+/// are skipped. Output: JSON map id -> reply payload.
+#[cfg(test)]
+pub(crate) const NATIVE_HARNESS: &str = r#"
+const vm = require('vm');
+const cases = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const out = {};
+const waits = [];
+for (const c of cases) {
+  const sandbox = { setTimeout, clearTimeout, Promise, console };
+  sandbox.window = sandbox;
+  sandbox.__CONNECTOR_EFFECTS__ = { mark() { return 0; }, unchangedSince() { return true; } };
+  waits.push(new Promise((resolve) => {
+    sandbox.__CONNECTOR_RUN__ = function (id, fn, o) {
+      Promise.resolve().then(fn).then(
+        (r) => resolve(out[c.id] = { id, result: r === undefined ? null : r }),
+        (e) => resolve(out[c.id] = { id, error: String(e && e.message || e), effect: o || 'none' }));
+    };
+    sandbox.__TAURI_INTERNALS__ = { invoke(cmd, args) {
+      const p = JSON.parse(args.payload);
+      resolve(out[c.id] = Object.assign({ event: args.event, result: null }, p));
+    } };
+    setTimeout(() => resolve(out[c.id] = out[c.id] || { timeout: true }), 2000).unref();
+  }));
+  const ctx = vm.createContext(sandbox, { codeGeneration: { strings: c.strings, wasm: false } });
+  for (const script of c.scripts) {
+    try { vm.runInContext(script, ctx); } catch (e) { if (!e || e.name !== 'SyntaxError') throw e; }
+  }
+}
+Promise.all(waits).then(() => { process.stdout.write(JSON.stringify(out)); process.exit(0); });
+"#;
+
+/// Run [`NATIVE_HARNESS`]; `None` when node is unavailable.
+#[cfg(test)]
+pub(crate) fn run_native_harness(cases: &serde_json::Value) -> Option<serde_json::Value> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("node")
+        .arg("-e")
+        .arg(NATIVE_HARNESS)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(cases.to_string().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Some(serde_json::from_slice(&output.stdout).unwrap())
+}
+
+/// Error reported, with no effect, when no candidate form parsed.
+pub const PAGE_SCRIPT_SYNTAX: &str = "page_script_syntax";
+
+/// Native eval scripts for one request: one per candidate, then a final step.
+/// Pass code as code and identity as JSON data; template literals are never
+/// used, so `${...}` in a script is not interpolated.
+fn native_scripts(script: &PageScript, id: &str, reply: &NativeReply<'_>) -> Vec<String> {
     let id = serde_json::to_string(id).expect("strings serialize");
-    let event_name = serde_json::to_string(event_name).expect("strings serialize");
-    format!(
-        r#"(async function(){{
-        const id={id}, eventName={event_name};
-        function send(payload){{
-            if(window.__TAURI_INTERNALS__)window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{{event:eventName,payload:JSON.stringify(payload)}});
-        }}
-        const fx=window.__CONNECTOR_EFFECTS__,mark=fx?fx.mark():0;
-        try{{
-            const AF=Object.getPrototypeOf(async function(){{}}).constructor;
-            const r=await new AF('return ('+{script}+')')();
-            let value;try{{JSON.stringify(r);value=r}}catch(_){{value=String(r)}}
-            send({{id:id,result:value}});
-        }}catch(e){{
-            const effect=fx&&fx.unchangedSince(mark)?'none':'possible';
-            send({{id:id,error:e.message||String(e),effect:effect}});
-        }}
-    }})()"#
-    )
+    let (runner, ready) = match reply {
+        NativeReply::Bridge => (
+            "window.__CONNECTOR_RUN__".to_string(),
+            "if(typeof window.__CONNECTOR_RUN__!=='function')return;",
+        ),
+        NativeReply::Event(event) => {
+            let event = serde_json::to_string(event).expect("strings serialize");
+            (
+                format!(
+                    r#"(function(id,fn,o){{var ev={event};function send(p){{var t=window.__TAURI_INTERNALS__;if(t)t.invoke('plugin:event|emit',{{event:ev,payload:JSON.stringify(p)}});}}var fx=window.__CONNECTOR_EFFECTS__,mark=fx?fx.mark():0;Promise.resolve().then(fn).then(function(r){{var v;try{{JSON.stringify(r);v=r}}catch(_){{v=String(r)}}send({{id:id,result:v}});}},function(e){{send({{id:id,error:(e&&e.message)||String(e),effect:o||(fx&&fx.unchangedSince(mark)?'none':'possible')}});}});}})"#
+                ),
+                "",
+            )
+        }
+    };
+    let registry = "var g=window.__CONNECTOR_PARSED__;if(!g){g=new Set();try{Object.defineProperty(window,'__CONNECTOR_PARSED__',{value:g,configurable:true})}catch(_){window.__CONNECTOR_PARSED__=g}}";
+    let blocked = "var b=window.__CONNECTOR_EVAL_BLOCKED__;if(b===undefined){try{Function('');b=false}catch(_){b=true}}if(b)return;";
+    let skip_eval = matches!(reply, NativeReply::Bridge);
+    let mut scripts: Vec<String> = script
+        .candidates
+        .iter()
+        // A bridge that reported a blocking CSP cannot use compiling forms.
+        .filter(|candidate| !(skip_eval && candidate.needs_eval))
+        .map(|candidate| {
+            let guard = if candidate.needs_eval { blocked } else { "" };
+            format!(
+                "(function(){{var id={id};{registry}if(g.has(id))return;{guard}{ready}g.add(id);{runner}(id,async function(){{return (\n{}\n);}});}})()",
+                candidate.expression
+            )
+        })
+        .collect();
+    let message = serde_json::to_string(&format!(
+        "{PAGE_SCRIPT_SYNTAX}: the script could not be parsed as an expression or an async function body (native delivery compiles scripts as code; under a Content Security Policy without 'unsafe-eval', multi-statement scripts need an explicit `return`)"
+    ))
+    .expect("strings serialize");
+    scripts.push(format!(
+        "(function(){{var id={id};var g=window.__CONNECTOR_PARSED__;if(g&&g.has(id)){{g.delete(id);return;}}{ready}{runner}(id,function(){{throw new SyntaxError({message});}},'none');}})()"
+    ));
+    scripts
 }
 
 fn now_ms() -> u64 {
@@ -1042,6 +1292,14 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
 
   const BRIDGE_PORT = {port};
   const WINDOW_ID = {window_id};
+  // A CSP without 'unsafe-eval' blocks string compilation; the plugin then
+  // delivers commands as native eval code that calls __CONNECTOR_RUN__.
+  const EVAL_BLOCKED = (function() {{
+    try {{ return Function('return 1')() !== 1; }} catch (_) {{ return true; }}
+  }})();
+  try {{
+    Object.defineProperty(window, '__CONNECTOR_EVAL_BLOCKED__', {{ value: EVAL_BLOCKED, configurable: true }});
+  }} catch (_) {{}}
   let BRIDGE_KEY = {bridge_key};
   let ws = null;
   let reconnectTimer = null;
@@ -1251,7 +1509,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
 
   function sendHello() {{
     try {{
-      ws.send(JSON.stringify({{type:'hello',bridgeKey:BRIDGE_KEY,id:'__bridge_hello__',windowId:WINDOW_ID}}));
+      ws.send(JSON.stringify({{type:'hello',bridgeKey:BRIDGE_KEY,id:'__bridge_hello__',windowId:WINDOW_ID,evalBlocked:EVAL_BLOCKED}}));
     }} catch (_) {{}}
   }}
   window.__CONNECTOR_BRIDGE_REBIND__ = function(key) {{
@@ -1282,6 +1540,20 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       sendResult(id, null, e.message || String(e), effect);
     }}
   }}
+
+  // Runner for natively delivered commands; `fn` is already compiled code.
+  function runNative(id, fn, effectOverride) {{
+    const effectMark = effectMonitor.mark();
+    Promise.resolve().then(fn).then(function(result) {{
+      sendResult(id, result, null);
+    }}, function(e) {{
+      const effect = effectOverride || (effectMonitor.unchangedSince(effectMark) ? 'none' : 'possible');
+      sendResult(id, null, (e && e.message) || String(e), effect);
+    }});
+  }}
+  try {{
+    Object.defineProperty(window, '__CONNECTOR_RUN__', {{ value: runNative, configurable: true }});
+  }} catch (_) {{}}
 
   function sendResult(id, result, error, effect) {{
     if (!ws || ws.readyState !== WebSocket.OPEN) {{
@@ -2306,6 +2578,7 @@ pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<Str
         app_handle: Arc::new(Mutex::new(None)),
         runtime: Arc::new(crate::runtime::RuntimeManager::default()),
         late_hook: Arc::new(StdMutex::new(None)),
+        native_sink: Arc::new(StdMutex::new(None)),
     };
     bridge.clients.lock().await.insert(
         "main".into(),
@@ -2315,6 +2588,7 @@ pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<Str
             bridge_key: crate::identity::bridge_key("main"),
             conn_id: "connection-a".into(),
             tx,
+            eval_blocked: false,
         },
     );
     (bridge, rx)
@@ -3340,7 +3614,7 @@ mod transport_tests {
             authorize: None,
         };
         let error = bridge
-            .execute_js_ws("write()", "main", &request)
+            .execute_js_ws(&PageScript::trusted("write()"), "main", &request)
             .await
             .unwrap_err();
         assert!(matches!(error, BridgeError::NotDispatched { .. }));
@@ -3518,10 +3792,29 @@ mod transport_tests {
         assert!(probe.status.success());
         let directory = std::env::temp_dir().join(format!("bridge-js-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
-        for (name, source) in [
-            ("init.js", bridge_init_script(9555, "main")),
-            ("eval.js", eval_script("(async () => 1)()", "id", "event")),
-        ] {
+        for (name, source) in [("init.js", bridge_init_script(9555, "main"))]
+            .into_iter()
+            .chain(
+                test_native_scripts(
+                    &PageScript::trusted("(async () => 1)()"),
+                    "id",
+                    Some("event"),
+                )
+                .into_iter()
+                .chain(test_native_scripts(
+                    &PageScript::with_inline("1".into(), vec!["2".into()]),
+                    "id",
+                    None,
+                ))
+                .enumerate()
+                .map(|(index, source)| {
+                    (
+                        Box::leak(format!("native-{index}.js").into_boxed_str()) as &str,
+                        source,
+                    )
+                }),
+            )
+        {
             let path = directory.join(name);
             std::fs::write(&path, source).unwrap();
             let check = std::process::Command::new("node")
@@ -3621,16 +3914,105 @@ process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].m
     }
 
     #[test]
-    fn eval_embeds_script_and_identity_as_json_data() {
-        let script = "({value: '\\u4f60', text: \"${globalThis.unintended++} ` \\\\ \\\"\"})\n";
+    fn native_scripts_embed_identity_as_json_data() {
+        let script = "({value: '\\u4f60', text: \"${globalThis.unintended++} ` \\\\ \\\"\"})";
         let id = "id'`\\\"\\n${unsafe}";
-        let event = "event-name";
-        let generated = eval_script(script, id, event);
-        assert!(generated.contains(&serde_json::to_string(script).unwrap()));
-        assert!(generated.contains(&format!("const id={}", serde_json::to_string(id).unwrap())));
+        let generated =
+            test_native_scripts(&PageScript::trusted(script), id, Some("event")).join("\n");
         assert!(
-            !generated.contains("+`"),
-            "script must not use interpolated template literals"
+            generated.contains(script),
+            "trusted code is inlined as code"
+        );
+        assert!(generated.contains(&format!("var id={}", serde_json::to_string(id).unwrap())));
+        assert!(
+            !generated.contains("+`")
+                && !generated.contains("AsyncFunction")
+                && !generated.contains("new Function"),
+            "native scripts must not compile strings or use template literals"
+        );
+        let cases = json!([{"id": "t", "strings": false, "scripts": test_native_scripts(&PageScript::trusted(script), id, Some("event"))}]);
+        let Some(out) = run_native_harness(&cases) else {
+            return;
+        };
+        assert_eq!(out["t"]["id"], json!(id));
+        assert_eq!(out["t"]["result"]["value"], json!("\u{4f60}"));
+    }
+
+    #[test]
+    fn trusted_scripts_run_under_a_csp_that_blocks_eval() {
+        let ok = PageScript::trusted("(async () => ({ n: 1 + 1 }))()");
+        let bad = PageScript::trusted(")(");
+        let throws = PageScript::trusted("(() => { throw new Error('boom') })()");
+        let cases = json!([
+            {"id": "ws-ok", "strings": false, "scripts": test_native_scripts(&ok, "a", None)},
+            {"id": "ev-ok", "strings": false, "scripts": test_native_scripts(&ok, "b", Some("evt"))},
+            {"id": "ws-bad", "strings": false, "scripts": test_native_scripts(&bad, "c", None)},
+            {"id": "ev-bad", "strings": false, "scripts": test_native_scripts(&bad, "d", Some("evt"))},
+            {"id": "throws", "strings": false, "scripts": test_native_scripts(&throws, "e", None)},
+        ]);
+        let Some(out) = run_native_harness(&cases) else {
+            eprintln!("node unavailable; skipping");
+            return;
+        };
+        assert_eq!(out["ws-ok"]["result"], json!({"n": 2}));
+        assert_eq!(out["ev-ok"]["result"], json!({"n": 2}));
+        assert_eq!(out["ev-ok"]["event"], json!("evt"));
+        for case in ["ws-bad", "ev-bad"] {
+            assert!(
+                out[case]["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains(PAGE_SCRIPT_SYNTAX),
+                "{case}: {}",
+                out[case]
+            );
+            assert_eq!(out[case]["effect"], json!("none"));
+        }
+        assert_eq!(out["throws"]["error"], json!("boom"));
+    }
+
+    #[tokio::test]
+    async fn eval_blocked_clients_receive_native_code_and_reply_over_the_socket() {
+        let (bridge, mut rx) = queued_bridge().await;
+        bridge
+            .clients
+            .lock()
+            .await
+            .get_mut("main")
+            .unwrap()
+            .eval_blocked = true;
+        let (sink_tx, mut sink_rx) = mpsc::unbounded_channel();
+        *bridge.native_sink.lock().unwrap() = Some(sink_tx);
+        assert_eq!(bridge.eval_blocked("main").await, Some(true));
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_with_request_id("1 + 1", 1000, "main", "native-id")
+                .await
+        });
+        let first = sink_rx.recv().await.unwrap();
+        assert!(first.contains("__CONNECTOR_RUN__") && first.contains("1 + 1"));
+        let done = sink_rx.recv().await.unwrap();
+        assert!(done.contains(PAGE_SCRIPT_SYNTAX));
+        assert!(rx.try_recv().is_err(), "no string command over the socket");
+        super::test_page_message(&bridge, json!({"id": "native-id", "result": 2})).await;
+        assert_eq!(task.await.unwrap().unwrap(), json!(2));
+    }
+
+    #[tokio::test]
+    async fn hello_records_eval_blocked_and_status_reports_it() {
+        let (bridge, _rx) = queued_bridge().await;
+        let key = crate::identity::bridge_key("main");
+        super::test_page_message(
+            &bridge,
+            json!({"type": "hello", "id": "__bridge_hello__", "bridgeKey": key, "windowId": "main", "evalBlocked": true}),
+        )
+        .await;
+        assert_eq!(bridge.eval_blocked("main").await, Some(true));
+        let status = bridge.status().await;
+        assert!(
+            status.to_string().contains("\"evalBlocked\":true"),
+            "{status}"
         );
     }
 }

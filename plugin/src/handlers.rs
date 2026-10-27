@@ -353,9 +353,10 @@ pub async fn execute_js(
     let timeout_ms = timeout_ms
         .unwrap_or(DEFAULT_EVAL_TIMEOUT_MS)
         .clamp(1, MAX_EVAL_TIMEOUT_MS);
-    let wrapped = eval_script(script, page_deadline_ms(timeout_ms));
+    let page_script = eval_page_script(script, page_deadline_ms(timeout_ms));
+    let request_id = uuid::Uuid::new_v4().to_string();
     match bridge
-        .execute_js_for_window_typed(&wrapped, timeout_ms, window_id)
+        .execute_page_script(&page_script, timeout_ms, window_id, &request_id, None)
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
@@ -380,6 +381,21 @@ fn eval_script(script: &str, page_deadline_ms: u64) -> String {
         include_str!("../js/eval.js").trim_end(),
         serde_json::to_string(script).expect("script serializes"),
         serde_json::to_string(EVAL_TIMEOUT_MARK).expect("mark serializes"),
+    )
+}
+
+/// The caller's script in every page form. When the page's CSP blocks
+/// string compilation the script is inlined as code: first as an expression,
+/// then as an async function body (statement lists need an explicit `return`).
+fn eval_page_script(script: &str, page_deadline_ms: u64) -> crate::bridge::PageScript {
+    let runner = include_str!("../js/eval.js").trim_end();
+    let mark = serde_json::to_string(EVAL_TIMEOUT_MARK).expect("mark serializes");
+    let inline = |open: &str, close: &str| {
+        format!("{runner}(async () => {open}\n{script}\n{close},{page_deadline_ms},{mark})")
+    };
+    crate::bridge::PageScript::with_inline(
+        eval_script(script, page_deadline_ms),
+        vec![inline("(", ")"), inline("{", "}")],
     )
 }
 
@@ -4460,6 +4476,52 @@ mod tests {
             1000,
         );
         assert_eq!(thrown.error.unwrap().code, "execution_failed");
+    }
+
+    #[test]
+    fn user_eval_runs_under_a_csp_that_blocks_eval() {
+        use serde_json::json;
+        let scripts = |source: &str, id: &str, event: Option<&str>| {
+            crate::bridge::test_native_scripts(&super::eval_page_script(source, 750), id, event)
+        };
+        let mut cases = Vec::new();
+        for (key, source) in [
+            ("expr", "1 + 1"),
+            ("await", "await Promise.resolve(3)"),
+            ("ret", "return 5"),
+            ("stmts", "const a = 1; return a + 1"),
+            ("object", "({ title: 'x' })"),
+            ("comment", "7 // trailing comment"),
+            ("bad", ")("),
+        ] {
+            cases.push(json!({"id": format!("ws-{key}"), "strings": false, "scripts": scripts(source, key, None)}));
+            cases.push(json!({"id": format!("ev-{key}"), "strings": false, "scripts": scripts(source, key, Some("evt"))}));
+        }
+        // With eval allowed the devtools-like completion value still works.
+        cases.push(json!({"id": "allowed", "strings": true, "scripts": scripts("const a = 1; a + 1", "z", Some("evt"))}));
+        let Some(out) = crate::bridge::run_native_harness(&json!(cases)) else {
+            eprintln!("node unavailable; skipping");
+            return;
+        };
+        for prefix in ["ws", "ev"] {
+            let get = |key: &str| out[format!("{prefix}-{key}")].clone();
+            assert_eq!(get("expr")["result"], json!(2), "{prefix}");
+            assert_eq!(get("await")["result"], json!(3), "{prefix}");
+            assert_eq!(get("ret")["result"], json!(5), "{prefix}");
+            assert_eq!(get("stmts")["result"], json!(2), "{prefix}");
+            assert_eq!(get("object")["result"], json!({"title": "x"}), "{prefix}");
+            assert_eq!(get("comment")["result"], json!(7), "{prefix}");
+            assert!(
+                get("bad")["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains(crate::bridge::PAGE_SCRIPT_SYNTAX),
+                "{prefix}: {}",
+                get("bad")
+            );
+            assert_eq!(get("bad")["effect"], json!("none"));
+        }
+        assert_eq!(out["allowed"]["result"], json!(2), "{}", out["allowed"]);
     }
 
     #[test]
