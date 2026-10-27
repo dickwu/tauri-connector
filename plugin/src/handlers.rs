@@ -353,13 +353,65 @@ pub async fn execute_js(
     let timeout_ms = timeout_ms
         .unwrap_or(DEFAULT_EVAL_TIMEOUT_MS)
         .clamp(1, MAX_EVAL_TIMEOUT_MS);
+    let wrapped = eval_script(script, page_deadline_ms(timeout_ms));
     match bridge
-        .execute_js_for_window_typed(script, timeout_ms, window_id)
+        .execute_js_for_window_typed(&wrapped, timeout_ms, window_id)
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
+        Err(e) => Response::outcome_error(id.to_string(), eval_error_outcome(e, timeout_ms)),
     }
+}
+
+/// Marks the page-side deadline rejection produced by `js/eval.js`.
+const EVAL_TIMEOUT_MARK: &str = "connector_eval_timeout";
+
+/// The page settles its own deadline first so the reply carries its effect
+/// evidence; the bridge deadline then only covers a blocked main thread.
+fn page_deadline_ms(timeout_ms: u64) -> u64 {
+    timeout_ms
+        .saturating_sub((timeout_ms / 4).min(1_000))
+        .max(1)
+}
+
+fn eval_script(script: &str, page_deadline_ms: u64) -> String {
+    format!(
+        "{}({},{page_deadline_ms},{})",
+        include_str!("../js/eval.js").trim_end(),
+        serde_json::to_string(script).expect("script serializes"),
+        serde_json::to_string(EVAL_TIMEOUT_MARK).expect("mark serializes"),
+    )
+}
+
+/// A script still pending at its deadline is a timeout, not an unknown
+/// transport failure. With no IPC/network dispatch observed the lease is
+/// released (effect none); otherwise it stays quarantined as before.
+fn eval_error_outcome(error: BridgeError, timeout_ms: u64) -> ExecutionOutcome {
+    let timed_out = matches!(&error, BridgeError::ExecutionFailed { error, .. }
+        if error.contains(EVAL_TIMEOUT_MARK));
+    let mut outcome = bridge_error_outcome(error);
+    if timed_out {
+        let none = outcome.effect == connector_client::outcome::EffectStatus::None;
+        let message = if none {
+            format!(
+                "Script did not settle within {timeout_ms} ms (execution_timeout). No IPC, mutating fetch/XHR, beacon or WebSocket send was observed, so nothing was quarantined; raise --timeout / timeout_ms for slow reads"
+            )
+        } else {
+            format!(
+                "Script did not settle within {timeout_ms} ms (execution_timeout) after it may have dispatched IPC or network effects; the resource stays quarantined until the result arrives or `resources release`"
+            )
+        };
+        outcome.error = Some(WorkflowError::new(
+            "execution_timeout",
+            "executing",
+            message,
+        ));
+        outcome.warnings.push(
+            "The page promise may still be running; work it does after the deadline is not observed"
+                .into(),
+        );
+    }
+    outcome
 }
 
 // ============ Resource quarantine ============
@@ -4170,6 +4222,55 @@ mod tests {
     };
     use crate::state::{PluginState, RefEntry};
     use std::path::Path;
+
+    #[test]
+    fn a_timed_out_read_only_eval_is_a_clear_timeout_without_quarantine() {
+        use crate::bridge::BridgeError;
+        use connector_client::outcome::{EffectStatus, ExecutionStatus};
+        let failed = |effect| BridgeError::ExecutionFailed {
+            request_id: "req".into(),
+            error: format!(
+                "{}: script still pending after 750 ms",
+                super::EVAL_TIMEOUT_MARK
+            ),
+            effect,
+        };
+        let outcome = super::eval_error_outcome(failed(EffectStatus::None), 1000);
+        assert_eq!(outcome.execution, ExecutionStatus::Failed);
+        assert_eq!(outcome.effect, EffectStatus::None);
+        let error = outcome.error.as_ref().unwrap();
+        assert_eq!(error.code, "execution_timeout");
+        assert!(error.message.contains("1000 ms"));
+        assert!(error.message.contains("nothing was quarantined"));
+        let response = crate::protocol::Response::outcome_error("id".into(), outcome);
+        assert!(!response.requires_quarantine());
+
+        let possible = super::eval_error_outcome(failed(EffectStatus::Possible), 1000);
+        assert_eq!(possible.error.as_ref().unwrap().code, "execution_timeout");
+        let response = crate::protocol::Response::outcome_error("id".into(), possible);
+        assert!(response.requires_quarantine());
+
+        // Other failures keep their codes.
+        let thrown = super::eval_error_outcome(
+            BridgeError::ExecutionFailed {
+                request_id: "req".into(),
+                error: "boom".into(),
+                effect: EffectStatus::None,
+            },
+            1000,
+        );
+        assert_eq!(thrown.error.unwrap().code, "execution_failed");
+    }
+
+    #[test]
+    fn the_page_deadline_precedes_the_bridge_deadline() {
+        assert_eq!(super::page_deadline_ms(1), 1);
+        assert_eq!(super::page_deadline_ms(1000), 750);
+        assert_eq!(super::page_deadline_ms(30_000), 29_000);
+        let script = super::eval_script("const a = 1; a", 750);
+        assert!(script.starts_with("// Runs a caller's") || script.contains("connectorEval"));
+        assert!(script.ends_with(r#"("const a = 1; a",750,"connector_eval_timeout")"#));
+    }
 
     #[test]
     fn hidden_pages_and_uniform_captures_warn_page_hidden() {

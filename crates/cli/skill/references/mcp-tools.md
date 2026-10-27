@@ -191,17 +191,17 @@ All shown JSON requires envelope authorization from the host adapter; no credent
 
 ### webview_execute_js
 
-Execute arbitrary JavaScript in the webview. Use IIFE for return values.
+Execute arbitrary JavaScript in the webview. The script may be an expression (`document.title`), a statement list whose last expression is the result (`const rows = document.querySelectorAll('tr'); rows.length`; `let`/`const` are block-scoped, so rerunning it does not redeclare), or an async function body that uses `return`/top-level `await` (`const r = await fetch('/x'); return r.status`). Expressions are tried first, so existing scripts keep their meaning.
 
 A script that throws or rejects reports `execution_failed`. Its `effect` is `none` -- and the window lease is released -- only when the page observed no backend-capable dispatch while it ran: no app IPC (`invoke`), no non-GET/HEAD/OPTIONS `fetch` or XHR, no `sendBeacon`, and no app WebSocket send. Anything else, including app background traffic during the script or an unobservable channel, reports `effect: possible` and quarantines the window until it is released with `resources` or the app restarts. Work scheduled to run after the rejection (timers, later event handlers) is not observed, and same-origin iframes are outside the monitor.
 
 | Param | Type | Required | Description |
 |---|---|---|---|
-| `script` | string | yes | JavaScript code. Wrap in `(() => { return value; })()` to get a return value. Empty scripts are rejected |
+| `script` | string | yes | JavaScript expression, statement list, or async function body (see above). Empty scripts are rejected |
 | `timeoutMs` | integer | no | Page-side deadline, 1–600000 ms (default 30000). The standalone MCP server waits 5 s longer |
 | `windowId` | string | | Target window |
 
-A timeout returns `outcome_unknown` with `outcome.dispatch.requestId` and quarantines the window. If the page finishes later, a success or an `effect: none` failure lifts that quarantine automatically; otherwise use `resources`.
+A promise still pending at the deadline fails with `execution_timeout` (the page enforces the deadline about 1 s, at most a quarter of `timeoutMs`, before the bridge does). Like any failure, `effect: none` releases the window and `effect: possible` quarantines it; the promise may keep running in the page and work it does afterwards is not observed. Only a page that never answers (blocked main thread, suspended webview) returns `outcome_unknown` with `outcome.dispatch.requestId` and quarantines the window. If the page finishes later, a success or an `effect: none` failure lifts that quarantine automatically; otherwise use `resources`.
 
 ### resources
 
