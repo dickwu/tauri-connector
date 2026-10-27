@@ -211,20 +211,21 @@ impl PluginState {
         let generation = DOM_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         entry.generation = generation;
         let mut cache = self.dom_cache.lock().await;
-        if let Some(previous) = cache.get(&entry.window_id) {
-            if previous.explicit && !entry.explicit {
-                // A background push only refreshes the raw DOM; the caller's
-                // snapshot and its @refs stay authoritative until they take a
-                // new snapshot (a navigation already invalidates the refs).
-                entry.snapshot = previous.snapshot.clone();
-                entry.snapshot_mode = previous.snapshot_mode.clone();
-                entry.refs = previous.refs.clone();
-                entry.meta = previous.meta.clone();
-                entry.timestamp = previous.timestamp;
-                entry.search_text = previous.search_text.clone();
-                entry.snapshot_id = previous.snapshot_id.clone();
-                entry.explicit = true;
-            }
+        if let Some(previous) = cache.get(&entry.window_id)
+            && previous.explicit
+            && !entry.explicit
+        {
+            // A background push only refreshes the raw DOM; the caller's
+            // snapshot and its @refs stay authoritative until they take a
+            // new snapshot (a navigation already invalidates the refs).
+            entry.snapshot = previous.snapshot.clone();
+            entry.snapshot_mode = previous.snapshot_mode.clone();
+            entry.refs = previous.refs.clone();
+            entry.meta = previous.meta.clone();
+            entry.timestamp = previous.timestamp;
+            entry.search_text = previous.search_text.clone();
+            entry.snapshot_id = previous.snapshot_id.clone();
+            entry.explicit = true;
         }
         cache.insert(entry.window_id.clone(), entry);
         generation
