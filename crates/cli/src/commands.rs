@@ -135,7 +135,10 @@ pub async fn snapshot(
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|data| serde_json::from_str::<RefMap>(&data).ok());
     let refs = merge_snapshot_refs(inline_refs, all_refs);
-    eprintln!("\n{}", ref_count_summary(inline_count, refs.len()));
+    eprintln!(
+        "\n{}",
+        ref_count_summary(&snapshot_mode, inline_count, refs.len())
+    );
 
     let snapshot_id = result
         .pointer("/meta/snapshotId")
@@ -159,7 +162,13 @@ fn merge_snapshot_refs(inline: RefMap, all: Option<RefMap>) -> RefMap {
     }
 }
 
-fn ref_count_summary(inline: usize, total: usize) -> String {
+fn ref_count_summary(mode: &str, inline: usize, total: usize) -> String {
+    if total == 0 && mode != "ai" {
+        // Only ai snapshots assign @eN refs; "0 refs captured" read like a failure.
+        return format!(
+            "No @eN refs: {mode} snapshots do not assign refs (use `snapshot -i` for clickable refs; earlier cached refs were cleared)"
+        );
+    }
     if total > inline {
         format!(
             "{total} refs captured ({inline} inline, {} in subtree files)",
@@ -1992,9 +2001,12 @@ fn format_resources(result: &Value) -> String {
             scopes.join(", ")
         ));
     }
+    // Identical lines (older plugins record one per settlement) print once
+    // with a count, in first-seen order.
+    let mut late_lines: Vec<(String, usize)> = Vec::new();
     for entry in result["lateSettlements"].as_array().into_iter().flatten() {
-        out.push_str(&format!(
-            "late result {}: {}{}\n",
+        let line = format!(
+            "late result {}: {}{}",
             entry["requestId"].as_str().unwrap_or("?"),
             entry["outcome"].as_str().unwrap_or("?"),
             if entry["releasedQuarantine"].as_bool() == Some(true) {
@@ -2002,7 +2014,18 @@ fn format_resources(result: &Value) -> String {
             } else {
                 ""
             }
-        ));
+        );
+        match late_lines.iter_mut().find(|(seen, _)| *seen == line) {
+            Some((_, count)) => *count += 1,
+            None => late_lines.push((line, 1)),
+        }
+    }
+    for (line, count) in late_lines {
+        if count > 1 {
+            out.push_str(&format!("{line} (x{count})\n"));
+        } else {
+            out.push_str(&format!("{line}\n"));
+        }
     }
     out
 }
@@ -2086,11 +2109,18 @@ mod tests {
         assert_eq!(merged.len(), 3);
         assert_eq!(merged["e0"].selector, "#a");
         assert_eq!(
-            super::ref_count_summary(1, merged.len()),
+            super::ref_count_summary("ai", 1, merged.len()),
             "3 refs captured (1 inline, 2 in subtree files)"
         );
         assert_eq!(super::merge_snapshot_refs(inline, None).len(), 1);
-        assert_eq!(super::ref_count_summary(4, 4), "4 refs captured");
+        assert_eq!(super::ref_count_summary("ai", 4, 4), "4 refs captured");
+        assert_eq!(super::ref_count_summary("ai", 0, 0), "0 refs captured");
+        let plain = super::ref_count_summary("accessibility", 0, 0);
+        assert!(
+            plain.starts_with("No @eN refs: accessibility snapshots"),
+            "{plain}"
+        );
+        assert!(plain.contains("snapshot -i"), "{plain}");
     }
 
     #[test]
@@ -2132,6 +2162,19 @@ mod tests {
             .ends_with("retake failed: capture_timeout"));
         assert!(super::screenshot_fallback_note(None).is_none());
         assert!(super::screenshot_fallback_note(Some(&serde_json::Value::Null)).is_none());
+    }
+
+    #[test]
+    fn repeated_late_results_print_once_with_a_count() {
+        let entry = json!({"requestId": "req-7", "outcome": "lost", "releasedQuarantine": false});
+        let text = super::format_resources(&json!({
+            "quarantined": [],
+            "lateSettlements": [entry.clone(), entry.clone(), entry,
+                {"requestId": "req-8", "outcome": "lost", "releasedQuarantine": false}]
+        }));
+        assert_eq!(text.matches("late result req-7").count(), 1, "{text}");
+        assert!(text.contains("late result req-7: lost (x3)\n"), "{text}");
+        assert!(text.contains("late result req-8: lost\n"), "{text}");
     }
 
     #[test]

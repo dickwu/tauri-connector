@@ -96,7 +96,26 @@ fn describe(id: &str, held: &Held) -> Option<Value> {
 }
 
 impl ArbiterState {
+    /// One history entry per request: a repeat settlement for the same
+    /// requestId (WebSocket and eval paths, or a retried watch) refreshes the
+    /// existing entry instead of adding an identical line. A settled outcome
+    /// is never downgraded to `lost`, and a released quarantine stays released.
     fn record_late(&mut self, request_id: &str, outcome: LateOutcome, released: bool) {
+        if let Some(index) = self.late.iter().position(|r| r.request_id == request_id) {
+            let mut record = self.late.remove(index).expect("index is in range");
+            let rank = |o: LateOutcome| match o {
+                LateOutcome::Lost => 0,
+                LateOutcome::Failed => 1,
+                LateOutcome::Succeeded | LateOutcome::FailedWithoutEffect => 2,
+            };
+            if rank(outcome) >= rank(record.outcome) {
+                record.outcome = outcome;
+            }
+            record.released |= released;
+            record.at_ms = now_ms();
+            self.late.push_back(record);
+            return;
+        }
         if self.late.len() >= LATE_HISTORY {
             self.late.pop_front();
         }
@@ -519,7 +538,28 @@ mod tests {
         assert_eq!(late[0]["requestId"], "req-late");
         assert_eq!(late[0]["outcome"], "failed_without_effect");
         assert_eq!(late[0]["releasedQuarantine"], true);
-        assert_eq!(late[1]["outcome"], "failed");
+        // The earlier `failed` settlement of the same request is folded into its line.
+        assert_eq!(late[1]["requestId"], "other");
+        assert_eq!(late.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn repeated_late_settlements_for_one_request_keep_one_history_line() {
+        let arbiter = ResourceArbiter::default();
+        let lease = arbiter.try_acquire(vec!["window/main".into()]).unwrap();
+        lease.quarantine_request("outcome_unknown", Some("req-dup"));
+        assert!(arbiter.settle_late("req-dup", LateOutcome::Succeeded));
+        assert!(!arbiter.settle_late("req-dup", LateOutcome::Succeeded));
+        assert!(!arbiter.settle_late("req-dup", LateOutcome::Lost));
+        assert!(!arbiter.settle_late("req-other", LateOutcome::Lost));
+        let late = arbiter.list()["lateSettlements"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(late.len(), 2, "{late:?}");
+        let dup = late.iter().find(|r| r["requestId"] == "req-dup").unwrap();
+        assert_eq!(dup["outcome"], "succeeded");
+        assert_eq!(dup["releasedQuarantine"], true);
     }
 
     #[test]
