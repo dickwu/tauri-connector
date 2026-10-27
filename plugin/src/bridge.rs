@@ -3169,7 +3169,7 @@ mod transport_tests {
     async fn ws_timeout_does_not_attempt_eval_replay() {
         let (bridge, mut rx) = queued_bridge().await;
         let error = bridge
-            .execute_js_for_window("slowWrite()", 1, "main")
+            .execute_js_for_window("slowWrite()", 100, "main")
             .await
             .unwrap_err();
         let command: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
@@ -3198,13 +3198,13 @@ mod transport_tests {
             }
         }));
         let error = bridge
-            .execute_js_for_window_typed("slowWrite()", 1, "main")
+            .execute_js_for_window_typed("slowWrite()", 100, "main")
             .await
             .unwrap_err();
-        assert!(matches!(
-            error,
-            BridgeError::DispatchedOutcomeUnknown { .. }
-        ));
+        assert!(
+            matches!(error, BridgeError::DispatchedOutcomeUnknown { .. }),
+            "{error:?}"
+        );
         let command: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
         let id = command["id"].as_str().unwrap().to_string();
         let mut message = page_result;
