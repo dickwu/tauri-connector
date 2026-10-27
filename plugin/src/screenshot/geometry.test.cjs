@@ -17,6 +17,9 @@ const { chromium } = require('playwright');
     // the native window, and gives up (unsettled) within its budget otherwise.
     const steady=await invoke({cmd:'frame_ready',expectedViewport:{width:800,height:600}});
     assert.equal(steady.settled,true);
+    // A title bar or safe-area inset makes the CSS viewport shorter than the window.
+    assert.equal((await invoke({cmd:'frame_ready',expectedViewport:{width:800,height:628}})).settled,true);
+    assert.equal((await invoke({cmd:'frame_ready',expectedViewport:{width:800,height:500},settleMs:150})).settled,false);
     const stale=await invoke({cmd:'frame_ready',expectedViewport:{width:1920,height:600},settleMs:200});
     assert.equal(stale.settled,false);
     assert(stale.settleFrames>=1);

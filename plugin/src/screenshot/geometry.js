@@ -31,7 +31,9 @@
       const expected=args.expectedViewport&&Number.isFinite(args.expectedViewport.width)&&Number.isFinite(args.expectedViewport.height)?args.expectedViewport:null;
       const budget=Number.isFinite(args.settleMs)?Math.max(0,Math.min(args.settleMs,1000)):400;
       const sample=()=>({w:innerWidth,h:innerHeight,d:devicePixelRatio,r:document.readyState});
-      const fits=s=>!expected||(Math.abs(s.w-expected.width)<=2&&Math.abs(s.h-expected.height)<=2);
+      // Width must match the window; height may be smaller (title bar or
+      // safe-area insets) but never larger than the window's inner height.
+      const fits=s=>!expected||(Math.abs(s.w-expected.width)<=2&&s.h<=expected.height+2);
       const until=performance.now()+budget;
       let prev=sample(),frames=0,settled=false;
       while(performance.now()<until){
