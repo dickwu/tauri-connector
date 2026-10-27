@@ -372,7 +372,9 @@ tauri-connector find "Submit" -s text
 ```bash
 manage_window(action: "list")
 manage_window(action: "resize", width: 1024, height: 768)
+manage_window(action: "focus")          # bring a background window to the front natively
 tauri-connector windows
+tauri-connector windows focus           # same; also --bring-to-front on eval, wait, screenshot
 tauri-connector resize 1024 768 --window-id settings
 ```
 

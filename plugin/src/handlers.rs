@@ -1830,6 +1830,38 @@ pub async fn window_resize(
     }
 }
 
+/// Unminimize, show and focus a window natively, then give the compositor a
+/// moment to deliver a frame. Works while the page is hidden because it never
+/// touches the webview.
+pub(crate) async fn bring_window_to_front(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let focus = window.set_focus().map_err(|e| e.to_string());
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    focus
+}
+
+pub async fn window_focus(id: &str, window_id: &str, app: Option<&tauri::AppHandle>) -> Response {
+    let Some(app) = app else {
+        return Response::error(id.to_string(), "App not initialized");
+    };
+    let Some(window) = app.get_webview_window(window_id) else {
+        return Response::error(id.to_string(), format!("Window '{window_id}' not found"));
+    };
+    let focus = bring_window_to_front(&window).await;
+    Response::success(
+        id.to_string(),
+        serde_json::json!({
+            "windowId": window_id,
+            "focused": window.is_focused().unwrap_or(false),
+            "visible": window.is_visible().unwrap_or(false),
+            "minimized": window.is_minimized().unwrap_or(false),
+            "focusError": focus.err(),
+            "note": "A locked or sleeping screen still renders no frames until it is unlocked",
+        }),
+    )
+}
+
 // ============ IPC Operations ============
 
 pub async fn backend_state(id: &str, app: Option<&tauri::AppHandle>) -> Response {

@@ -644,6 +644,11 @@ async fn handle_manage_window(client: &ConnectorClient, args: &Value) -> Result<
                 .send(json!({ "type": "window_info", "window_id": wid }))
                 .await
         }
+        "focus" => {
+            client
+                .send(json!({ "type": "window_focus", "window_id": wid }))
+                .await
+        }
         "resize" => {
             let width = num_arg(args, "width").ok_or("Missing 'width'")?;
             let height = num_arg(args, "height").ok_or("Missing 'height'")?;

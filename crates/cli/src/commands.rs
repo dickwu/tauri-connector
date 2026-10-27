@@ -843,6 +843,38 @@ pub async fn windows(client: &ConnectorClient) -> Result<(), String> {
     Ok(())
 }
 
+fn window_focus_error(error: String) -> String {
+    if error.contains("unknown variant") || error.contains("window_focus") {
+        format!(
+            "{error}\n\nhint: window focus needs tauri-plugin-connector 0.17.4 or newer in the app"
+        )
+    } else {
+        error
+    }
+}
+
+/// `windows focus`: natively unminimize, show and focus the window.
+pub async fn window_focus(client: &ConnectorClient) -> Result<(), String> {
+    let result = client
+        .send(json!({ "type": "window_focus", "window_id": window_id() }))
+        .await
+        .map_err(window_focus_error)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).unwrap_or_default()
+    );
+    Ok(())
+}
+
+/// `--bring-to-front` on eval/wait: focus the window before the command.
+pub async fn focus_window(client: &ConnectorClient) -> Result<(), String> {
+    client
+        .send(json!({ "type": "window_focus", "window_id": window_id() }))
+        .await
+        .map(|_| ())
+        .map_err(window_focus_error)
+}
+
 /// Take a screenshot and save to file.
 #[allow(clippy::too_many_arguments)]
 pub async fn screenshot(

@@ -243,9 +243,9 @@ function createServer() {
 
   server.tool(
     'manage_window',
-    'List windows, get window info, or resize a window',
+    'List windows, get window info, resize a window, or focus it (unminimize, show and focus natively)',
     {
-      action: z.enum(['list', 'info', 'resize']),
+      action: z.enum(['list', 'info', 'resize', 'focus']),
       windowId: z.string().optional(),
       width: z.number().optional(),
       height: z.number().optional(),
@@ -256,6 +256,8 @@ function createServer() {
         cmd = { type: 'window_list' }
       } else if (action === 'info') {
         cmd = { type: 'window_info', window_id: windowId ?? 'main' }
+      } else if (action === 'focus') {
+        cmd = { type: 'window_focus', window_id: windowId ?? 'main' }
       } else {
         if (!width || !height) return textResult('Error: width and height required for resize')
         cmd = { type: 'window_resize', window_id: windowId ?? 'main', width, height }

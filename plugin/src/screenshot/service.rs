@@ -446,7 +446,7 @@ async fn handle_inner(
             let visibility = page_visibility(bridge, window).await;
             match hidden_window_error(visibility.as_deref()) {
                 Some(message) => Err(format!("window_not_visible: {message} ({e})")),
-                None => Err(e),
+                None => Err(no_frame_error(&e)),
             }
         }
         other => other,
@@ -612,8 +612,16 @@ pub fn artifact_handle(operation: &str, args: &Value, state: &PluginState) -> Re
 /// screen-locked window, so waiting for a frame can only time out.
 pub(crate) fn hidden_window_error(visibility: Option<&str>) -> Option<String> {
     (visibility == Some("hidden")).then(|| {
-        "The window's page is hidden (minimized, on another Space or desktop, fully covered, or the screen is locked or asleep), so the webview renders no frames to capture. Bring the window to the front and retry, or pass --bring-to-front (MCP: bringToFront: true) to let the connector unminimize, show and focus it first; a locked or sleeping screen must be unlocked".to_string()
+        "The window's page is hidden (minimized, on another Space or desktop, fully covered, or the screen is locked or asleep), so the webview renders no frames to capture. Bring it to the front natively with `tauri-connector windows focus` (MCP: manage_window action \"focus\"), or pass --bring-to-front (MCP: bringToFront: true), then retry; a locked or sleeping screen must be unlocked".to_string()
     })
+}
+
+/// A capture that got no animation frame from a page that does not report
+/// itself hidden: still explain the background-window cause and remedy.
+pub(crate) fn no_frame_error(error: &str) -> String {
+    format!(
+        "{error}: the webview rendered no frame in time. A background, minimized, covered or screen-locked window usually stops rendering; run `tauri-connector windows focus` (MCP: manage_window action \"focus\") or pass --bring-to-front (MCP: bringToFront: true) and retry"
+    )
 }
 
 /// How long a screenshot waits for the page runtime to come back after a
@@ -656,10 +664,7 @@ async fn bring_to_front(app: &tauri::AppHandle, window: &str) -> Result<(), Stri
     let handle = app
         .get_webview_window(window)
         .ok_or_else(|| format!("No window labelled {window}"))?;
-    let _ = handle.unminimize();
-    let _ = handle.show();
-    let _ = handle.set_focus();
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    let _ = crate::handlers::bring_window_to_front(&handle).await;
     Ok(())
 }
 

@@ -531,6 +531,7 @@ async fn handle_command_unleased(
         // Window Management
         Command::WindowList => handlers::window_list(&id, app).await,
         Command::WindowInfo { window_id } => handlers::window_info(&id, &window_id, app).await,
+        Command::WindowFocus { window_id } => handlers::window_focus(&id, &window_id, app).await,
         Command::WindowResize {
             window_id,
             width,

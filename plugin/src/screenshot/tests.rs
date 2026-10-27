@@ -377,4 +377,8 @@ fn a_hidden_page_names_the_window_and_the_remedy() {
     assert!(message.contains("locked"));
     assert!(super::service::hidden_window_error(Some("visible")).is_none());
     assert!(super::service::hidden_window_error(None).is_none());
+    assert!(message.contains("windows focus"));
+    let no_frame = super::service::no_frame_error("capture_not_ready: render_frame_timeout");
+    assert!(no_frame.starts_with("capture_not_ready: render_frame_timeout"));
+    assert!(no_frame.contains("windows focus") && no_frame.contains("--bring-to-front"));
 }

@@ -206,9 +206,9 @@ pub fn tool_definitions() -> serde_json::Value {
                 connector_client::inspection::picker_schema()
             ),
             tool_def("manage_window",
-                "List windows, get window info, or resize a window. resize requires width and height",
+                "List windows, get window info, resize a window, or focus it. resize requires width and height. focus natively unminimizes, shows and focuses the window (no webview needed), so a hidden page that fails captures with window_not_visible or render_frame_timeout renders again; a locked screen must still be unlocked",
                 json!({ "type": "object", "properties": {
-                    "action": { "type": "string", "enum": ["list", "info", "resize"] },
+                    "action": { "type": "string", "enum": ["list", "info", "resize", "focus"] },
                     "windowId": { "type": "string" },
                     "width": { "type": "number" },
                     "height": { "type": "number" }

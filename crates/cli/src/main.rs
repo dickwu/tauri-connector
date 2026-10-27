@@ -47,6 +47,15 @@ struct Cli {
 }
 
 #[derive(Subcommand, Debug, Clone)]
+enum WindowsAction {
+    /// List windows (default)
+    List,
+    /// Natively unminimize, show and focus the window (global --window-id),
+    /// so a hidden page renders frames again; needs no webview round trip
+    Focus,
+}
+
+#[derive(Subcommand, Debug, Clone)]
 enum ResourcesAction {
     /// Show quarantined scopes with their requestIds and reasons (default)
     List,
@@ -158,6 +167,9 @@ enum Commands {
         /// Page-side deadline in milliseconds (default 30000, max 600000)
         #[arg(long)]
         timeout: Option<u64>,
+        /// Unminimize, show and focus the window first
+        #[arg(long)]
+        bring_to_front: bool,
     },
     /// List or release resource quarantines left by unknown outcomes
     Resources {
@@ -249,8 +261,11 @@ enum Commands {
     },
     /// Show internal webview bridge status
     Bridge,
-    /// List windows
-    Windows,
+    /// List windows, or `windows focus` to bring one to the front
+    Windows {
+        #[command(subcommand)]
+        action: Option<WindowsAction>,
+    },
     /// Check for updates and self-update
     Update {
         /// Just check, don't install
@@ -344,6 +359,9 @@ struct WaitArgs {
     /// Timeout in milliseconds
     #[arg(long, default_value_t = 5000)]
     timeout: u64,
+    /// Unminimize, show and focus the window first
+    #[arg(long)]
+    bring_to_front: bool,
 }
 
 #[derive(clap::Args)]
@@ -1089,18 +1107,29 @@ async fn run_cli(cli: Cli) {
             function,
             state,
             timeout,
+            bring_to_front,
         }) => {
-            commands::wait(
-                &client,
-                selector.as_deref(),
-                text.as_deref(),
-                url.as_deref(),
-                load_state.as_deref(),
-                function.as_deref(),
-                state.as_deref(),
-                timeout,
-            )
-            .await
+            let focused = if bring_to_front {
+                commands::focus_window(&client).await
+            } else {
+                Ok(())
+            };
+            match focused {
+                Ok(()) => {
+                    commands::wait(
+                        &client,
+                        selector.as_deref(),
+                        text.as_deref(),
+                        url.as_deref(),
+                        load_state.as_deref(),
+                        function.as_deref(),
+                        state.as_deref(),
+                        timeout,
+                    )
+                    .await
+                }
+                Err(e) => Err(e),
+            }
         }
         Commands::Locator(LocatorArgs {
             role,
@@ -1137,8 +1166,20 @@ async fn run_cli(cli: Cli) {
             )
             .await
         }
-        Commands::Eval { script, timeout } => {
-            commands::eval_js(&client, &script.join(" "), timeout).await
+        Commands::Eval {
+            script,
+            timeout,
+            bring_to_front,
+        } => {
+            let focused = if bring_to_front {
+                commands::focus_window(&client).await
+            } else {
+                Ok(())
+            };
+            match focused {
+                Ok(()) => commands::eval_js(&client, &script.join(" "), timeout).await,
+                Err(e) => Err(e),
+            }
         }
         Commands::Resources { action } => match action.unwrap_or(ResourcesAction::List) {
             ResourcesAction::List => commands::resources(&client, "list", None, false).await,
@@ -1417,7 +1458,10 @@ async fn run_cli(cli: Cli) {
         Commands::State => commands::state(&client).await,
         Commands::Status { .. } => unreachable!(),
         Commands::Bridge => commands::bridge_status(&client).await,
-        Commands::Windows => commands::windows(&client).await,
+        Commands::Windows { action } => match action.unwrap_or(WindowsAction::List) {
+            WindowsAction::List => commands::windows(&client).await,
+            WindowsAction::Focus => commands::window_focus(&client).await,
+        },
         Commands::Snapshots { .. } => unreachable!(),
         Commands::Skills { .. } => unreachable!(),
         Commands::Update { .. } => unreachable!(),
@@ -1597,6 +1641,34 @@ mod workflow_cli_tests {
                 .unwrap()
                 .to_string();
         assert!(err.contains("html5dnd"), "{err}");
+    }
+
+    #[test]
+    fn windows_focus_and_bring_to_front_flags_parse() {
+        let cli = Cli::try_parse_from(["tauri-connector", "windows"]).unwrap();
+        assert!(matches!(cli.command, Commands::Windows { action: None }));
+        let cli = Cli::try_parse_from(["tauri-connector", "windows", "focus"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Windows {
+                action: Some(WindowsAction::Focus)
+            }
+        ));
+        let cli =
+            Cli::try_parse_from(["tauri-connector", "eval", "--bring-to-front", "1+1"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Eval {
+                bring_to_front: true,
+                ..
+            }
+        ));
+        let cli =
+            Cli::try_parse_from(["tauri-connector", "wait", "#app", "--bring-to-front"]).unwrap();
+        let Commands::Wait(args) = cli.command else {
+            panic!("not a wait command")
+        };
+        assert!(args.bring_to_front);
     }
 
     #[test]

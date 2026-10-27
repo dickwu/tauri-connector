@@ -300,14 +300,16 @@ Picker cannot modify an existing workflow spec, run key, original verdict, resum
 
 ### manage_window
 
-List windows, get info about a specific window, or resize.
+List windows, get info about a specific window, resize, or focus.
 
 | Param | Type | Required | Description |
 |---|---|---|---|
-| `action` | string | yes | `list`, `info`, `resize` |
-| `windowId` | string | | Target window (for `info` and `resize`) |
+| `action` | string | yes | `list`, `info`, `resize`, `focus` |
+| `windowId` | string | | Target window (for `info`, `resize` and `focus`) |
 | `width` | number | | New width (for `resize`). Always pass both dimensions: the standalone server rejects a missing one, the embedded server silently falls back to 800x600 |
 | `height` | number | | New height (for `resize`) |
+
+`focus` (plugin 0.17.4+) unminimizes, shows and focuses the window natively, without a webview round trip, so it works while the page is hidden and captures fail with `window_not_visible` or `capture_not_ready: render_frame_timeout`. It returns `{windowId, focused, visible, minimized, focusError}`. A locked or sleeping screen must still be unlocked.
 
 ---
 

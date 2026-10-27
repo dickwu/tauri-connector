@@ -242,6 +242,12 @@ pub enum Command {
         width: u32,
         height: u32,
     },
+    /// Natively unminimize, show and focus a window (no webview round trip),
+    /// so a hidden page starts rendering frames again.
+    WindowFocus {
+        #[serde(default = "default_window")]
+        window_id: String,
+    },
 
     // --- IPC ---
     BackendState,
@@ -675,6 +681,23 @@ mod workflow_protocol_tests {
     use super::*;
     use connector_client::outcome::{EffectStatus, ExecutionOutcome, WorkflowError};
     use serde_json::json;
+
+    #[test]
+    fn window_focus_defaults_to_the_main_window() {
+        let request: Request =
+            serde_json::from_value(json!({"id":"f1","type":"window_focus"})).unwrap();
+        let Command::WindowFocus { window_id } = request.command else {
+            panic!("wrong command");
+        };
+        assert_eq!(window_id, "main");
+        let request: Request = serde_json::from_value(
+            json!({"id":"f2","type":"window_focus","window_id":"secondary"}),
+        )
+        .unwrap();
+        assert!(
+            matches!(request.command, Command::WindowFocus { window_id } if window_id == "secondary")
+        );
+    }
 
     #[test]
     fn workflow_preserves_camel_case_service_arguments() {

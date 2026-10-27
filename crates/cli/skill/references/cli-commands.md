@@ -428,7 +428,7 @@ The command prints the final resolved path and `sha256` as JSON. Annotated scree
 
 **What `webview_native` does not show.** WebKit's snapshot API (`WKWebView takeSnapshot`) renders the page's layers itself and skips some compositor-only effects: `backdrop-filter` (frosted glass, blur behind sheets and toolbars) comes out unblurred or transparent, and the native title bar, vibrancy and window shadow are not included. When you need the pixels as the user sees them, use `--source window_native` (MCP `source: "window_native"`), which captures the composited window (it needs screen-recording permission on macOS).
 
-**Hidden windows.** A minimized, fully covered, other-Space or screen-locked window renders no frames, so a protected capture fails with `window_not_visible` naming the remedy instead of returning a blank or stale image. Bring the window to the front, or pass `--bring-to-front` (MCP `bringToFront: true`) to let the connector unminimize, show and focus it first. A locked or sleeping screen must be unlocked; the first capture right after `--bring-to-front` can occasionally time out while the window comes up, so retry once.
+**Hidden windows.** A minimized, fully covered, other-Space or screen-locked window renders no frames, so a protected capture fails with `window_not_visible` naming the remedy instead of returning a blank or stale image. Run `tauri-connector windows focus` (MCP `manage_window(action: "focus")`), or pass `--bring-to-front` (MCP `bringToFront: true`; also on `eval` and `wait`) to let the connector unminimize, show and focus it first. A locked or sleeping screen must be unlocked; the first capture right after `--bring-to-front` can occasionally time out while the window comes up, so retry once.
 
 **Right after a reload.** After a reload or hot reload the capture waits (up to 5 s, within the request timeout) for the new page runtime, then for the viewport to stay unchanged across frames and match the window's logical inner size (up to about 400 ms), so it does not return the old frame or a transient size such as a 1920 px innerWidth. `consistency.viewportSettled: false` means the viewport never settled in that budget (for example a webview that does not fill its window); the capture is still consistent with the probed viewport. If the page reloads during a capture the CLI captures the new page once more; a second change is reported as `capture_context_changed`.
 
@@ -547,6 +547,8 @@ tauri-connector eval --timeout 120000 "await longTask()"
 
 The script may be an expression, a statement list whose last expression is printed (`eval "const n = document.querySelectorAll('li').length; n * 2"`), or an async function body with `return`/`await`; expressions are tried first, so existing scripts keep their meaning.
 
+`--bring-to-front` (0.17.4+) runs `windows focus` on the target window first, for apps that sit in the background.
+
 `--timeout <ms>` sets the page-side deadline (default 30000, max 600000); the CLI waits 5 s longer so the plugin's typed timeout, with its requestId, always arrives. An empty script is rejected before anything is sent. A read-only promise (no IPC or write observed) still pending at the deadline fails with `execution_timeout` and releases the window. A script that may have dispatched IPC or a write, or a page that never answers, leaves the outcome unknown and quarantines the window until its late result settles it or `resources release` -- see `resources`.
 
 ### resources
@@ -585,6 +587,7 @@ tauri-connector wait [selector] [FLAGS]
 | `--fn` | | JavaScript expression/function/body that returns truthy |
 | `--state` | `attached` (applied by the plugin when omitted) | Selector state: `attached`, `detached`, `visible`, `hidden` |
 | `--timeout` | 5000 | Timeout in ms |
+| `--bring-to-front` | false | Unminimize, show and focus the window first (0.17.4+) |
 
 Examples:
 ```bash
@@ -712,11 +715,14 @@ tauri-connector events stop
 
 ### windows
 
-List all open windows.
+List all open windows, or bring one to the front.
 
 ```bash
-tauri-connector windows
+tauri-connector windows                      # list (same as `windows list`)
+tauri-connector windows focus [--window-id <id>]   # 0.17.4+: unminimize, show and focus natively
 ```
+
+`windows focus` works through the native window, not the webview, so it succeeds even when the page is hidden and every webview call times out (`window_not_visible`, `capture_not_ready: render_frame_timeout`). It prints `{windowId, focused, visible, minimized, focusError}`. A locked or sleeping screen still renders nothing until it is unlocked. It needs tauri-plugin-connector 0.17.4+ in the app; older plugins answer with an unknown-variant error and a hint.
 
 ### resize
 

@@ -348,6 +348,7 @@ pub(crate) async fn dispatch_raw(
             match action.as_str() {
                 "list" => handlers::window_list(id, app).await,
                 "info" => handlers::window_info(id, &wid, app).await,
+                "focus" => handlers::window_focus(id, &wid, app).await,
                 "resize" => {
                     let width = num_arg(args, "width").unwrap_or(800.0) as u32;
                     let height = num_arg(args, "height").unwrap_or(600.0) as u32;
