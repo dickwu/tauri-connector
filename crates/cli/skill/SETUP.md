@@ -207,7 +207,7 @@ If a client cannot reach the embedded HTTP server, register the standalone binar
 
 ## Step 6b: Enable application-owned workflows (optional, plugin >= 0.15)
 
-The `workflow_*` MCP tools and `tauri-connector workflow` run known multi-step sequences inside the app. They stay locked until the host configures a workflow token of **at least 32 bytes** -- a shorter value is ignored as if no token were set. `workflow_capabilities` answers without a token and reports `authentication.configured`; `run`, `get`, `cancel` and `resume` return `unauthorized` until the token is configured on the host and supplied by the client.
+The `workflow_*` MCP tools and `tauri-connector workflow` run known multi-step sequences inside the app. They stay locked until the host configures a workflow token of **at least 32 bytes** -- a shorter value is ignored (with a stderr warning) as if no token were set. Discovery, `status`, `runtime-health`, rich screenshots, picker and capture work without a token on a tokenless debug host. `workflow_capabilities` answers without a token and reports `authentication.configured`; `run`, `get`, `cancel` and `resume` return `unauthorized` until the token is configured on the host and supplied by the client.
 
 Generate a token for the development session without printing it, then start the app and every client from the same environment:
 

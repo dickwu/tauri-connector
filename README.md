@@ -123,7 +123,7 @@ tauri-connector workflow capabilities
 tauri-connector workflow --help
 ```
 
-The host must configure a token of at least 32 bytes before starting the plugin. `init()` and `ConnectorBuilder::new()` read `TAURI_CONNECTOR_WORKFLOW_TOKEN`; hosts can instead pass a secret obtained from their own configuration to `ConnectorBuilder::workflow_token(token)`. For a local development session, generate a token without printing it:
+Workflows require the host to configure a token of at least 32 bytes before starting the plugin; a shorter value is ignored with a warning on stderr. Without a host token the plugin runs in debug mode: discovery (`app_identity`), `status`, `runtime-health`, rich screenshots (`--source`), the element picker and IPC capture work unauthenticated; only `workflow_*` run/get/cancel/resume need the token. Once the host configures a token, those inspection APIs require it too, and `status` shows such an instance as `unauthorized` rather than `stale`. `init()` and `ConnectorBuilder::new()` read `TAURI_CONNECTOR_WORKFLOW_TOKEN`; hosts can instead pass a secret obtained from their own configuration to `ConnectorBuilder::workflow_token(token)`. For a local development session, generate a token without printing it:
 
 ```bash
 export TAURI_CONNECTOR_WORKFLOW_TOKEN="$(openssl rand -hex 32)"
@@ -194,7 +194,7 @@ See the [CLI reference](skill/references/cli-commands.md#application-owned-workf
 
 Inspection protocol v1 adds authenticated application identity and health, app-owned active element selection, protected screenshots, and IPC capture v2. Package versions remain unchanged. The CLI, direct WS and both MCP entry points share the same host services. [Migration notes](docs/upgrade-migration.md) describe deliberate discovery and authorization changes; [implementation status](docs/upgrade-implementation-status.md) separates unit, integration, native platform and CI evidence.
 
-Configure the existing host token and provide it through `TAURI_CONNECTOR_WORKFLOW_TOKEN` for CLI/standalone MCP. Select the intended instance with `--app-instance-id`, or discover a unique authenticated application for the current canonical workspace. Explicit identity constraints never fall back to another process.
+If the host configured a workflow token, provide it through `TAURI_CONNECTOR_WORKFLOW_TOKEN` for CLI/standalone MCP; a tokenless debug host needs none. Select the intended instance with `--app-instance-id`, or discover a unique authenticated application for the current canonical workspace. Explicit identity constraints never fall back to another process.
 
 ```bash
 tauri-connector identity

@@ -227,7 +227,7 @@ No parameters.
 
 Start a real, application-owned element picker, or read/cancel its retained handle. The user points at an element and confirms with the primary pointer button or Enter; Escape and a visible cancel control end the interaction. Starting selection installs input guards and an overlay. It does not ask the user to inject JavaScript or reuse the legacy pointed-element cache.
 
-All actions require `authToken` in the call envelope. The CLI and standalone MCP supply `TAURI_CONNECTOR_WORKFLOW_TOKEN` privately. The same token represents one authorization domain across connections; a connection ID is not a separate user identity.
+When the host configured a workflow token, all actions require `authToken` in the call envelope; a tokenless debug host accepts them without one. The CLI and standalone MCP supply `TAURI_CONNECTOR_WORKFLOW_TOKEN` privately. The same token represents one authorization domain across connections; a connection ID is not a separate user identity.
 
 | Param | Actions | Default / contract |
 | --- | --- | --- |

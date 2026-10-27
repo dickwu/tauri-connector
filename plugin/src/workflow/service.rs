@@ -25,6 +25,23 @@ use crate::{
 };
 
 const MAX_RUNS: usize = 1000;
+const MIN_TOKEN_BYTES: usize = 32;
+
+/// Accept a workflow token only when it is long enough, and say so when a
+/// configured token is ignored instead of silently running without one.
+fn valid_token(token: Option<String>, source: &str) -> Option<String> {
+    match token {
+        Some(token) if token.len() >= MIN_TOKEN_BYTES => Some(token),
+        Some(token) if !token.is_empty() => {
+            eprintln!(
+                "[connector] ignoring {source}: workflow tokens need at least {MIN_TOKEN_BYTES} bytes (got {}); workflows stay disabled and inspection runs unauthenticated",
+                token.len()
+            );
+            None
+        }
+        _ => None,
+    }
+}
 const MAX_LIVE_RUNS: usize = 20;
 
 type BackendFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, WorkflowError>> + Send + 'a>>;
@@ -223,11 +240,10 @@ impl WorkflowService {
         Self {
             resources: ResourceArbiter::default(),
             directory,
-            token: std::sync::Mutex::new(
-                std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN")
-                    .ok()
-                    .filter(|s| s.len() >= 32),
-            ),
+            token: std::sync::Mutex::new(valid_token(
+                std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN").ok(),
+                "TAURI_CONNECTOR_WORKFLOW_TOKEN",
+            )),
             authorization_generation: AtomicU64::new(1),
             app_instance_id: crate::identity::app_instance_id().to_owned(),
             journal: OnceCell::new(),
@@ -240,7 +256,7 @@ impl WorkflowService {
 
     pub fn set_token(&self, token: Option<String>) {
         let mut current = self.token.lock().unwrap_or_else(|p| p.into_inner());
-        let next = token.filter(|s| s.len() >= 32);
+        let next = valid_token(token, "ConnectorBuilder::workflow_token");
         if *current != next {
             self.authorization_generation.fetch_add(1, Ordering::SeqCst);
             *current = next;
@@ -249,9 +265,15 @@ impl WorkflowService {
 
     /// Inspection objects are scoped to the host credential generation, never
     /// to a transport connection or a copy of the credential in page state.
+    ///
+    /// A host without a workflow token runs in debug mode: discovery, health,
+    /// rich screenshots, picker and capture stay usable without credentials.
+    /// Once the host configures a token, inspection requires it.
     pub(crate) fn inspection_authorize(&self, args: &Value) -> Result<u64, Value> {
         let generation = self.authorization_generation.load(Ordering::SeqCst);
-        self.authorize(args)?;
+        if self.token_configured() {
+            self.authorize(args)?;
+        }
         if !self.inspection_authorized(generation) {
             return Err(error(
                 "unauthorized",
@@ -262,8 +284,15 @@ impl WorkflowService {
     }
 
     pub(crate) fn inspection_authorized(&self, generation: u64) -> bool {
-        let token = self.token.lock().unwrap_or_else(|p| p.into_inner());
-        token.is_some() && self.authorization_generation.load(Ordering::SeqCst) == generation
+        self.authorization_generation.load(Ordering::SeqCst) == generation
+    }
+
+    /// Whether the host configured a workflow token of at least 32 bytes.
+    pub(crate) fn token_configured(&self) -> bool {
+        self.token
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
     }
 
     /// Hydrate persisted unknown effects before changing the UI. Fresh Windows
@@ -1949,15 +1978,44 @@ mod tests {
         assert!(service.inspection_authorized(generation));
         service.set_token(Some(PRINCIPAL.into()));
         assert!(service.inspection_authorized(generation));
-        service.set_token(None);
-        assert!(!service.inspection_authorized(generation));
         assert!(
             service
-                .inspection_authorize(&json!({"authToken":PRINCIPAL}))
+                .inspection_authorize(&json!({"authToken":"wrong-token-wrong-token-wrong-token"}))
                 .is_err()
         );
+        assert!(service.inspection_authorize(&json!({})).is_err());
+        service.set_token(None);
+        assert!(!service.inspection_authorized(generation));
         service.set_token(Some(PRINCIPAL.into()));
         assert!(!service.inspection_authorized(generation));
+    }
+
+    #[test]
+    fn tokenless_debug_host_allows_inspection_but_not_workflows() {
+        let service = WorkflowService::new(
+            std::env::temp_dir().join(format!("inspection-debug-{}", uuid::Uuid::new_v4())),
+        );
+        service.set_token(None);
+        let generation = service.inspection_authorize(&json!({})).unwrap();
+        assert!(service.inspection_authorized(generation));
+        assert_eq!(
+            service.authorize(&json!({})).unwrap_err()["code"],
+            "unauthorized"
+        );
+        // Configuring a token later revokes tokenless inspection objects.
+        service.set_token(Some("t".repeat(32)));
+        assert!(!service.inspection_authorized(generation));
+        assert!(service.inspection_authorize(&json!({})).is_err());
+    }
+
+    #[test]
+    fn short_tokens_are_ignored() {
+        assert_eq!(valid_token(Some("short".into()), "test"), None);
+        assert_eq!(valid_token(Some(String::new()), "test"), None);
+        assert_eq!(
+            valid_token(Some("k".repeat(32)), "test").as_deref(),
+            Some("k".repeat(32).as_str())
+        );
     }
 
     #[test]

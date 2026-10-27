@@ -90,9 +90,35 @@ pub struct InstanceStatus {
     pub instance: ConnectorInstance,
     pub pid_alive: bool,
     pub ws_reachable: bool,
+    /// The endpoint answered but refused the identity handshake because the
+    /// host requires a workflow token the client did not supply. Such an
+    /// instance is alive, not stale.
+    #[serde(default)]
+    pub unauthorized: bool,
     pub stale: bool,
     pub error: Option<String>,
 }
+
+impl InstanceStatus {
+    /// Human label: `ready`, `unauthorized`, or `stale`.
+    pub fn state(&self) -> &'static str {
+        if self.stale {
+            "stale"
+        } else if self.unauthorized {
+            "unauthorized"
+        } else {
+            "ready"
+        }
+    }
+}
+
+/// Whether an identity error means the host refused our credentials (the
+/// endpoint is alive) rather than being unreachable.
+pub fn is_unauthorized_error(error: &str) -> bool {
+    error.contains("\"code\":\"unauthorized\"") || error.starts_with("unauthorized")
+}
+
+const UNAUTHORIZED_HINT: &str = "the app requires a workflow token; set TAURI_CONNECTOR_WORKFLOW_TOKEN to the host's token, or pass --port to connect without identity verification";
 
 /// Resolve every candidate against its live identity. Explicit constraints never fall back.
 pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConnection, String> {
@@ -182,12 +208,19 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
     }
     let hints = discover_instances(&opts.cwd, app_id.as_deref(), pid_file.as_deref());
     let mut candidates = Vec::new();
+    let mut unauthorized_ports = Vec::new();
     let mut endpoints = HashSet::new();
     for hint in hints {
         if !pid_is_alive(hint.pid) || !endpoints.insert((host.clone(), hint.ws_port)) {
             continue;
         }
-        if let Ok(identity) = endpoint_identity(&host, hint.ws_port, 1500).await {
+        let identity = endpoint_identity(&host, hint.ws_port, 1500).await;
+        if let Err(error) = &identity {
+            if is_unauthorized_error(error) {
+                unauthorized_ports.push(hint.ws_port);
+            }
+        }
+        if let Ok(identity) = identity {
             if validate_identity(
                 &identity,
                 app_id.as_deref(),
@@ -251,6 +284,11 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
                 }
             }
         }
+    }
+    if candidates.is_empty() && !unauthorized_ports.is_empty() {
+        return Err(format!(
+            "unauthorized: running app on port(s) {unauthorized_ports:?} refused identity; {UNAUTHORIZED_HINT}"
+        ));
     }
     select_unique(candidates)
 }
@@ -336,21 +374,27 @@ pub async fn instance_statuses(
     let mut statuses = Vec::with_capacity(instances.len());
     for instance in instances {
         let pid_alive = pid_is_alive(instance.pid);
-        let (ws_reachable, error) = if pid_alive {
+        let (ws_reachable, unauthorized, error) = if pid_alive {
             match endpoint_identity(host, instance.ws_port, 1_000)
                 .await
                 .and_then(|identity| validate_identity(&identity, app_id, None, Some(&instance)))
             {
-                Ok(()) => (true, None),
-                Err(e) => (false, Some(e)),
+                Ok(()) => (true, false, None),
+                Err(e) if is_unauthorized_error(&e) => (
+                    true,
+                    true,
+                    Some(format!("unauthorized: {UNAUTHORIZED_HINT}")),
+                ),
+                Err(e) => (false, false, Some(e)),
             }
         } else {
-            (false, Some("process is not running".to_string()))
+            (false, false, Some("process is not running".to_string()))
         };
         statuses.push(InstanceStatus {
             instance,
             pid_alive,
             ws_reachable,
+            unauthorized,
             stale: !pid_alive || !ws_reachable,
             error,
         });
@@ -523,5 +567,44 @@ mod tests {
             instance.snapshots_dir(),
             PathBuf::from("/tmp/logs/snapshots")
         );
+    }
+
+    #[test]
+    fn unauthorized_identity_is_alive_not_stale() {
+        let wire =
+            r#"{"code":"unauthorized","message":"Workflow credential is missing or invalid"}"#;
+        assert!(is_unauthorized_error(wire));
+        assert!(is_unauthorized_error("unauthorized: refused"));
+        assert!(!is_unauthorized_error(
+            "identity_unavailable: handshake timed out"
+        ));
+        let instance = ConnectorInstance {
+            pid: 42,
+            ws_port: 9555,
+            mcp_port: None,
+            bridge_port: None,
+            app_name: None,
+            app_id: None,
+            app_instance_id: None,
+            log_dir: None,
+            exe: None,
+            started_at: None,
+            pid_file: PathBuf::from("/tmp/.connector.json"),
+        };
+        let status = InstanceStatus {
+            instance,
+            pid_alive: true,
+            ws_reachable: true,
+            unauthorized: true,
+            stale: false,
+            error: None,
+        };
+        assert_eq!(status.state(), "unauthorized");
+        let legacy: InstanceStatus = serde_json::from_value(serde_json::json!({
+            "instance": serde_json::to_value(&status.instance).unwrap(),
+            "pid_alive": true, "ws_reachable": false, "stale": true, "error": null
+        }))
+        .unwrap();
+        assert_eq!(legacy.state(), "stale");
     }
 }

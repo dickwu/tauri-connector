@@ -12,7 +12,7 @@ Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-
 | `TAURI_CONNECTOR_PORT` | discovered | Plugin WebSocket port |
 | `TAURI_CONNECTOR_PID_FILE` | | Explicit `.connector.json` path |
 | `TAURI_CONNECTOR_APP_ID` | | Filter discovered instances by app identifier |
-| `TAURI_CONNECTOR_WORKFLOW_TOKEN` | | Host token (>= 32 bytes) for workflows and rich inspection/picker/capture APIs; base capabilities need none |
+| `TAURI_CONNECTOR_WORKFLOW_TOKEN` | | Host token (>= 32 bytes) for workflows; rich inspection/picker/capture APIs need it only when the host configured one |
 
 ---
 

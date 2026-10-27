@@ -879,8 +879,8 @@ async fn run_cli(cli: Cli) {
             } else {
                 println!("instances:");
                 for s in statuses {
+                    let state = s.state();
                     let i = s.instance;
-                    let state = if s.stale { "stale" } else { "ready" };
                     println!(
                         "  {state} {}:{} pid={} app={} id={} file={}",
                         host,
