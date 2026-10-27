@@ -118,6 +118,41 @@ impl InstanceStatus {
     }
 }
 
+/// The instance a connection found by port scan (no PID file), as a status
+/// row, unless a PID-file row already covers that port. Lets `status` list
+/// every app it can connect to, even from an unrelated working directory.
+/// Its `instance.pid_file` is empty.
+pub fn port_scan_status(
+    resolved: &ResolvedConnection,
+    statuses: &[InstanceStatus],
+) -> Option<InstanceStatus> {
+    if resolved.instance.is_some() || statuses.iter().any(|s| s.instance.ws_port == resolved.port) {
+        return None;
+    }
+    let identity = resolved.identity.as_ref()?;
+    Some(InstanceStatus {
+        instance: ConnectorInstance {
+            pid: identity.pid,
+            ws_port: resolved.port,
+            mcp_port: None,
+            bridge_port: None,
+            app_name: None,
+            app_id: Some(identity.app_id.clone()),
+            app_instance_id: Some(identity.app_instance_id.clone()),
+            log_dir: None,
+            exe: None,
+            started_at: Some(identity.started_at),
+            pid_file: PathBuf::new(),
+        },
+        pid_alive: true,
+        ws_reachable: true,
+        unauthorized: false,
+        legacy_plugin: false,
+        stale: false,
+        error: None,
+    })
+}
+
 /// Whether an identity error means the host refused our credentials (the
 /// endpoint is alive) rather than being unreachable.
 pub fn is_unauthorized_error(error: &str) -> bool {
@@ -608,6 +643,35 @@ fn pid_is_alive(_pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_port_scanned_connection_is_listed_as_an_instance() {
+        let identity = AppIdentity {
+            app_instance_id: "inst-1".into(),
+            app_id: "com.example.strata".into(),
+            pid: 4242,
+            started_at: 7,
+            workspace_id: None,
+            workspace_path: None,
+            inspection_protocol_version: 1,
+            workflow_protocol_version: None,
+        };
+        let resolved = ResolvedConnection {
+            host: "127.0.0.1".into(),
+            port: 9561,
+            source: ConnectionSource::PortScan,
+            instance: None,
+            identity: Some(identity),
+        };
+        let row = port_scan_status(&resolved, &[]).expect("listed");
+        assert_eq!(row.state(), "ready");
+        assert_eq!(row.instance.ws_port, 9561);
+        assert_eq!(row.instance.pid, 4242);
+        assert_eq!(row.instance.app_id.as_deref(), Some("com.example.strata"));
+        assert!(row.instance.pid_file.as_os_str().is_empty());
+        // Not duplicated when a PID-file row already names the port.
+        assert!(port_scan_status(&resolved, &[row]).is_none());
+    }
 
     #[test]
     fn candidates_include_documented_locations() {

@@ -878,7 +878,7 @@ async fn run_cli(cli: Cli) {
             .clone()
             .or_else(|| std::env::var("TAURI_CONNECTOR_HOST").ok())
             .unwrap_or_else(|| DEFAULT_HOST.to_string());
-        let statuses = discovery::instance_statuses(
+        let mut statuses = discovery::instance_statuses(
             &connection_options.cwd,
             connection_options.app_id.as_deref(),
             connection_options.pid_file.as_deref(),
@@ -888,6 +888,12 @@ async fn run_cli(cli: Cli) {
         let resolved = discovery::resolve_connection(connection_options.clone())
             .await
             .ok();
+        if let Some(row) = resolved
+            .as_ref()
+            .and_then(|r| discovery::port_scan_status(r, &statuses))
+        {
+            statuses.push(row);
+        }
         if *json {
             println!(
                 "{}",
@@ -917,7 +923,11 @@ async fn run_cli(cli: Cli) {
                         i.pid,
                         i.app_name.as_deref().unwrap_or("?"),
                         i.app_id.as_deref().unwrap_or("?"),
-                        i.pid_file.display(),
+                        if i.pid_file.as_os_str().is_empty() {
+                            "(port scan)".to_string()
+                        } else {
+                            i.pid_file.display().to_string()
+                        },
                     );
                     if let Some(error) = s.error {
                         println!("    {error}");
