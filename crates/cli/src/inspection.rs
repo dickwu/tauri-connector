@@ -220,6 +220,33 @@ impl ScreenshotOptions {
         Ok(())
     }
 }
+fn write_export(path: &str, bytes: &[u8], overwrite: bool) -> Result<(), String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true);
+    if overwrite {
+        if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err("refusing screenshot export through symlink".into());
+        }
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+    // Default umask permissions: a screenshot is a debug artifact the user
+    // opens in other tools, not a secret (redaction already ran).
+    let mut file = options.open(path).map_err(|e| export_error(path, &e))?;
+    use std::io::Write;
+    file.write_all(bytes)
+        .map_err(|e| format!("capture succeeded but explicit export failed: {e}"))
+}
+
+fn export_error(path: &str, error: &std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::AlreadyExists {
+        format!("capture succeeded but explicit export failed: {path} already exists; pass --overwrite to replace it")
+    } else {
+        format!("capture succeeded but explicit export failed: {error}")
+    }
+}
+
 pub async fn screenshot(
     client: &ConnectorClient,
     args: Value,
@@ -235,27 +262,7 @@ pub async fn screenshot(
             .and_then(Value::as_str)
             .ok_or("captured image unavailable for explicit export")?;
         let bytes = crate::commands::b64_decode(encoded)?;
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true);
-        if overwrite {
-            if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
-                return Err("refusing screenshot export through symlink".into());
-            }
-            options.create(true).truncate(true);
-        } else {
-            options.create_new(true);
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options
-            .open(path)
-            .map_err(|e| format!("capture succeeded but explicit export failed: {e}"))?;
-        use std::io::Write;
-        file.write_all(&bytes)
-            .map_err(|e| format!("capture succeeded but explicit export failed: {e}"))?;
+        write_export(path, &bytes, overwrite)?;
         report["exportedPath"] = json!(path);
     }
     if let Some(object) = report.as_object_mut() {
@@ -274,6 +281,35 @@ mod cursor_contract_tests {
     struct QueryCli {
         #[command(flatten)]
         query: Query,
+    }
+
+    #[test]
+    fn an_existing_export_path_names_the_overwrite_flag() {
+        let exists = std::io::Error::from(std::io::ErrorKind::AlreadyExists);
+        let message = export_error("/tmp/shot.png", &exists);
+        assert!(message.contains("/tmp/shot.png already exists"));
+        assert!(message.contains("pass --overwrite"));
+        let other = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert!(!export_error("/tmp/shot.png", &other).contains("--overwrite"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn screenshot_exports_are_readable_like_other_user_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("connector-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.png");
+        let _ = std::fs::remove_file(&path);
+        let path = path.to_str().unwrap().to_owned();
+        write_export(&path, b"png", false).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_ne!(mode, 0o600, "exports follow the umask, not owner-only");
+        let refused = write_export(&path, b"png", false).unwrap_err();
+        assert!(refused.contains("pass --overwrite"));
+        write_export(&path, b"png2", true).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"png2");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
