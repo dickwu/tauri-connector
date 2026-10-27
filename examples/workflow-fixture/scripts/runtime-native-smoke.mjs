@@ -47,7 +47,7 @@ try {
   assert.ok(anonymous.error);results.tests.push({id:'UP-T036',name:'anonymous rich health rejected',passed:true});
   const cold=await inspect('runtime_health',{windowId:'main'});
   assert.equal(cold.checks.bridge.connected,true);assert.equal(cold.checks.bridge.status,'responsive');
-  assert.equal(cold.checks.runtime.status,'unavailable');assert.equal(cold.diagnostics.installAttempts,0);
+  assert.equal(cold.checks.runtime.status,'not_installed');assert.equal(cold.conclusion,'runtime_not_installed');assert.equal(cold.diagnostics.installAttempts,0);
   results.tests.push({id:'UP-T033',name:'native read-only probe does not install missing runtime',passed:true});
   let picker=await inspect('webview_select_element',{action:'start',requestKey:randomUUID(),captureScreenshot:false});
   const until=Date.now()+6000;
