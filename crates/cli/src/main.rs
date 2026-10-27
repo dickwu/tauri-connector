@@ -1436,6 +1436,9 @@ WORKFLOWS:
 CONNECTION:
   Resolves the connector endpoint as:
   --host/--port > TAURI_CONNECTOR_* env > .connector.json > port scan
+  Every command uses the same discovery as `status`: a verified live
+  .connector.json under the cwd or its ancestors (incl. src-tauri/target),
+  else the single verified running app (several: ambiguous_app).
 
 STATUS:
   status [--json]                    Show discovered instances and selected endpoint

@@ -1,6 +1,6 @@
 # CLI Command Reference
 
-Complete reference for the `tauri-connector` CLI binary. Commands resolve the connection as `--host/--port` > `TAURI_CONNECTOR_*` env > nearby `.connector.json` > port scan.
+Complete reference for the `tauri-connector` CLI binary. Commands resolve the connection as `--host/--port` > `TAURI_CONNECTOR_*` env > nearby `.connector.json` > port scan. Every command (not only `status`) accepts a live `.connector.json` found under the working directory or its ancestors (including `src-tauri/target`) once the endpoint proves it is that process, even when the app runs from another directory; from an unrelated directory it selects the single verified running app and reports `ambiguous_app` when there are several. `--app-id`, `--app-instance-id` and `--pid-file` never fall back.
 
 Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-cli --release`
 

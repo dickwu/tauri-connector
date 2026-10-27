@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
+import {coldRuntime} from './fixture-readiness.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 
@@ -10,7 +11,7 @@ export async function waitForColdDocument(rpc,oldEpoch) {
   assert.equal(typeof oldEpoch,'string','the previous document identity must be known before reload');
   for(let attempt=0;attempt<100;attempt++) {
     const health=await rpc.inspect('runtime_health',{timeoutMs:1000});
-    if(health.checks.bridge.status==='responsive'&&health.conclusion==='runtime_missing') {
+    if(health.checks.bridge.status==='responsive'&&coldRuntime(health)) {
       const page=await rpc.js("({epoch:window.__CONNECTOR_BOOTSTRAP__?.pageEpoch,ready:document.readyState==='complete',fixture:!!window.__WORKFLOW_FIXTURE__&&!!document.querySelector('#upgrade-fixture')})");
       if(page.epoch&&page.epoch!==oldEpoch&&page.ready&&page.fixture)return {health,epoch:page.epoch};
     }

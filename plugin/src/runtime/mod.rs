@@ -57,4 +57,4 @@ pub fn install_script(configuration: &serde_json::Value) -> String {
     )
 }
 
-pub const PROBE: &str = "/*__CONNECTOR_RUNTIME_COMMAND__*/(()=>{if(window.top!==window)return {available:false,reason:'subframe'};const b=window.__CONNECTOR_BOOTSTRAP__;return {available:!!b,pageEpoch:b?.pageEpoch,suspended:b?.suspended,origin:location.origin,url:String(location.href),runtime:window.__CONNECTOR_INSPECTION_RUNTIME__?.status()||null}})()";
+pub const PROBE: &str = "/*__CONNECTOR_RUNTIME_COMMAND__*/(()=>{if(window.top!==window)return {available:false,reason:'subframe'};const b=window.__CONNECTOR_BOOTSTRAP__;return {available:!!b,pageEpoch:b?.pageEpoch,suspended:b?.suspended,origin:location.origin,url:String(location.href),readyState:document.readyState,runtime:window.__CONNECTOR_INSPECTION_RUNTIME__?.status()||null}})()";

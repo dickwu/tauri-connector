@@ -6,7 +6,9 @@ import {inspectionTargetReady} from '../examples/workflow-fixture/scripts/fixtur
 test('Native capture readiness requires a responsive document, not a connected socket',()=>{
   assert.equal(inspectionTargetReady({checks:{bridge:{connected:true,status:'unavailable'}},conclusion:'runtime_target_unavailable'}),false);
   assert.equal(inspectionTargetReady({checks:{bridge:{connected:true,status:'responsive'}},conclusion:'runtime_probe_not_completed'}),false);
+  assert.equal(inspectionTargetReady({checks:{bridge:{status:'responsive'}},conclusion:'runtime_not_installed'}),true);
   assert.equal(inspectionTargetReady({checks:{bridge:{status:'responsive'}},conclusion:'runtime_missing'}),true);
+  assert.equal(inspectionTargetReady({checks:{bridge:{status:'responsive'}},conclusion:'runtime_starting'}),false);
   assert.equal(inspectionTargetReady({checks:{bridge:{status:'responsive'}},conclusion:'runtime_responsive'}),true);
   assert.equal(inspectionTargetReady(null),false);
 });
@@ -15,7 +17,7 @@ test('UP-T105 cold preparation rejects the old epoch and incomplete replacement 
   const pages=[{epoch:'old',ready:true,fixture:true},{epoch:'new',ready:false,fixture:true},{epoch:'new',ready:true,fixture:false},{epoch:'new',ready:true,fixture:true}];
   let inspections=0,reads=0;
   const rpc={
-    async inspect(operation){assert.equal(operation,'runtime_health');inspections++;return {checks:{bridge:{status:'responsive'}},conclusion:'runtime_missing',diagnostics:{installSuccesses:0}};},
+    async inspect(operation){assert.equal(operation,'runtime_health');inspections++;return {checks:{bridge:{status:'responsive'}},conclusion:'runtime_not_installed',diagnostics:{installSuccesses:0}};},
     async js(){return pages[reads++];},
   };
   const result=await waitForColdDocument(rpc,'old');

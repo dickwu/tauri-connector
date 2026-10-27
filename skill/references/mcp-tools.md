@@ -169,7 +169,7 @@ Get computed CSS properties for a CSS-selected element.
 
 ### app_identity and runtime_health
 
-`app_identity` requires `authToken` and returns current application-instance/workspace identity. `runtime_health` accepts `authToken`, `windowId` (default `main`), `depth` (`transport`, `bridge`, `runtime`; default `runtime`) and `timeoutMs` (100–10000; default 2000). Transport, bridge and runtime results are separate; a reachable socket does not prove a ready page. Health is bounded observation: it does not reload a page, retry a write, change a workflow verdict or release quarantine. Anonymous base capabilities remain minimal and do not expose workspace paths or page/capture content.
+`app_identity` requires `authToken` and returns current application-instance/workspace identity. `runtime_health` accepts `authToken`, `windowId` (default `main`), `depth` (`transport`, `bridge`, `runtime`; default `runtime`) and `timeoutMs` (100–10000; default 2000). Transport, bridge and runtime results are separate; a reachable socket does not prove a ready page. The inspection runtime installs lazily on the first inspection command, so a loaded page without it reports `runtime_not_installed` (normal cold state; plugins before 0.17.3 said `runtime_missing`). A page still loading, or a bridge not yet connected shortly after launch, reports `runtime_starting` with `retryAfterMs`. Health is bounded observation: it does not reload a page, retry a write, change a workflow verdict or release quarantine. Anonymous base capabilities remain minimal and do not expose workspace paths or page/capture content.
 
 ### ipc_capture and ipc_query
 

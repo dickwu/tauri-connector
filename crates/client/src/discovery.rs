@@ -242,8 +242,17 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
             identity,
         });
     }
+    let constrained = app_id.is_some() || expected_instance.is_some() || pid_file.is_some();
     let hints = discover_instances(&opts.cwd, app_id.as_deref(), pid_file.as_deref());
+    // Tier 1: endpoints that match an explicit constraint or this workspace.
     let mut candidates = Vec::new();
+    // Tier 2: a live PID file found near the working directory whose endpoint
+    // proves it is that exact process. `status` lists these as ready, so every
+    // command must be able to use them too (e.g. from the repo root while the
+    // app's working directory is `src-tauri`).
+    let mut nearby = Vec::new();
+    // Tier 3: any other verified endpoint; used only when it is the only one.
+    let mut others = Vec::new();
     let mut unauthorized_ports = Vec::new();
     let mut legacy_ports = Vec::new();
     let mut endpoints = HashSet::new();
@@ -267,21 +276,23 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
                 Some(&hint),
             )
             .is_ok()
-                && (app_id.is_some()
-                    || expected_instance.is_some()
-                    || pid_file.is_some()
-                    || identity
-                        .workspace_path
-                        .as_deref()
-                        .is_some_and(|path| workspace_matches(&opts.cwd, path)))
             {
-                candidates.push(ResolvedConnection {
+                let in_workspace = identity
+                    .workspace_path
+                    .as_deref()
+                    .is_some_and(|path| workspace_matches(&opts.cwd, path));
+                let candidate = ResolvedConnection {
                     host: host.clone(),
                     port: hint.ws_port,
                     source: ConnectionSource::PidFile,
                     instance: Some(hint),
                     identity: Some(identity),
-                });
+                };
+                if constrained || in_workspace {
+                    candidates.push(candidate);
+                } else {
+                    nearby.push(candidate);
+                }
             }
         }
     }
@@ -306,23 +317,37 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
                     None,
                 )
                 .is_ok()
-                    && (app_id.is_some()
-                        || expected_instance.is_some()
-                        || identity
-                            .workspace_path
-                            .as_deref()
-                            .is_some_and(|path| workspace_matches(&opts.cwd, path)))
                 {
-                    candidates.push(ResolvedConnection {
+                    let in_workspace = identity
+                        .workspace_path
+                        .as_deref()
+                        .is_some_and(|path| workspace_matches(&opts.cwd, path));
+                    let candidate = ResolvedConnection {
                         host: host.clone(),
                         port,
                         source: ConnectionSource::PortScan,
                         instance: None,
                         identity: Some(identity),
-                    });
+                    };
+                    if constrained || in_workspace {
+                        candidates.push(candidate);
+                    } else {
+                        others.push(candidate);
+                    }
                 }
             }
         }
+    }
+    if candidates.is_empty() {
+        candidates = nearby;
+    }
+    if candidates.is_empty() && others.len() == 1 && !constrained {
+        // Exactly one verified app is running and nothing ties the working
+        // directory to another one: select it, as `status` does.
+        candidates = others;
+    } else if candidates.is_empty() && others.len() > 1 {
+        // Several unrelated apps: report them instead of a bare app_not_found.
+        return select_unique(others);
     }
     if candidates.is_empty() && !unauthorized_ports.is_empty() {
         return Err(format!(

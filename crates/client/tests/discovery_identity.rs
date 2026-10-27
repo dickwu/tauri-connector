@@ -217,3 +217,76 @@ async fn a_silent_endpoint_is_not_mistaken_for_a_legacy_plugin() {
     assert_eq!(statuses[0].state(), "stale");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// Answer `app_identity` as a 0.16+ plugin whose process runs in `workspace`.
+async fn spawn_plugin_with_identity(workspace: PathBuf) -> u16 {
+    use futures_util::{SinkExt, StreamExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let workspace = workspace.clone();
+            tokio::spawn(async move {
+                let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
+                    return;
+                };
+                while let Some(Ok(message)) = ws.next().await {
+                    let Ok(text) = message.to_text() else {
+                        continue;
+                    };
+                    let Ok(request) = serde_json::from_str::<serde_json::Value>(text) else {
+                        continue;
+                    };
+                    let reply = serde_json::json!({"id":request["id"],"result":{
+                        "appInstanceId":"nearby-instance","appId":"com.example.nearby",
+                        "pid":std::process::id(),"startedAt":1,
+                        "workspacePath":workspace,"inspectionProtocolVersion":1}});
+                    let _ = ws
+                        .send(tokio_tungstenite::tungstenite::Message::Text(
+                            reply.to_string().into(),
+                        ))
+                        .await;
+                }
+            });
+        }
+    });
+    port
+}
+
+#[tokio::test]
+async fn a_live_pid_file_below_the_working_directory_routes_every_command() {
+    // R2 regression: the app runs with cwd `src-tauri`, so its workspace does
+    // not contain the repo root. `status` listed it as ready while `windows`
+    // and `runtime-health` failed with app_not_found from the repo root.
+    let root = std::env::temp_dir().join(format!(
+        "connector-nearby-{}",
+        connector_client::inspection::new_request_key()
+    ));
+    let app_dir = root.join("src-tauri");
+    std::fs::create_dir_all(app_dir.join("target")).unwrap();
+    let port = spawn_plugin_with_identity(app_dir.canonicalize().unwrap()).await;
+    std::fs::write(
+        app_dir.join("target/.connector.json"),
+        serde_json::json!({"pid":std::process::id(),"ws_port":port,
+            "app_id":"com.example.nearby","app_instance_id":"nearby-instance","started_at":1})
+        .to_string(),
+    )
+    .unwrap();
+    let resolved = connector_client::discovery::resolve_connection(options(&root))
+        .await
+        .unwrap();
+    assert_eq!(resolved.port, port);
+    assert!(matches!(resolved.source, ConnectionSource::PidFile));
+
+    // A stale identity behind the same file is still refused.
+    std::fs::write(
+        app_dir.join("target/.connector.json"),
+        serde_json::json!({"pid":std::process::id(),"ws_port":port,
+            "app_id":"com.example.nearby","app_instance_id":"previous-run","started_at":1})
+        .to_string(),
+    )
+    .unwrap();
+    let stale = connector_client::discovery::resolve_connection(options(&root)).await;
+    assert!(stale.map(|r| r.port != port).unwrap_or(true));
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -3081,7 +3081,13 @@ mod transport_tests {
             .await
             .unwrap();
         assert_eq!(health["checks"]["transport"]["status"], "responsive");
-        assert_eq!(health["checks"]["runtime"]["status"], "unavailable");
+        // No page bridge: unavailable, or starting during the startup grace.
+        let runtime = health["checks"]["runtime"]["status"].as_str().unwrap();
+        assert!(["unavailable", "starting"].contains(&runtime), "{health}");
+        if runtime == "starting" {
+            assert_eq!(health["conclusion"], "runtime_starting");
+            assert!(health["retryAfterMs"].as_u64().is_some());
+        }
         assert_eq!(health["executionReplayed"], false);
         assert!(rx.try_recv().is_err());
         assert_eq!(bridge.runtime.diagnostics()["installAttempts"], 0);
