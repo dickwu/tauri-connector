@@ -356,23 +356,64 @@ pub async fn execute_js(
     let page_script = eval_page_script(script, page_deadline_ms(timeout_ms));
     let request_id = uuid::Uuid::new_v4().to_string();
     match bridge
-        .execute_page_script(&page_script, timeout_ms, window_id, &request_id, None)
+        .execute_page_script(
+            &page_script,
+            bridge_deadline_ms(timeout_ms),
+            window_id,
+            &request_id,
+            None,
+        )
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::outcome_error(id.to_string(), eval_error_outcome(e, timeout_ms)),
+        Err(e) => {
+            let mut outcome = eval_error_outcome(e, timeout_ms);
+            csp_eval_hint(&mut outcome, bridge.eval_blocked(window_id).await);
+            Response::outcome_error(id.to_string(), outcome)
+        }
     }
 }
 
 /// Marks the page-side deadline rejection produced by `js/eval.js`.
 const EVAL_TIMEOUT_MARK: &str = "connector_eval_timeout";
 
-/// The page settles its own deadline first so the reply carries its effect
-/// evidence; the bridge deadline then only covers a blocked main thread.
+/// The page settles at the requested deadline so the reply carries its
+/// effect evidence close to the time the caller asked for.
 fn page_deadline_ms(timeout_ms: u64) -> u64 {
-    timeout_ms
-        .saturating_sub((timeout_ms / 4).min(1_000))
-        .max(1)
+    timeout_ms.max(1)
+}
+
+/// The bridge waits a little longer than the page so a page-side timeout
+/// arrives first; it only fires on its own for a blocked main thread.
+fn bridge_deadline_ms(timeout_ms: u64) -> u64 {
+    timeout_ms + (timeout_ms / 4).clamp(250, 1_000)
+}
+
+/// Under a CSP without 'unsafe-eval' the connector compiles the caller's
+/// script natively, but code inside it that calls eval/new Function still
+/// fails; name that clearly instead of a bare EvalError.
+fn csp_eval_hint(outcome: &mut ExecutionOutcome, eval_blocked: Option<bool>) {
+    let Some(error) = outcome.error.as_mut() else {
+        return;
+    };
+    let message = error.message.to_ascii_lowercase();
+    let eval_refused = message.contains("evalerror")
+        || message.contains("unsafe-eval")
+        || message.contains("code generation from strings")
+        || (message.contains("content security policy") && message.contains("eval"));
+    if eval_refused {
+        error.code = "csp_blocks_eval".into();
+        error.message = format!(
+            "{} (csp_blocks_eval: the page's Content Security Policy forbids eval/new Function inside the script; the connector already runs your script without eval, so avoid string compilation in it, or allow 'unsafe-eval' in a dev-only CSP)",
+            error.message
+        );
+    } else if eval_blocked == Some(true)
+        && error.message.contains(crate::bridge::PAGE_SCRIPT_SYNTAX)
+    {
+        outcome
+            .warnings
+            .push("The page CSP blocks eval: multi-statement scripts need an explicit `return` for a value".into());
+    }
 }
 
 fn eval_script(script: &str, page_deadline_ms: u64) -> String {
@@ -4527,8 +4568,21 @@ mod tests {
     #[test]
     fn the_page_deadline_precedes_the_bridge_deadline() {
         assert_eq!(super::page_deadline_ms(1), 1);
-        assert_eq!(super::page_deadline_ms(1000), 750);
-        assert_eq!(super::page_deadline_ms(30_000), 29_000);
+        // The page fires at the requested time (R2: 2000 ms used to fire at 1500).
+        assert_eq!(super::page_deadline_ms(2000), 2000);
+        assert_eq!(super::page_deadline_ms(4000), 4000);
+        assert_eq!(super::bridge_deadline_ms(2000), 2500);
+        assert_eq!(super::bridge_deadline_ms(30_000), 31_000);
+        assert_eq!(super::bridge_deadline_ms(100), 350);
+        let mut outcome = connector_client::outcome::ExecutionOutcome::not_dispatched(
+            connector_client::outcome::WorkflowError::new(
+                "execution_failed",
+                "executing",
+                "EvalError: Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source",
+            ),
+        );
+        super::csp_eval_hint(&mut outcome, Some(true));
+        assert_eq!(outcome.error.unwrap().code, "csp_blocks_eval");
         let script = super::eval_script("const a = 1; a", 750);
         assert!(script.starts_with("// Runs a caller's") || script.contains("connectorEval"));
         assert!(script.ends_with(r#"("const a = 1; a",750,"connector_eval_timeout")"#));
