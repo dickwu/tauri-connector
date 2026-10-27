@@ -95,17 +95,23 @@ pub struct InstanceStatus {
     /// instance is alive, not stale.
     #[serde(default)]
     pub unauthorized: bool,
+    /// The endpoint answers but its plugin predates the identity handshake
+    /// (before 0.16.0). It is alive and reachable with `--port`, not stale.
+    #[serde(default)]
+    pub legacy_plugin: bool,
     pub stale: bool,
     pub error: Option<String>,
 }
 
 impl InstanceStatus {
-    /// Human label: `ready`, `unauthorized`, or `stale`.
+    /// Human label: `ready`, `unauthorized`, `legacy_plugin`, or `stale`.
     pub fn state(&self) -> &'static str {
         if self.stale {
             "stale"
         } else if self.unauthorized {
             "unauthorized"
+        } else if self.legacy_plugin {
+            "legacy_plugin"
         } else {
             "ready"
         }
@@ -116,6 +122,33 @@ impl InstanceStatus {
 /// endpoint is alive) rather than being unreachable.
 pub fn is_unauthorized_error(error: &str) -> bool {
     error.contains("\"code\":\"unauthorized\"") || error.starts_with("unauthorized")
+}
+
+/// Minimum plugin release that answers the identity handshake used by
+/// `--app-id`, `--app-instance-id` and `--pid-file` routing.
+pub const IDENTITY_PLUGIN_VERSION: &str = "0.16.0";
+
+fn legacy_plugin_error(ports: &[u16]) -> String {
+    let port = ports[0];
+    format!(
+        "capability_unavailable: running app on port(s) {ports:?} uses a tauri-plugin-connector older than {IDENTITY_PLUGIN_VERSION} that cannot report its app identity, so --app-id/--app-instance-id/--pid-file cannot verify it; upgrade the host app's tauri-plugin-connector (0.17.2 or later recommended), or pass --port {port} to connect without identity verification"
+    )
+}
+
+/// True when the endpoint answers `bridge_status` but advertises no inspection
+/// protocol, i.e. a plugin that predates the identity handshake. Such plugins
+/// reply to unknown commands with id `unknown`, so the identity request itself
+/// only times out.
+pub async fn is_legacy_plugin(host: &str, port: u16, timeout_ms: u64) -> bool {
+    let probe = tokio::time::timeout(Duration::from_millis(timeout_ms), async {
+        let mut client = crate::ConnectorClient::new();
+        client.connect(host, port).await?;
+        client
+            .send_with_timeout(json!({"type":"bridge_status"}), timeout_ms)
+            .await
+    })
+    .await;
+    matches!(probe, Ok(Ok(status)) if status.is_object() && status.get("inspectionProtocolVersion").is_none())
 }
 
 const UNAUTHORIZED_HINT: &str = "the app requires a workflow token; set TAURI_CONNECTOR_WORKFLOW_TOKEN to the host's token, or pass --port to connect without identity verification";
@@ -169,7 +202,10 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
         let identity = match identity {
             Ok(identity) => Some(identity),
             Err(error) if app_id.is_some() || expected_instance.is_some() || pid_file.is_some() => {
-                return Err(error)
+                if !is_unauthorized_error(&error) && is_legacy_plugin(&host, port, 1500).await {
+                    return Err(legacy_plugin_error(&[port]));
+                }
+                return Err(error);
             }
             Err(_) => {
                 ping_ws(&host, port, 1500).await?;
@@ -209,6 +245,7 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
     let hints = discover_instances(&opts.cwd, app_id.as_deref(), pid_file.as_deref());
     let mut candidates = Vec::new();
     let mut unauthorized_ports = Vec::new();
+    let mut legacy_ports = Vec::new();
     let mut endpoints = HashSet::new();
     for hint in hints {
         if !pid_is_alive(hint.pid) || !endpoints.insert((host.clone(), hint.ws_port)) {
@@ -218,6 +255,8 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
         if let Err(error) = &identity {
             if is_unauthorized_error(error) {
                 unauthorized_ports.push(hint.ws_port);
+            } else if is_legacy_plugin(&host, hint.ws_port, 1500).await {
+                legacy_ports.push(hint.ws_port);
             }
         }
         if let Ok(identity) = identity {
@@ -289,6 +328,9 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
         return Err(format!(
             "unauthorized: running app on port(s) {unauthorized_ports:?} refused identity; {UNAUTHORIZED_HINT}"
         ));
+    }
+    if candidates.is_empty() && !legacy_ports.is_empty() {
+        return Err(legacy_plugin_error(&legacy_ports));
     }
     select_unique(candidates)
 }
@@ -374,17 +416,22 @@ pub async fn instance_statuses(
     let mut statuses = Vec::with_capacity(instances.len());
     for instance in instances {
         let pid_alive = pid_is_alive(instance.pid);
+        let mut legacy_plugin = false;
         let (ws_reachable, unauthorized, error) = if pid_alive {
-            match endpoint_identity(host, instance.ws_port, 1_000)
-                .await
-                .and_then(|identity| validate_identity(&identity, app_id, None, Some(&instance)))
-            {
-                Ok(()) => (true, false, None),
+            match endpoint_identity(host, instance.ws_port, 1_000).await {
+                Ok(identity) => match validate_identity(&identity, app_id, None, Some(&instance)) {
+                    Ok(()) => (true, false, None),
+                    Err(e) => (false, false, Some(e)),
+                },
                 Err(e) if is_unauthorized_error(&e) => (
                     true,
                     true,
                     Some(format!("unauthorized: {UNAUTHORIZED_HINT}")),
                 ),
+                Err(_) if is_legacy_plugin(host, instance.ws_port, 1_000).await => {
+                    legacy_plugin = true;
+                    (true, false, Some(legacy_plugin_error(&[instance.ws_port])))
+                }
                 Err(e) => (false, false, Some(e)),
             }
         } else {
@@ -395,6 +442,7 @@ pub async fn instance_statuses(
             pid_alive,
             ws_reachable,
             unauthorized,
+            legacy_plugin,
             stale: !pid_alive || !ws_reachable,
             error,
         });
@@ -596,10 +644,17 @@ mod tests {
             pid_alive: true,
             ws_reachable: true,
             unauthorized: true,
+            legacy_plugin: false,
             stale: false,
             error: None,
         };
         assert_eq!(status.state(), "unauthorized");
+        let old_plugin = InstanceStatus {
+            unauthorized: false,
+            legacy_plugin: true,
+            ..status.clone()
+        };
+        assert_eq!(old_plugin.state(), "legacy_plugin");
         let legacy: InstanceStatus = serde_json::from_value(serde_json::json!({
             "instance": serde_json::to_value(&status.instance).unwrap(),
             "pid_alive": true, "ws_reachable": false, "stale": true, "error": null

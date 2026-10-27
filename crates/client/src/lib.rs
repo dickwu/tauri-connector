@@ -233,7 +233,7 @@ impl ConnectorClient {
             .and_then(Value::as_u64)
             != Some(inspection::INSPECTION_PROTOCOL_VERSION)
         {
-            return Err("capability_unavailable: connected app does not support inspection protocol v1; upgrade the plugin".into());
+            return Err(format!("capability_unavailable: connected app's tauri-plugin-connector predates inspection protocol v1 (added in {}); upgrade the host app's plugin (0.17.2 or later recommended) and restart it", discovery::IDENTITY_PLUGIN_VERSION));
         }
         let identity = self
             .verify_app_identity(args.get("authToken").and_then(Value::as_str))

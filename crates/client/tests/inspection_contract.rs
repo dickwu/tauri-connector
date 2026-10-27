@@ -118,11 +118,17 @@ async fn unsupported_plugin_never_receives_picker_or_execute_js() {
     });
     let mut client = connector_client::ConnectorClient::new();
     client.connect("127.0.0.1", port).await.unwrap();
-    assert!(client
+    let error = client
         .inspect("webview_select_element", &json!({"action":"start"}))
         .await
-        .unwrap_err()
-        .contains("capability_unavailable"));
+        .unwrap_err();
+    assert!(error.starts_with("capability_unavailable"), "{error}");
+    // The message names the release that introduced the protocol instead of
+    // implying a credential problem.
+    assert!(
+        error.contains("predates inspection protocol v1 (added in 0.16.0)"),
+        "{error}"
+    );
     server.await.unwrap();
 }
 
