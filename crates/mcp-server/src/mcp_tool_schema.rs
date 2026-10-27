@@ -187,7 +187,7 @@ pub fn tool_definitions() -> serde_json::Value {
                     "alt": { "type": "string" },
                     "title": { "type": "string" },
                     "testId": { "type": "string" },
-                    "name": { "type": "string", "description": "Accessible-name filter" },
+                    "name": { "type": "string", "description": "Accessible name; alone it matches exposed elements by name, with other filters it narrows them" },
                     "exact": { "type": "boolean" },
                     "first": { "type": "boolean" },
                     "last": { "type": "boolean" },

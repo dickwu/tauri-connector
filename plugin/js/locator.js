@@ -30,9 +30,12 @@
             };
 
             const textOnly = ['role', 'label', 'placeholder', 'alt', 'title', 'testId', 'name'].every(key => query[key] == null);
+            const nameOnly = query.name != null && ['role', 'text', 'label', 'placeholder', 'alt', 'title', 'testId'].every(key => query[key] == null);
+            let ignoreName = false;
             const findMatches = () => Array.from(document.querySelectorAll('*')).filter((el) => {
                 if (el.isConnected === false || semantic.isConnectorOwned(el)) return false;
-                if ((query.role != null || query.label != null) && !semantic.isAccessibilityExposed(el)) return false;
+                // A name-only query matches what a snapshot lists: exposed elements.
+                if ((query.role != null || query.label != null || nameOnly) && !semantic.isAccessibilityExposed(el)) return false;
                 if (query.role != null && !matchText(implicitRole(el), query.role)) return false;
                 if (query.text != null) {
                     if (!matchText(el.textContent || '', query.text)) return false;
@@ -46,7 +49,7 @@
                     const value = el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test') || el.getAttribute('testid');
                     if (!matchText(value, query.testId)) return false;
                 }
-                return query.name == null || matchText(accessibleName(el), query.name);
+                return ignoreName || query.name == null || matchText(accessibleName(el), query.name);
             });
             const filtered = findMatches();
             const count = filtered.length;
@@ -54,7 +57,19 @@
             if (query.nth !== null && query.nth !== undefined) index = Number(query.nth);
             if (query.first) index = 0;
             const el = filtered[index];
-            if (!el) return { count, index, code: 'target_not_found', error: 'No element matched locator', dispatched: false };
+            if (!el) {
+                const miss = { count, index, code: 'target_not_found', error: 'No element matched locator', dispatched: false };
+                if (query.name != null && !nameOnly) {
+                    // Say which accessible names the other filters did find,
+                    // so a name mismatch is visible instead of a bare miss.
+                    ignoreName = true;
+                    const near = findMatches().slice(0, 5);
+                    ignoreName = false;
+                    miss.candidates = near.map(node => ({ tag: node.tagName.toLowerCase(), role: implicitRole(node) || null, name: semantic.isSensitive(node) ? '[redacted]' : normalize(accessibleName(node)).slice(0, 100) }));
+                    if (near.length) miss.error += '; --name ' + JSON.stringify(query.name) + ' did not match the accessible names of ' + near.length + ' element(s) the other filters found (see candidates)';
+                }
+                return miss;
+            }
             const action = query.action || null;
             const value = query.value || '';
             if (action && action !== 'text' && count > 1 && !query.first && !query.last && query.nth == null) return {count, code:'ambiguous_target', error:'Locator matched multiple elements; provide a unique locator or explicit index', dispatched:false};

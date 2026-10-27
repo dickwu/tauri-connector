@@ -173,6 +173,23 @@
     if (nested.length === 1) monaco = nested[0];
   }
   if (monaco || el.isContentEditable) return editorInput(el, monaco);
+  // Component libraries (AntD Input's affix wrapper, MUI TextField) put the
+  // real field inside a wrapper; a wrapper with exactly one field means it.
+  let retargeted = null;
+  const fillable = node => node instanceof HTMLTextAreaElement || (node instanceof HTMLInputElement && ['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(node.type));
+  if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && typeof el.querySelectorAll === 'function') {
+    const fields = Array.from(el.querySelectorAll('input, textarea')).filter(fillable);
+    if (fields.length === 1) { retargeted = { from: el.tagName.toLowerCase(), to: fields[0].tagName.toLowerCase() }; el = fields[0]; }
+  }
+  // What was actually written, so a caller can tell a wrong element apart
+  // from a field the framework did not observe.
+  const describe = node => {
+    const semantic = typeof window !== 'undefined' && window ? window.__CONNECTOR_SEMANTIC__ : null;
+    let name = '', role = null;
+    try { name = semantic ? semantic.getAccessibleName(node) : (node.getAttribute('aria-label') || node.getAttribute('placeholder') || ''); role = semantic ? semantic.getRole(node) : null; } catch (_) {}
+    const visible = !!(node.getClientRects && node.getClientRects().length);
+    return { tag: node.tagName.toLowerCase(), role, name: String(name).slice(0, 100), visible };
+  };
   const isInput = el instanceof HTMLInputElement;
   const isTextarea = el instanceof HTMLTextAreaElement;
   if ((!isInput && !isTextarea) || (isInput && !['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(el.type))) {
@@ -220,5 +237,8 @@
   await new Promise(resolve => setTimeout(resolve, 0));
   if (!el.isConnected) return fail('target_changed', 'Input target was replaced during input');
   if (String(el.value) !== expected) return fail('postcondition_failed', 'Input value did not persist after event processing');
-  return { action, [action === 'type' ? 'typed' : 'filled']: text, value: expected, target: el.tagName.toLowerCase(), targetId: el.id || null, interactionMode };
+  const result = { action, [action === 'type' ? 'typed' : 'filled']: text, value: expected, target: el.tagName.toLowerCase(), targetId: el.id || null, interactionMode, element: describe(el) };
+  if (options.resolvedVia) result.resolvedVia = options.resolvedVia;
+  if (retargeted) result.retargeted = retargeted;
+  return result;
 })

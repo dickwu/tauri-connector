@@ -361,7 +361,8 @@ struct LocatorArgs {
     title: Option<String>,
     #[arg(long, alias = "testid")]
     test_id: Option<String>,
-    /// Accessible-name filter applied after the primary locator
+    /// Accessible name: alone it matches exposed elements by name; with other
+    /// filters it narrows them (substring, case-insensitive unless --exact)
     #[arg(long)]
     name: Option<String>,
     /// Match text/name exactly instead of substring matching

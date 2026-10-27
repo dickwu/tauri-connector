@@ -34,3 +34,16 @@ test('B09 text in a child does not discard the parent matching an explicit role'
   const result = await locate({role:'button', text:'Save', exact:true}, [save, child]);
   assert.equal(result.count, 1); assert.equal(result.matched.selector, '#save');
 });
+test('git-strata --name alone finds the element by accessible name', async () => {
+  const input = node('filter', {'aria-label': 'Filter sessions'}, ''); input.tagName = 'INPUT';
+  const other = node('save', {}, 'Save');
+  const result = await locate({name: 'Filter sessions'}, [input, other]);
+  assert.equal(result.count, 1); assert.equal(result.matched.selector, '#filter');
+});
+test('git-strata a --name miss lists the names the other filters found', async () => {
+  const input = node('filter', {'aria-label': 'Search sessions'}, ''); input.tagName = 'INPUT';
+  const result = await locate({role: 'textbox', name: 'Filter sessions'}, [input]);
+  assert.equal(result.code, 'target_not_found');
+  assert.equal(result.candidates.length, 1); assert.equal(result.candidates[0].name, 'Search sessions');
+  assert.match(result.error, /did not match/);
+});

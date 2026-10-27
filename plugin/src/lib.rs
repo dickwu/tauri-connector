@@ -119,6 +119,7 @@ async fn push_dom(app: AppHandle, payload: PushDomPayload) -> Result<(), String>
             search_text: String::new(),
             snapshot_id: None,
             generation: 0,
+            explicit: false,
         })
         .await;
 

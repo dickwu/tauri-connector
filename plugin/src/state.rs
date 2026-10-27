@@ -65,6 +65,10 @@ pub struct DomEntry {
     /// replacement of the entry is never blindly overwritten.
     #[serde(default)]
     pub generation: u64,
+    /// True for a snapshot a caller asked for. Its refs are what the caller
+    /// saw, so the page's background auto-push must not renumber them.
+    #[serde(default)]
+    pub explicit: bool,
 }
 
 impl DomEntry {
@@ -197,6 +201,21 @@ impl PluginState {
         let generation = DOM_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         entry.generation = generation;
         let mut cache = self.dom_cache.lock().await;
+        if let Some(previous) = cache.get(&entry.window_id) {
+            if previous.explicit && !entry.explicit {
+                // A background push only refreshes the raw DOM; the caller's
+                // snapshot and its @refs stay authoritative until they take a
+                // new snapshot (a navigation already invalidates the refs).
+                entry.snapshot = previous.snapshot.clone();
+                entry.snapshot_mode = previous.snapshot_mode.clone();
+                entry.refs = previous.refs.clone();
+                entry.meta = previous.meta.clone();
+                entry.timestamp = previous.timestamp;
+                entry.search_text = previous.search_text.clone();
+                entry.snapshot_id = previous.snapshot_id.clone();
+                entry.explicit = true;
+            }
+        }
         cache.insert(entry.window_id.clone(), entry);
         generation
     }
@@ -302,4 +321,76 @@ pub fn read_jsonl_filtered<T: DeserializeOwned>(
     // Return the last `limit` entries (tail)
     let skip = results.len().saturating_sub(limit);
     results.into_iter().skip(skip).collect()
+}
+
+#[cfg(test)]
+mod explicit_snapshot_tests {
+    use super::*;
+
+    fn entry(explicit: bool, html: &str, ref_name: &str) -> DomEntry {
+        let mut refs = RefMap::new();
+        refs.insert(
+            "e1".into(),
+            RefEntry {
+                tag: "input".into(),
+                role: Some("textbox".into()),
+                name: ref_name.into(),
+                selector: "input".into(),
+                nth: None,
+                identity: None,
+                semantic_version: None,
+                page_epoch: None,
+            },
+        );
+        DomEntry {
+            window_id: "main".into(),
+            html: html.into(),
+            text_content: String::new(),
+            snapshot: format!("- textbox \"{ref_name}\" [ref=e1]"),
+            snapshot_mode: "ai".into(),
+            refs,
+            meta: SnapshotMeta::default(),
+            timestamp: 1,
+            search_text: String::new(),
+            snapshot_id: None,
+            generation: 0,
+            explicit,
+        }
+    }
+
+    // git-strata #7: the bridge auto-pushes a fresh full snapshot after DOM
+    // mutations; it used to renumber the refs a caller had just read, so
+    // `fill @e7` wrote into a different input and still reported success.
+    #[tokio::test]
+    async fn a_background_push_keeps_the_refs_of_an_explicit_snapshot() {
+        let dir = std::env::temp_dir().join(format!("connector-dom-{}", uuid::Uuid::new_v4()));
+        let state = PluginState::new(dir.clone()).unwrap();
+        state
+            .push_dom(entry(true, "<old/>", "Filter sessions"))
+            .await;
+        state
+            .push_dom(entry(false, "<new/>", "Commit message"))
+            .await;
+        let kept = state.get_dom("main").await.unwrap();
+        assert_eq!(kept.refs["e1"].name, "Filter sessions");
+        assert!(kept.snapshot.contains("Filter sessions"));
+        assert!(kept.explicit);
+        assert_eq!(kept.html, "<new/>", "the raw DOM still refreshes");
+        state.push_dom(entry(true, "<x/>", "Commit message")).await;
+        assert_eq!(
+            state.get_dom("main").await.unwrap().refs["e1"].name,
+            "Commit message"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn background_pushes_replace_each_other_without_an_explicit_snapshot() {
+        let dir = std::env::temp_dir().join(format!("connector-dom-{}", uuid::Uuid::new_v4()));
+        let state = PluginState::new(dir.clone()).unwrap();
+        state.push_dom(entry(false, "<a/>", "One")).await;
+        state.push_dom(entry(false, "<b/>", "Two")).await;
+        assert_eq!(state.get_dom("main").await.unwrap().refs["e1"].name, "Two");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

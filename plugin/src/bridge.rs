@@ -1712,7 +1712,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         if (isInteractive) {{
           refId = 'e' + (refCounter++);
           attrs.push('ref=' + refId);
-          try {{ el.setAttribute('data-connector-ref', refId); }} catch (_) {{}}
+          if (opts.stampRefs !== false) {{ try {{ el.setAttribute('data-connector-ref', refId); }} catch (_) {{}} }}
           refs[refId] = {{
             tag: tag,
             role: role || null,
@@ -2455,7 +2455,9 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         maxElements: 5000,
         reactEnrich: true,
         followPortals: true,
-        shadowDom: false
+        shadowDom: false,
+        // Background pushes must not renumber the refs a caller is using.
+        stampRefs: false
       }});
       ipc.invoke('plugin:connector|push_dom', {{
         payload: {{

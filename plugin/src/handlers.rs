@@ -584,6 +584,7 @@ pub async fn dom_snapshot(
             search_text: String::new(),
             snapshot_id: None,
             generation: 0,
+            explicit: true,
         })
         .await;
 
@@ -1389,19 +1390,32 @@ async fn targeted_input(
     bridge: &Bridge,
     state: &PluginState,
 ) -> Response {
+    let mut resolved_via = serde_json::Value::Null;
     let resolver = if let Some(selector) = selector {
         match cached_ref(state, window_id, selector).await {
-            Ok(Some((ref_id, entry, _, _))) => format!(
-                "{} if (!el) return {{code: 'stale_ref', error: {}, dispatched: false}};",
-                ref_resolver_block("el", &ref_id, &entry),
-                js_string(&format!(
-                    "ref={ref_id} no longer matches an element; run snapshot again."
-                ))
-            ),
-            Ok(None) => format!(
-                "const matches = document.querySelectorAll({}); if (matches.length !== 1) return {{code: matches.length ? 'ambiguous_target' : 'target_not_found', error: 'Expected exactly one input target', count: matches.length, dispatched: false}}; const el = matches[0];",
-                js_string(selector)
-            ),
+            Ok(Some((ref_id, entry, _, age_ms))) => {
+                resolved_via = serde_json::json!({
+                    "kind": "ref",
+                    "ref": ref_id,
+                    "snapshotAgeMs": age_ms,
+                    "snapshotRole": entry.role,
+                    "snapshotName": entry.name,
+                });
+                format!(
+                    "{} if (!el) return {{code: 'stale_ref', error: {}, dispatched: false}};",
+                    ref_resolver_block("el", &ref_id, &entry),
+                    js_string(&format!(
+                        "ref={ref_id} no longer matches an element; run snapshot again."
+                    ))
+                )
+            }
+            Ok(None) => {
+                resolved_via = serde_json::json!({"kind": "selector", "selector": selector});
+                format!(
+                    "const matches = document.querySelectorAll({}); if (matches.length !== 1) return {{code: matches.length ? 'ambiguous_target' : 'target_not_found', error: 'Expected exactly one input target', count: matches.length, dispatched: false}}; const el = matches[0];",
+                    js_string(selector)
+                )
+            }
             Err(error) => {
                 return Response::outcome_error(
                     id.to_string(),
@@ -1425,7 +1439,9 @@ async fn targeted_input(
             )),
         );
     };
-    let script = input_script(&resolver, &input_options(action, text, key, modifiers));
+    let mut options = input_options(action, text, key, modifiers);
+    options["resolvedVia"] = resolved_via;
+    let script = input_script(&resolver, &options);
     execute_input(id, &script, window_id, bridge).await
 }
 
@@ -1672,10 +1688,13 @@ pub async fn locator(
         && alt.is_none()
         && title.is_none()
         && test_id.is_none()
+        && name.is_none()
     {
-        return Response::error(
+        // Refused before anything runs: never an unknown outcome.
+        return Response::not_dispatched(
             id.to_string(),
-            "Provide one locator: role, text, label, placeholder, alt, title, or testid",
+            "invalid_spec",
+            "Provide one locator: role, name, text, label, placeholder, alt, title, or testid",
         );
     }
 
@@ -4771,6 +4790,20 @@ mod tests {
         assert_eq!(entries[0].window_id, "main");
         assert_eq!(entries[1].window_id, "editor");
         assert!(super::pending_log_entries(&serde_json::json!(null), "main").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_locator_with_no_filter_is_refused_without_quarantine() {
+        use connector_client::outcome::ExecutionStatus;
+        let bridge = crate::bridge::Bridge::start().unwrap();
+        let response = super::locator(
+            "l", None, None, None, None, None, None, None, None, false, false, false, None, None,
+            None, "main", &bridge,
+        )
+        .await;
+        let outcome = response.into_outcome("webview_locator");
+        assert_eq!(outcome.execution, ExecutionStatus::NotDispatched);
+        assert!(outcome.error.unwrap().message.contains("name"));
     }
 
     #[tokio::test]

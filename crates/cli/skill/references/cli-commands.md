@@ -599,7 +599,7 @@ tauri-connector locator --test-id submit --action click
 | Flag | Description |
 |---|---|
 | `--role`, `--text`, `--label`, `--placeholder`, `--alt`, `--title`, `--test-id` (alias `--testid`) | Primary locator |
-| `--name` | Accessible-name filter |
+| `--name` | Accessible name. Alone it matches exposed elements by name; with other filters it narrows them. A miss lists the names the other filters found (`candidates`) |
 | `--exact` | Exact text/name match |
 | `--first`, `--last`, `--nth` | Match selection |
 | `--action` | `click`, `fill`, `type`, `hover`, `focus`, `check`, `uncheck`, `text` |

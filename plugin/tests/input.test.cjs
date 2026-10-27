@@ -226,3 +226,19 @@ test('R2-3 an already focused Monaco editor types without a settle delay', async
   assert.equal(result.verified, true); assert.equal(m.inserted.length, 3);
   assert.ok(Date.now() - started < 250);
 });
+test('git-strata #7 a wrapper with exactly one field fills that field and says so', async () => {
+  const f = fixture();
+  const wrapper = { tagName: 'SPAN', isConnected: true, getAttribute: () => null, querySelectorAll: (sel) => sel === 'input, textarea' ? [f.target] : [] };
+  const fn = vm.runInNewContext(fs.readFileSync(helperPath, 'utf8'), f.context);
+  const result = await fn(wrapper, { action: 'fill', text: '9152', resolvedVia: { kind: 'ref', ref: 'e7' } });
+  assert.equal(f.target.value, '9152'); assert.equal(f.app.value, '9152');
+  assert.equal(result.retargeted.from, 'span'); assert.equal(result.retargeted.to, 'input');
+  assert.equal(result.element.tag, 'input'); assert.equal(result.resolvedVia.ref, 'e7');
+});
+test('git-strata #7 a wrapper with several fields is not guessed at', async () => {
+  const f = fixture();
+  const wrapper = { tagName: 'DIV', isConnected: true, getAttribute: () => null, querySelectorAll: () => [f.prior, f.target] };
+  const fn = vm.runInNewContext(fs.readFileSync(helperPath, 'utf8'), f.context);
+  const result = await fn(wrapper, { action: 'fill', text: 'x' });
+  assert.equal(result.code, 'not_actionable'); assert.equal(f.target.value, 'old'); assert.equal(f.prior.value, 'untouched');
+});

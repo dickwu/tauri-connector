@@ -84,7 +84,7 @@ Find an element by semantic locator and optionally act on the matched element. U
 | `alt` | string | | Image alt text |
 | `title` | string | | Title attribute |
 | `testId` | string | | `data-testid`, `data-test-id`, `data-test`, or `testid` |
-| `name` | string | | Accessible-name filter applied after the primary locator |
+| `name` | string | | Accessible name. Alone it matches exposed elements by name; with other filters it narrows them. A miss lists the names found (`candidates`) |
 | `exact` | boolean | false | Exact text/name match instead of case-insensitive substring |
 | `first` | boolean | false | Force first match |
 | `last` | boolean | false | Force last match |

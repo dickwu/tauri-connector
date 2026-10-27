@@ -3,7 +3,7 @@
 (() => {
   const { React, ReactDOM } = window.WorkflowReact;
   const h = React.createElement;
-  const stats = { opens: 0, inputEvents: 0, saves: 0, submissions: [], tasks: [], errors: [], backgroundTicks: 0 };
+  const stats = { opens: 0, inputEvents: 0, saves: 0, submissions: [], tasks: [], errors: [], backgroundTicks: 0, filterEvents: 0 };
   Object.defineProperty(window, '__workflowFixtureStats', { value: stats });
   Object.defineProperty(window, '__WORKFLOW_FIXTURE__', { value: stats });
   let nextId = 0;
@@ -15,6 +15,8 @@
     const [blocked, setBlocked] = React.useState(false);
     const [entity, setEntity] = React.useState('fixture-entity-a');
     const [background, setBackground] = React.useState(false);
+    const [filter, setFilter] = React.useState('');
+    const [filterFocused, setFilterFocused] = React.useState(false);
     React.useEffect(() => {
       if (!background) return;
       const timer = setInterval(() => { stats.backgroundTicks++; }, 25);
@@ -47,6 +49,13 @@
         key: task.id, 'data-testid': 'task-row', 'data-task-name': task.name, 'data-task-id': task.id
       }, h('span', null, task.name), h('button', { onClick() { setDetail(task); }, 'aria-label': `Details ${task.id}` }, 'Details')))),
       detail && h('aside', { 'data-testid': 'task-detail', 'data-task-id': detail.id }, detail.name),
+      // AntD 6 Input shape: an affix wrapper span around a controlled input
+      // whose class changes on focus (re-render while the fill is running).
+      h('span', { className: 'ant-input-affix-wrapper' + (filterFocused ? ' ant-input-affix-wrapper-focused' : ''), 'data-testid': 'session-filter-wrapper', style: { display: 'inline-flex', alignItems: 'center', border: '1px solid #789', background: 'white' } },
+        h('span', { className: 'ant-input-prefix', 'aria-hidden': true }, '⌕'),
+        h('input', { className: 'ant-input', placeholder: 'Filter sessions', value: filter, onFocus() { setFilterFocused(true); }, onBlur() { setFilterFocused(false); }, onChange(event) { stats.filterEvents++; setFilter(event.target.value); } }),
+        h('span', { className: 'ant-input-suffix' }, filter ? h('button', { type: 'button', 'aria-label': 'Clear filter', onClick() { setFilter(''); } }, '×') : null)),
+      h('output', { 'data-testid': 'session-filter-value' }, filter),
       h('section', { 'aria-label': 'Adversarial controls', style: { marginTop: 16 } },
         h('button', { 'data-testid': 'duplicate-save' }, '保存'),
         h('button', { 'data-testid': 'duplicate-save' }, '保存'),
