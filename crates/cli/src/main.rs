@@ -335,7 +335,8 @@ struct WaitArgs {
     #[arg(long)]
     load_state: Option<String>,
     /// Wait until this JavaScript expression/function returns truthy
-    #[arg(long = "fn")]
+    // `--function` is the pre-0.12 spelling, kept as a hidden alias.
+    #[arg(long = "fn", alias = "function")]
     function: Option<String>,
     /// Element state for selector waits: attached, detached, visible, hidden
     #[arg(long)]
@@ -1581,6 +1582,26 @@ mod workflow_cli_tests {
                 .unwrap()
                 .to_string();
         assert!(err.contains("html5dnd"), "{err}");
+    }
+
+    #[test]
+    fn wait_accepts_the_old_function_spelling() {
+        for flag in ["--fn", "--function"] {
+            let cli = Cli::try_parse_from(["tauri-connector", "wait", flag, "window.ready"])
+                .unwrap_or_else(|e| panic!("{flag}: {e}"));
+            let Commands::Wait(args) = cli.command else {
+                panic!("not a wait command")
+            };
+            assert_eq!(args.function.as_deref(), Some("window.ready"));
+        }
+        use clap::CommandFactory;
+        let help = Cli::command()
+            .find_subcommand("wait")
+            .unwrap()
+            .clone()
+            .render_long_help()
+            .to_string();
+        assert!(!help.contains("--function"), "the alias stays hidden");
     }
 
     #[test]
