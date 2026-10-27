@@ -185,6 +185,18 @@ const NON_MUTATING_LEASED_TOOLS: &[&str] = &[
 /// any other tool keeps `effect: possible`, which quarantines its resources.
 pub fn legacy_error_outcome(tool: &str, error: WorkflowError) -> ExecutionOutcome {
     let canonical = tool.strip_prefix("webview_").unwrap_or(tool);
+    if canonical == "screenshot" && error.message.contains("snapdom not available") {
+        // The DOM renderer is missing: the handler finished without capturing,
+        // so this is a definite, effect-free failure, not an unknown outcome.
+        let message = format!(
+            "{}\n\nhint: the legacy screenshot fallback needs window.snapdom; pass --source webview_native (or window_native) to use the native capture instead",
+            error.message
+        );
+        return ExecutionOutcome::failed(
+            WorkflowError::new("capability_unavailable", "executing", message),
+            EffectStatus::None,
+        );
+    }
     let mut out = ExecutionOutcome::unknown(error);
     if NON_MUTATING_LEASED_TOOLS.contains(&canonical) {
         out.effect = EffectStatus::None;
@@ -254,6 +266,21 @@ mod tests {
                 "{tool}"
             );
         }
+    }
+
+    #[test]
+    fn a_missing_dom_renderer_is_a_definite_effect_free_screenshot_failure() {
+        let error = WorkflowError::new(
+            "outcome_unknown",
+            "dispatching",
+            "Screenshot failed: execution_failed: snapdom not available — install @zumer/snapdom",
+        );
+        let out = legacy_error_outcome("screenshot", error);
+        assert_eq!(out.execution, ExecutionStatus::Failed);
+        assert_eq!(out.effect, EffectStatus::None);
+        let error = out.error.unwrap();
+        assert_eq!(error.code, "capability_unavailable");
+        assert!(error.message.contains("--source webview_native"));
     }
 
     #[test]
