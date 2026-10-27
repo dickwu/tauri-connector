@@ -37,6 +37,7 @@ fn up_pk030_slow_read_on_same_connection_does_not_cancel_or_refresh_picker() {
     let script_error = crate::bridge::BridgeError::ExecutionFailed {
         request_id: "probe".into(),
         error: "page error".into(),
+        effect: connector_client::outcome::EffectStatus::Possible,
     };
     assert!(!e.retain_after_slow_status("status", &failure, true, Err(&script_error)));
     let channel_error = crate::bridge::BridgeError::DispatchedOutcomeUnknown {
@@ -78,6 +79,7 @@ fn up_pk013_only_a_never_dispatched_start_proves_no_guard_needs_cleanup() {
         BridgeError::ExecutionFailed {
             request_id: "test".into(),
             error: "not_dispatched is just business text".into(),
+            effect: connector_client::outcome::EffectStatus::Possible,
         },
         BridgeError::DispatchedOutcomeUnknown {
             request_id: "test".into(),

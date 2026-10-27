@@ -966,3 +966,156 @@ mod workflow_adapter_tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 }
+
+// Non-Unix hosts reject leased tools before dispatch (private journal storage).
+#[cfg(all(test, unix))]
+mod lease_release_tests {
+    use super::*;
+    use serde_json::json;
+    use std::time::Duration;
+    use tokio::sync::mpsc::UnboundedReceiver;
+
+    fn isolated_state() -> PluginState {
+        let directory =
+            std::env::temp_dir().join(format!("connector-leases-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        PluginState::new(directory).unwrap()
+    }
+
+    async fn next_page_command(rx: &mut UnboundedReceiver<String>) -> serde_json::Value {
+        let message = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("command was not dispatched to the page")
+            .unwrap();
+        serde_json::from_str(&message).unwrap()
+    }
+
+    /// Dispatch `command` and answer each page request with `reply(id)`.
+    async fn run_against_page(
+        command: serde_json::Value,
+        reply: impl Fn(&serde_json::Value) -> serde_json::Value,
+        state: &PluginState,
+    ) -> serde_json::Value {
+        let (bridge, mut rx) = crate::bridge::test_queued_bridge().await;
+        let command: Command = serde_json::from_value(command).unwrap();
+        let call = handle_command("ws".into(), command, &bridge, None, state);
+        tokio::pin!(call);
+        loop {
+            tokio::select! {
+                response = &mut call => {
+                    return serde_json::to_value(response.outcome.unwrap()).unwrap();
+                }
+                request = next_page_command(&mut rx) => {
+                    crate::bridge::test_page_message(&bridge, reply(&request["id"])).await;
+                }
+            }
+        }
+    }
+
+    fn assert_released(state: &PluginState) {
+        assert_eq!(state.workflow.resources.quarantined(), 0);
+        state
+            .workflow
+            .resources
+            .try_acquire(vec!["backend".into(), "ui".into()])
+            .expect("the next exclusive command must not be resource_busy");
+    }
+
+    #[tokio::test]
+    async fn rejected_script_without_page_effects_releases_its_lease() {
+        let state = isolated_state();
+        let script = r#"(async () => { const r = undefined; r.querySelectorAll("x") })()"#;
+        let outcome = run_against_page(
+            json!({"type":"execute_js","script":script}),
+            |id| json!({"id": id, "error": "TypeError: undefined is not an object", "effect": "none"}),
+            &state,
+        )
+        .await;
+        assert_eq!(outcome["error"]["code"], "execution_failed");
+        assert_eq!(outcome["effect"], "none");
+        assert_released(&state);
+
+        // The reported follow-up: the next eval runs instead of resource_busy.
+        let outcome = run_against_page(
+            json!({"type":"execute_js","script":"1 + 1"}),
+            |id| json!({"id": id, "result": 2}),
+            &state,
+        )
+        .await;
+        assert_eq!(outcome["execution"], "completed", "{outcome}");
+        assert_eq!(outcome["data"], 2);
+    }
+
+    #[tokio::test]
+    async fn rejected_script_that_may_have_written_keeps_its_quarantine() {
+        for report in [Some("possible"), None] {
+            let state = isolated_state();
+            let outcome = run_against_page(
+                json!({"type":"execute_js","script":"writeThenThrow()"}),
+                |id| {
+                    let mut message = json!({"id": id, "error": "Error: after write"});
+                    if let Some(report) = report {
+                        message["effect"] = json!(report);
+                    }
+                    message
+                },
+                &state,
+            )
+            .await;
+            assert_eq!(outcome["effect"], "possible", "{report:?}");
+            assert_eq!(state.workflow.resources.quarantined(), 1, "{report:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_tool_failure_releases_its_lease() {
+        let state = isolated_state();
+        let outcome = run_against_page(
+            json!({"type":"dom_snapshot"}),
+            |id| json!({"id": id, "error": "snapshot exploded"}),
+            &state,
+        )
+        .await;
+        assert_eq!(outcome["effect"], "none", "{outcome}");
+        assert_released(&state);
+    }
+
+    #[tokio::test]
+    async fn interaction_failure_keeps_its_quarantine() {
+        let state = isolated_state();
+        let outcome = run_against_page(
+            json!({"type":"interact","action":"click","selector":"#save"}),
+            |id| json!({"id": id, "error": "click handler threw"}),
+            &state,
+        )
+        .await;
+        assert_eq!(outcome["effect"], "possible", "{outcome}");
+        assert_eq!(state.workflow.resources.quarantined(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancelled_command_releases_its_lease() {
+        let state = isolated_state();
+        let (bridge, mut rx) = crate::bridge::test_queued_bridge().await;
+        let command: Command =
+            serde_json::from_value(json!({"type":"execute_js","script":"new Promise(() => {})"}))
+                .unwrap();
+        {
+            let call = handle_command("ws".into(), command, &bridge, None, &state);
+            tokio::pin!(call);
+            tokio::select! {
+                _ = &mut call => panic!("an unanswered script finished"),
+                _ = next_page_command(&mut rx) => {}
+            }
+            assert!(
+                state
+                    .workflow
+                    .resources
+                    .try_acquire(vec!["ui".into()])
+                    .is_err(),
+                "the dispatched script holds the lease"
+            );
+        }
+        assert_released(&state);
+    }
+}

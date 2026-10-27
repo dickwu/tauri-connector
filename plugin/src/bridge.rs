@@ -31,7 +31,13 @@ pub enum BridgeError {
     #[error("not_dispatched: {reason} (requestId: {request_id})")]
     NotDispatched { request_id: String, reason: String },
     #[error("execution_failed: {error} (requestId: {request_id})")]
-    ExecutionFailed { request_id: String, error: String },
+    ExecutionFailed {
+        request_id: String,
+        error: String,
+        /// `None` only when the page observed no backend-capable dispatch
+        /// while the script ran; a write that may have landed stays `Possible`.
+        effect: connector_client::outcome::EffectStatus,
+    },
     #[error("outcome_unknown: {reason} (requestId: {request_id}); remote execution may continue")]
     DispatchedOutcomeUnknown { request_id: String, reason: String },
 }
@@ -429,10 +435,12 @@ impl Bridge {
                 .unwrap_or_else(|_| payload_str.to_string());
             let result = match serde_json::from_str::<BridgeResult>(&inner) {
                 Ok(result) if result.id == expected_id => {
+                    let effect = result.reported_effect();
                     if let Some(error) = result.error {
                         Err(BridgeError::ExecutionFailed {
                             request_id: expected_id.clone(),
                             error,
+                            effect,
                         })
                     } else {
                         Ok(result.result.unwrap_or(serde_json::Value::Null))
@@ -855,10 +863,12 @@ async fn handle_bridge_message(
                 let request = pending
                     .remove(&result.id)
                     .expect("request checked under same lock");
+                let effect = result.reported_effect();
                 let value = if let Some(error) = result.error {
                     Err(BridgeError::ExecutionFailed {
                         request_id: result.id,
                         error,
+                        effect,
                     })
                 } else {
                     Ok(result.result.unwrap_or(serde_json::Value::Null))
@@ -903,12 +913,16 @@ fn eval_script(script: &str, id: &str, event_name: &str) -> String {
         function send(payload){{
             if(window.__TAURI_INTERNALS__)window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{{event:eventName,payload:JSON.stringify(payload)}});
         }}
+        const fx=window.__CONNECTOR_EFFECTS__,mark=fx?fx.mark():0;
         try{{
             const AF=Object.getPrototypeOf(async function(){{}}).constructor;
             const r=await new AF('return ('+{script}+')')();
             let value;try{{JSON.stringify(r);value=r}}catch(_){{value=String(r)}}
             send({{id:id,result:value}});
-        }}catch(e){{send({{id:id,error:e.message||String(e)}});}}
+        }}catch(e){{
+            const effect=fx&&fx.unchangedSince(mark)?'none':'possible';
+            send({{id:id,error:e.message||String(e),effect:effect}});
+        }}
     }})()"#
     )
 }
@@ -927,6 +941,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         .expect("bridge key serializes");
     let window_id = serde_json::to_string(window_id).expect("window label serializes");
     let semantic_source = include_str!("semantic/core.js");
+    let effects_source = include_str!("effects.js");
     format!(
         r#"(function() {{
   if (window.top !== window) return;
@@ -946,6 +961,12 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
   let reconnectTimer = null;
   const consoleLogs = [];
   const MAX_LOGS = 500;
+
+  // Rejected scripts release their lease only with this page evidence.
+  const effectMonitor = ({effects_source})(window, NativeWebSocket, function(socket) {{ return socket === ws; }});
+  try {{
+    Object.defineProperty(window, '__CONNECTOR_EFFECTS__', {{ value: effectMonitor }});
+  }} catch (_) {{}}
 
   // Intercept console methods for log capture
   const origConsole = {{}};
@@ -1162,17 +1183,19 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     const id = cmd.id;
     const script = cmd.script;
 
+    const effectMark = effectMonitor.mark();
     try {{
       const AsyncFunction = Object.getPrototypeOf(async function(){{}}).constructor;
       const fn = new AsyncFunction('return (' + script + ')');
       const result = await fn();
       sendResult(id, result, null);
     }} catch (e) {{
-      sendResult(id, null, e.message || String(e));
+      const effect = effectMonitor.unchangedSince(effectMark) ? 'none' : 'possible';
+      sendResult(id, null, e.message || String(e), effect);
     }}
   }}
 
-  function sendResult(id, result, error) {{
+  function sendResult(id, result, error, effect) {{
     if (!ws || ws.readyState !== WebSocket.OPEN) {{
       origConsole.error('[connector] Cannot send result: bridge not connected');
       return;
@@ -1181,6 +1204,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     const payload = {{ id: id }};
     if (error !== null && error !== undefined) {{
       payload.error = error;
+      payload.effect = effect || 'possible';
     }} else {{
       try {{
         // Ensure result is JSON-serializable
@@ -2113,39 +2137,61 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     )
 }
 
+/// A bridge with one registered `main` client whose outgoing commands are
+/// readable from the returned receiver.
+#[cfg(test)]
+pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<String>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let bridge = Bridge {
+        port: 0,
+        clients: Arc::new(Mutex::new(HashMap::new())),
+        connections: Arc::new(StdMutex::new(HashMap::from([(
+            "main".into(),
+            ConnectionState {
+                bridge_key: crate::identity::bridge_key("main"),
+                conn_id: Some("connection-a".into()),
+                revision: 1,
+            },
+        )]))),
+        pending: Arc::new(StdMutex::new(HashMap::new())),
+        app_handle: Arc::new(Mutex::new(None)),
+        runtime: Arc::new(crate::runtime::RuntimeManager::default()),
+    };
+    bridge.clients.lock().await.insert(
+        "main".into(),
+        BridgeClient {
+            window_id: "main".into(),
+            connected_at_ms: 0,
+            bridge_key: crate::identity::bridge_key("main"),
+            conn_id: "connection-a".into(),
+            tx,
+        },
+    );
+    (bridge, rx)
+}
+
+/// Deliver a page message on the registered `main` connection.
+#[cfg(test)]
+pub(crate) async fn test_page_message(bridge: &Bridge, message: serde_json::Value) {
+    let client = bridge.clients.lock().await["main"].clone();
+    handle_bridge_message(
+        &message.to_string(),
+        &client.tx,
+        &bridge.clients,
+        &bridge.connections,
+        &bridge.pending,
+        &client.conn_id,
+    )
+    .await;
+}
+
 #[cfg(test)]
 mod transport_tests {
     use super::*;
     use serde_json::json;
 
     async fn queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<String>) {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let bridge = Bridge {
-            port: 0,
-            clients: Arc::new(Mutex::new(HashMap::new())),
-            connections: Arc::new(StdMutex::new(HashMap::from([(
-                "main".into(),
-                ConnectionState {
-                    bridge_key: crate::identity::bridge_key("main"),
-                    conn_id: Some("connection-a".into()),
-                    revision: 1,
-                },
-            )]))),
-            pending: Arc::new(StdMutex::new(HashMap::new())),
-            app_handle: Arc::new(Mutex::new(None)),
-            runtime: Arc::new(crate::runtime::RuntimeManager::default()),
-        };
-        bridge.clients.lock().await.insert(
-            "main".into(),
-            BridgeClient {
-                window_id: "main".into(),
-                connected_at_ms: 0,
-                bridge_key: crate::identity::bridge_key("main"),
-                conn_id: "connection-a".into(),
-                tx,
-            },
-        );
-        (bridge, rx)
+        super::test_queued_bridge().await
     }
 
     #[tokio::test]
@@ -3240,6 +3286,65 @@ mod transport_tests {
         };
         assert!(fail().is_err());
         assert!(cleaned);
+    }
+
+    #[test]
+    fn generated_page_scripts_are_valid_javascript() {
+        let Ok(probe) = std::process::Command::new("node").arg("--version").output() else {
+            eprintln!("node unavailable; skipping generated script syntax check");
+            return;
+        };
+        assert!(probe.status.success());
+        let directory = std::env::temp_dir().join(format!("bridge-js-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        for (name, source) in [
+            ("init.js", bridge_init_script(9555, "main")),
+            ("eval.js", eval_script("(async () => 1)()", "id", "event")),
+        ] {
+            let path = directory.join(name);
+            std::fs::write(&path, source).unwrap();
+            let check = std::process::Command::new("node")
+                .arg("--check")
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(
+                check.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&check.stderr)
+            );
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn page_effect_report_reaches_execution_failure() {
+        use connector_client::outcome::EffectStatus;
+        for (report, expected) in [
+            (Some("none"), EffectStatus::None),
+            (Some("possible"), EffectStatus::Possible),
+            (Some("forged"), EffectStatus::Possible),
+            (None, EffectStatus::Possible),
+        ] {
+            let (bridge, mut rx) = queued_bridge().await;
+            let worker = bridge.clone();
+            let task = tokio::spawn(async move {
+                worker
+                    .execute_js_for_window_typed("readThenThrow()", 1000, "main")
+                    .await
+            });
+            let command: serde_json::Value =
+                serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+            let mut message = json!({"id": command["id"], "error": "page threw"});
+            if let Some(report) = report {
+                message["effect"] = json!(report);
+            }
+            super::test_page_message(&bridge, message).await;
+            let Err(BridgeError::ExecutionFailed { effect, .. }) = task.await.unwrap() else {
+                panic!("expected an execution failure");
+            };
+            assert_eq!(effect, expected, "{report:?}");
+        }
     }
 
     #[test]

@@ -525,7 +525,7 @@ impl Response {
 
     /// Keep typed execution facts intact; classify only registered legacy tool contracts.
     pub fn into_outcome(self, tool: &str) -> connector_client::outcome::ExecutionOutcome {
-        use connector_client::outcome::{ExecutionOutcome, WorkflowError, legacy_outcome};
+        use connector_client::outcome::{WorkflowError, legacy_outcome};
         if let Some(outcome) = self.outcome {
             return outcome;
         }
@@ -533,11 +533,10 @@ impl Response {
             ResponsePayload::Success { result } => legacy_outcome(tool, result),
             // A legacy handler error carries no dispatch acknowledgement. It cannot
             // justify releasing a possibly active write's lease or replaying it.
-            ResponsePayload::Error { error } => ExecutionOutcome::unknown(WorkflowError::new(
-                "outcome_unknown",
-                "dispatching",
-                error,
-            )),
+            ResponsePayload::Error { error } => connector_client::outcome::legacy_error_outcome(
+                tool,
+                WorkflowError::new("outcome_unknown", "dispatching", error),
+            ),
         }
     }
 
@@ -601,6 +600,20 @@ pub struct BridgeResult {
     pub result: Option<serde_json::Value>,
     #[serde(default)]
     pub error: Option<String>,
+    /// Page-side effect observation for a rejected script. Only `"none"` is
+    /// trusted to release the lease; anything else keeps the effect possible.
+    #[serde(default)]
+    pub effect: Option<String>,
+}
+
+impl BridgeResult {
+    pub fn reported_effect(&self) -> connector_client::outcome::EffectStatus {
+        if self.effect.as_deref() == Some("none") {
+            connector_client::outcome::EffectStatus::None
+        } else {
+            connector_client::outcome::EffectStatus::Possible
+        }
+    }
 }
 
 /// App metadata for backend_state.

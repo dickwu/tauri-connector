@@ -8,7 +8,7 @@ Complete parameter tables for tauri-connector MCP tools. Configure in `.mcp.json
 
 The standalone MCP server (`tauri-connector-mcp`) adds one additional tool, `driver_session`, and reads `TAURI_CONNECTOR_WORKFLOW_TOKEN` from its environment for the `workflow_*` tools (put it in the `env` block of its `.mcp.json` entry). Legacy `/sse` remains available for older clients.
 
-**Response envelope (0.15+).** Every tool result can carry a typed `outcome` (`structuredContent.outcome` on success, `structuredContent.{error, outcome}` on failure) with `execution`, `verification`, `effect`, and a stable `error.code` -- see "Run report fields" and "Error codes" under Workflow tools. A legacy handler error without a typed outcome surfaces as `outcome_unknown`. Mutating tools, plus `webview_screenshot`, `webview_dom_snapshot`, `webview_find_element`, `webview_get_styles`, and `webview_wait_for`, take an application-owned lease on the target window and can return `resource_busy` while a workflow, batch, or another tool holds it; read-only diagnostics such as `read_logs`, `bridge_status`, `ipc_get_backend_state`, `artifact_list`, and `artifact_read` are never blocked. A lease quarantined by an uncertain write (`quarantined: true`) is released only by restarting the app -- no tool clears it. Mutating tools can also fail with `persistence_unavailable` when the app's data directory is unusable, because the lease journal must be writable first.
+**Response envelope (0.15+).** Every tool result can carry a typed `outcome` (`structuredContent.outcome` on success, `structuredContent.{error, outcome}` on failure) with `execution`, `verification`, `effect`, and a stable `error.code` -- see "Run report fields" and "Error codes" under Workflow tools. A legacy handler error without a typed outcome surfaces as `outcome_unknown`. Mutating tools, plus `webview_screenshot`, `webview_dom_snapshot`, `webview_find_element`, `webview_get_styles`, and `webview_wait_for`, take an application-owned lease on the target window and can return `resource_busy` while a workflow, batch, or another tool holds it; read-only diagnostics such as `read_logs`, `bridge_status`, `ipc_get_backend_state`, `artifact_list`, and `artifact_read` are never blocked. A lease quarantined by an uncertain write (`quarantined: true`) is released only by restarting the app -- no tool clears it. A failure that provably dispatched nothing (`effect: none`) releases its lease instead: failed screenshot, snapshot, element, style, and wait tools, and `webview_execute_js` scripts that throw or reject without dispatching anything. Mutating tools can also fail with `persistence_unavailable` when the app's data directory is unusable, because the lease journal must be writable first.
 
 ---
 
@@ -188,6 +188,8 @@ All shown JSON requires envelope authorization from the host adapter; no credent
 ### webview_execute_js
 
 Execute arbitrary JavaScript in the webview. Use IIFE for return values.
+
+A script that throws or rejects reports `execution_failed`. Its `effect` is `none` -- and the window lease is released -- only when the page observed no backend-capable dispatch while it ran: no app IPC (`invoke`), no non-GET/HEAD/OPTIONS `fetch` or XHR, no `sendBeacon`, and no app WebSocket send. Anything else, including app background traffic during the script or an unobservable channel, reports `effect: possible` and quarantines the window until the app restarts. Work scheduled to run after the rejection (timers, later event handlers) is not observed, and same-origin iframes are outside the monitor.
 
 | Param | Type | Required | Description |
 |---|---|---|---|
@@ -599,7 +601,7 @@ Every outcome -- workflow steps and, since 0.15, legacy tools inside `batch_acti
 | `target_changed`, `stale_ref` | The window vanished or the page identity changed between steps; a legacy `@eN` ref no longer resolves |
 | `binding_missing`, `binding_type_mismatch` | `fromInput` / `fromStep` did not resolve, or resolved to the wrong JSON type |
 | `precondition_failed`, `postcondition_failed`, `condition_timeout` | The last verified boundary no longer holds before dispatch; a required `expect`/`goal` failed; a `wait` or expectation ran out of time |
-| `execution_failed` | The action itself threw; read `effect` to see whether it may still have landed |
+| `execution_failed` | The action itself threw; read `effect` to see whether it may still have landed. `effect: none` leaves no quarantine, so the next call can run |
 | `outcome_unknown` | Dispatched, result lost: `effect: possible`, resources quarantined until the app restarts. Inspect, then `reconcile`; never replay |
 | `run_key_conflict`, `run_not_found`, `run_expired` | Key reused with a different spec; unknown run id; run or evidence no longer retained in this app instance |
 | `stale_checkpoint`, `resume_not_safe`, `app_instance_changed`, `resume_requires_inputs` | Resume rejected: re-read the report for the current `revision`/`checkpointId`; the run is still executing or has nothing to reconcile; the app restarted (history is read-only); continuing needs inputs that were not persisted |

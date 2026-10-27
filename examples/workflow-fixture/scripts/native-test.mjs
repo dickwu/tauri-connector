@@ -241,6 +241,15 @@ async function run() {
     await rpc.js("window.__TAURI__.core.invoke('fixture_set_delay',{delayMs:0})");
     return { saveEffects: 1 };
   });
+  await test('JS exception without a dispatch leaves the window usable', async () => {
+    const before = store().saveCalls;
+    const response = await rpc.request({ type: 'execute_js', window_id: 'main', script: '(async () => { const r = undefined; r.querySelectorAll("x") })()' });
+    assert.equal(response.outcome?.error?.code, 'execution_failed', JSON.stringify(response));
+    assert.equal(response.outcome.effect, 'none', JSON.stringify(response.outcome));
+    assert.equal(store().saveCalls, before);
+    assert.equal(await rpc.js('1+1'), 2);
+    return { saveEffects: 0, outcome: response.outcome, nextEvalRan: true };
+  });
   await test('JS exception after native write does not replay through eval', async () => {
     const before = store().saveCalls;
     const response = await rpc.request({ type: 'execute_js', window_id: 'main', script: "(async()=>{await window.__TAURI__.core.invoke('fixture_create_task',{name:'throw-after-write'});throw new Error('fixture exception after write')})()" });

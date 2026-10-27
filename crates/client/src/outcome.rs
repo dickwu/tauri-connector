@@ -169,6 +169,29 @@ pub const ERROR_CODES: &[&str] = &[
 
 /// Adapter for known legacy tool contracts. It deliberately does not inspect
 /// arbitrary query results for business `error`, `ok`, or `found` fields.
+/// Lease-holding tools that only observe the UI. Their leases serialize UI
+/// access; they never carry a business write that a retry could duplicate.
+const NON_MUTATING_LEASED_TOOLS: &[&str] = &[
+    "screenshot",
+    "dom_snapshot",
+    "find_element",
+    "get_styles",
+    "wait_for",
+    "wait",
+];
+
+/// A legacy handler error carries no dispatch acknowledgement, so the result
+/// stays unknown. Only a non-mutating tool may declare that it had no effect;
+/// any other tool keeps `effect: possible`, which quarantines its resources.
+pub fn legacy_error_outcome(tool: &str, error: WorkflowError) -> ExecutionOutcome {
+    let canonical = tool.strip_prefix("webview_").unwrap_or(tool);
+    let mut out = ExecutionOutcome::unknown(error);
+    if NON_MUTATING_LEASED_TOOLS.contains(&canonical) {
+        out.effect = EffectStatus::None;
+    }
+    out
+}
+
 pub fn legacy_outcome(tool: &str, value: Value) -> ExecutionOutcome {
     let canonical = tool.strip_prefix("webview_").unwrap_or(tool);
     let mut out = ExecutionOutcome::completed(value, EffectStatus::Possible);
@@ -206,6 +229,33 @@ pub fn legacy_outcome(tool: &str, value: Value) -> ExecutionOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_errors_are_effect_free_only_for_read_only_tools() {
+        let error = || WorkflowError::new("outcome_unknown", "dispatching", "failed");
+        for tool in [
+            "dom_snapshot",
+            "webview_dom_snapshot",
+            "screenshot",
+            "wait_for",
+        ] {
+            let out = legacy_error_outcome(tool, error());
+            assert_eq!(out.execution, ExecutionStatus::OutcomeUnknown, "{tool}");
+            assert_eq!(out.effect, EffectStatus::None, "{tool}");
+        }
+        for tool in [
+            "interact",
+            "webview_keyboard",
+            "ipc_execute_command",
+            "execute_js",
+        ] {
+            assert_eq!(
+                legacy_error_outcome(tool, error()).effect,
+                EffectStatus::Possible,
+                "{tool}"
+            );
+        }
+    }
+
     #[test]
     fn business_json_does_not_decide_success() {
         for data in [

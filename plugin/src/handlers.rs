@@ -311,9 +311,11 @@ fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
         BridgeError::NotDispatched { reason, .. } => ExecutionOutcome::not_dispatched(
             WorkflowError::new("execution_failed", "dispatching", reason),
         ),
-        BridgeError::ExecutionFailed { error, .. } => ExecutionOutcome::failed(
+        // A settled rejection releases its lease only with page evidence that
+        // nothing effect-capable was dispatched; otherwise it stays quarantined.
+        BridgeError::ExecutionFailed { error, effect, .. } => ExecutionOutcome::failed(
             WorkflowError::new("execution_failed", "executing", error),
-            EffectStatus::Possible,
+            effect,
         ),
         BridgeError::DispatchedOutcomeUnknown { reason, .. } => {
             ExecutionOutcome::unknown(WorkflowError::new("outcome_unknown", "dispatching", reason))
@@ -4037,6 +4039,7 @@ mod tests {
         let failed = super::bridge_error_outcome(BridgeError::ExecutionFailed {
             request_id: "r3".into(),
             error: "threw after writing".into(),
+            effect: EffectStatus::Possible,
         });
         assert_eq!(failed.execution, ExecutionStatus::Failed);
         assert_eq!(failed.effect, EffectStatus::Possible);
