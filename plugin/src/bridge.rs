@@ -868,7 +868,9 @@ impl Bridge {
     async fn run_server(&self, listener: TokioTcpListener) -> Result<(), String> {
         loop {
             let (stream, addr) = listener.accept().await.map_err(|e| e.to_string())?;
-            println!("[connector][bridge] Webview client connected from {addr}");
+            if crate::server::connection_logs_enabled() {
+                println!("[connector][bridge] Webview client connected from {addr}");
+            }
             let clients = self.clients.clone();
             let connections = self.connections.clone();
             let pending = self.pending.clone();

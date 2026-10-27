@@ -86,7 +86,11 @@ impl Server {
         loop {
             match listener.accept().await {
                 Ok((stream, peer)) => {
-                    println!("[connector][server] Client connected: {peer}");
+                    // MCP clients and the CLI reconnect constantly (every
+                    // command, health polls); log them only when asked.
+                    if connection_logs_enabled() {
+                        println!("[connector][server] Client connected: {peer}");
+                    }
                     let bridge = self.bridge.clone();
                     let app_handle = self.app_handle.clone();
                     let state = self.state.clone();
@@ -138,7 +142,9 @@ impl Server {
                             });
                         }
 
-                        println!("[connector][server] Client disconnected");
+                        if connection_logs_enabled() {
+                            println!("[connector][server] Client disconnected: {peer}");
+                        }
                     });
                 }
                 Err(e) => {
@@ -757,8 +763,27 @@ where
         .map_err(|e| e.to_string())
 }
 
+/// Per-connection logging is opt-in with `TAURI_CONNECTOR_VERBOSE=1`.
+pub(crate) fn connection_logs_enabled() -> bool {
+    verbose_flag(std::env::var("TAURI_CONNECTOR_VERBOSE").ok().as_deref())
+}
+
+fn verbose_flag(value: Option<&str>) -> bool {
+    matches!(value.map(str::trim), Some(v) if !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
+}
+
 #[cfg(test)]
 mod rich_screenshot_envelope_tests {
+    #[test]
+    fn connection_logs_are_quiet_unless_verbose() {
+        assert!(!super::verbose_flag(None));
+        assert!(!super::verbose_flag(Some("")));
+        assert!(!super::verbose_flag(Some("0")));
+        assert!(!super::verbose_flag(Some("false")));
+        assert!(super::verbose_flag(Some("1")));
+        assert!(super::verbose_flag(Some("true")));
+    }
+
     use super::*;
 
     #[test]
