@@ -2134,6 +2134,16 @@ pub async fn screenshot(
     if let Some(app) = app {
         match xcap_screenshot(app, window_id, format, quality, max_width).await {
             Ok(result) => {
+                let result = retake_uniform_capture(
+                    result,
+                    Some(app),
+                    window_id,
+                    format,
+                    quality,
+                    max_width,
+                    bridge,
+                )
+                .await;
                 return finish_screenshot_response(
                     id, result, annotate, save, output_dir, name_hint, overwrite, selector,
                     window_id, bridge, state,
@@ -2146,12 +2156,12 @@ pub async fn screenshot(
         }
     }
 
-    // suppress unused warnings when xcap feature is disabled
-    let _ = app;
-
     // Tier 2: snapdom JS capture (requires @zumer/snapdom in frontend)
     match snapdom_screenshot(format, quality, max_width, window_id, bridge).await {
         Ok(result) => {
+            let result =
+                retake_uniform_capture(result, app, window_id, format, quality, max_width, bridge)
+                    .await;
             finish_screenshot_response(
                 id, result, annotate, save, output_dir, name_hint, overwrite, selector, window_id,
                 bridge, state,
@@ -2196,14 +2206,15 @@ async fn xcap_screenshot(
         let windows =
             xcap::Window::all().map_err(|e| format!("Failed to enumerate windows: {e}"))?;
 
-        let target = windows
-            .into_iter()
-            .find(|w| {
-                let is_minimized = w.is_minimized().unwrap_or(true);
-                let w_title = w.title().unwrap_or_default();
-                !is_minimized && w_title.contains(&title)
-            })
-            .ok_or_else(|| format!("No visible window matching title '{title}'"))?;
+        let target = pick_own_window(
+            windows,
+            &title,
+            std::process::id(),
+            |w| w.is_minimized().unwrap_or(true),
+            |w| w.title().unwrap_or_default(),
+            |w| w.pid().ok(),
+        )
+        .ok_or_else(|| format!("No visible window of this app matching title '{title}'"))?;
 
         target
             .capture_image()
@@ -2239,6 +2250,156 @@ async fn xcap_screenshot(
         "method": "xcap",
         "captureSource": "window_native",
     }))
+}
+
+/// Choose this app's window for a legacy xcap capture. Windows owned by
+/// another process are never eligible (a browser tab or editor whose title
+/// contains the app title used to win), an exact title beats a substring and
+/// a window whose pid is unreadable is only a last resort.
+#[cfg_attr(not(feature = "xcap"), allow(dead_code))]
+fn pick_own_window<W>(
+    windows: Vec<W>,
+    title: &str,
+    own_pid: u32,
+    minimized: impl Fn(&W) -> bool,
+    window_title: impl Fn(&W) -> String,
+    pid: impl Fn(&W) -> Option<u32>,
+) -> Option<W> {
+    let mut best: Option<(u8, W)> = None;
+    for window in windows {
+        if minimized(&window) {
+            continue;
+        }
+        let name = window_title(&window);
+        if !name.contains(title) {
+            continue;
+        }
+        let rank = match pid(&window) {
+            Some(p) if p != own_pid => continue,
+            Some(_) if name == title => 3,
+            Some(_) => 2,
+            None => 1,
+        };
+        if best.as_ref().is_none_or(|(current, _)| rank > *current) {
+            best = Some((rank, window));
+        }
+    }
+    best.map(|(_, window)| window)
+}
+
+/// True when a full-window capture should be retaken from the WebView's own
+/// snapshot: the page is not hidden, yet the image is a single colour (R2-5:
+/// an open AntD modal produced an all-white window capture).
+fn uniform_capture_needs_retake(visibility: Option<&str>, uniform: bool) -> bool {
+    page_hidden_warning_for(visibility, uniform)
+        .is_some_and(|warning| warning["reasons"] == serde_json::json!(["uniform_image"]))
+}
+
+/// Retake a uniform full-window capture with the redacted webview_native
+/// pipeline. The original result is kept, with the attempt recorded, when the
+/// retake fails or is itself uniform.
+async fn retake_uniform_capture(
+    mut result: serde_json::Value,
+    app: Option<&tauri::AppHandle>,
+    window_id: &str,
+    format: &str,
+    quality: u8,
+    max_width: Option<u32>,
+    bridge: &Bridge,
+) -> serde_json::Value {
+    let Some(app) = app else {
+        return result;
+    };
+    if !screenshot_is_uniform(&result) {
+        return result;
+    }
+    let visibility = bridge
+        .execute_js_for_window("document.visibilityState", PAGE_HIDDEN_PROBE_MS, window_id)
+        .await
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string));
+    if !uniform_capture_needs_retake(visibility.as_deref(), true) {
+        return result;
+    }
+    let from = result
+        .get("captureSource")
+        .or_else(|| result.get("method"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let mut fallback = serde_json::json!({
+        "from": from,
+        "to": "webview_native",
+        "reason": "uniform_image",
+    });
+    let retaken = match crate::screenshot::webview_native_png(app, bridge, window_id, 10_000).await
+    {
+        Ok(png) => webview_png_result(png, format, quality, max_width),
+        Err(error) => Err(error),
+    };
+    match retaken {
+        Ok(mut retaken) if !screenshot_is_uniform(&retaken) => {
+            fallback["outcome"] = serde_json::json!("used");
+            retaken["fallback"] = fallback;
+            retaken
+        }
+        Ok(_) => {
+            fallback["outcome"] = serde_json::json!("also_uniform");
+            result["fallback"] = fallback;
+            result
+        }
+        Err(error) => {
+            fallback["outcome"] = serde_json::json!("failed");
+            fallback["error"] = serde_json::json!(error);
+            result["fallback"] = fallback;
+            result
+        }
+    }
+}
+
+/// Shape a redacted webview_native PNG like a legacy screenshot result.
+#[cfg(feature = "capture-codec")]
+fn webview_png_result(
+    png: Vec<u8>,
+    format: &str,
+    quality: u8,
+    max_width: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let image = image::load_from_memory(&png)
+        .map_err(|e| format!("webview_native decode failed: {e}"))?
+        .to_rgba8();
+    let original_width = image.width();
+    let original_height = image.height();
+    let width = max_width
+        .filter(|max| *max > 0 && *max < original_width)
+        .unwrap_or(original_width);
+    let height = ((f64::from(original_height) * f64::from(width) / f64::from(original_width))
+        .round() as u32)
+        .max(1);
+    let encoded = encode_image(image, format, quality, max_width)?;
+    let mime = match format {
+        "jpeg" | "jpg" => "image/jpeg",
+        "webp" => "image/webp",
+        _ => "image/png",
+    };
+    Ok(serde_json::json!({
+        "base64": base64::engine::general_purpose::STANDARD.encode(&encoded),
+        "mimeType": mime,
+        "width": width,
+        "height": height,
+        "method": "webview_native",
+        "captureSource": "webview_native",
+        "redaction": "applied",
+    }))
+}
+
+#[cfg(not(feature = "capture-codec"))]
+fn webview_png_result(
+    _png: Vec<u8>,
+    _format: &str,
+    _quality: u8,
+    _max_width: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    Err("capture_backend_unavailable: capture-codec feature".into())
 }
 
 /// Fallback screenshot using snapdom (@zumer/snapdom).
@@ -3389,7 +3550,7 @@ fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
     }
 }
 
-#[cfg(feature = "xcap")]
+#[cfg(feature = "capture-codec")]
 /// Encode an RgbaImage to the requested format, optionally resizing.
 fn encode_image(
     image: image::RgbaImage,
@@ -4319,6 +4480,65 @@ mod tests {
         let blank = super::page_hidden_warning_for(Some("visible"), true).unwrap();
         assert_eq!(blank["reasons"], serde_json::json!(["uniform_image"]));
         assert!(blank["message"].as_str().unwrap().contains("single colour"));
+    }
+
+    #[test]
+    fn only_visible_uniform_captures_are_retaken_from_the_webview() {
+        assert!(super::uniform_capture_needs_retake(Some("visible"), true));
+        assert!(super::uniform_capture_needs_retake(None, true));
+        assert!(!super::uniform_capture_needs_retake(Some("visible"), false));
+        // A hidden page would snapshot blank through every backend.
+        assert!(!super::uniform_capture_needs_retake(Some("hidden"), true));
+    }
+
+    #[test]
+    fn legacy_window_capture_never_picks_another_process() {
+        // (title, pid, minimized)
+        let windows = vec![
+            ("R2 Client - Chrome", Some(7), false),
+            ("R2 Client", Some(42), true),
+            ("R2 Client (devtools)", Some(42), false),
+            ("R2 Client", Some(42), false),
+        ];
+        let pick = |windows: Vec<(&'static str, Option<u32>, bool)>| {
+            super::pick_own_window(
+                windows,
+                "R2 Client",
+                42,
+                |w| w.2,
+                |w| w.0.to_string(),
+                |w| w.1,
+            )
+        };
+        assert_eq!(pick(windows.clone()), Some(("R2 Client", Some(42), false)));
+        assert_eq!(
+            pick(windows[..3].to_vec()),
+            Some(("R2 Client (devtools)", Some(42), false))
+        );
+        assert_eq!(pick(windows[..1].to_vec()), None);
+        assert_eq!(
+            pick(vec![("R2 Client", None, false)]),
+            Some(("R2 Client", None, false))
+        );
+    }
+
+    #[cfg(feature = "capture-codec")]
+    #[test]
+    fn webview_retake_is_shaped_like_a_legacy_result() {
+        let mut image = image::RgbaImage::from_pixel(40, 20, image::Rgba([255, 255, 255, 255]));
+        image.put_pixel(3, 3, image::Rgba([0, 0, 0, 255]));
+        let mut png = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let result = super::webview_png_result(png, "jpeg", 80, Some(20)).unwrap();
+        assert_eq!(result["captureSource"], "webview_native");
+        assert_eq!(result["mimeType"], "image/jpeg");
+        assert_eq!(
+            (result["width"].as_u64(), result["height"].as_u64()),
+            (Some(20), Some(10))
+        );
+        assert_eq!(result["redaction"], "applied");
     }
 
     #[cfg(feature = "capture-codec")]

@@ -22,6 +22,8 @@ const { chromium } = require('playwright');
     await page.evaluate(()=>{const node=document.createElement('custom-secret');node.textContent='opaque';document.body.append(node);});
     assert.deepEqual((await invoke({cmd:'probe'})).uncoveredReasons,['shadow_boundary']);
     await page.evaluate(()=>document.querySelector('custom-secret').remove());
+    // R2-8: without window.snapdom the error names the remedy.
+    await assert.rejects(()=>invoke({cmd:'dom_capture'}),/capture_backend_unavailable: dom_rendering needs a host-bundled snapdom on window\.snapdom.*window\.snapdom = snapdom/);
     // A test renderer paints a known color; verify masks precede toDataURL.
     await page.evaluate(()=>{window.snapdom=async()=>({toCanvas:async()=>{
       const canvas=document.createElement('canvas');canvas.width=document.documentElement.scrollWidth;canvas.height=document.documentElement.scrollHeight;
@@ -44,6 +46,6 @@ const { chromium } = require('playwright');
     await page.evaluate(()=>document.querySelector('[data-connector-picker-ui]').style.visibility='hidden');
     assert(!(await invoke({cmd:'probe'})).uncoveredReasons.includes('picker_decoration_visible'));
     await page.evaluate(()=>window.geometryTest.dispose());
-    console.log(JSON.stringify({status:'passed',checks:10,layer:'chromium_contract',native:false}));
+    console.log(JSON.stringify({status:'passed',checks:11,layer:'chromium_contract',native:false}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

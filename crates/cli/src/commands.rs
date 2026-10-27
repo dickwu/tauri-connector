@@ -918,6 +918,8 @@ pub async fn screenshot(
         "refsPath": result.get("refsPath").cloned().or_else(|| latest_ref_cache_path(resolved)).unwrap_or(Value::Null),
         "rectCssPx": result.get("rectCssPx").cloned().unwrap_or(Value::Null),
         "devicePixelRatio": result.get("devicePixelRatio").cloned().unwrap_or(Value::Null),
+        "captureSource": result.get("captureSource").cloned().unwrap_or(Value::Null),
+        "fallback": result.get("fallback").cloned().unwrap_or(Value::Null),
     });
     append_cli_artifact_manifest(instance, &metadata)?;
     let size_kb = bytes.len() / 1024;
@@ -930,6 +932,9 @@ pub async fn screenshot(
     let warnings = result.get("warnings").cloned().unwrap_or(Value::Null);
     for message in screenshot_warning_messages(&warnings) {
         eprintln!("warning: {message}");
+    }
+    if let Some(note) = screenshot_fallback_note(result.get("fallback")) {
+        eprintln!("note: {note}");
     }
     println!(
         "{}",
@@ -948,6 +953,32 @@ pub async fn screenshot(
         .unwrap_or_default()
     );
     Ok(())
+}
+
+/// Describe a plugin-side capture retake, e.g. a uniform window capture that
+/// was replaced by the WebView's own snapshot.
+fn screenshot_fallback_note(fallback: Option<&Value>) -> Option<String> {
+    let fallback = fallback.filter(|v| v.is_object())?;
+    let text = |key: &str| fallback.get(key).and_then(Value::as_str).unwrap_or("?");
+    let reason = text("reason");
+    Some(match text("outcome") {
+        "used" => format!(
+            "{} capture was {reason}; used {} instead",
+            text("from"),
+            text("to")
+        ),
+        "also_uniform" => format!(
+            "{} capture was {reason}; {} retake was also uniform",
+            text("from"),
+            text("to")
+        ),
+        _ => format!(
+            "{} capture was {reason}; {} retake failed: {}",
+            text("from"),
+            text("to"),
+            text("error")
+        ),
+    })
 }
 
 /// One line per plugin screenshot warning, e.g. `page_hidden: ...`.
@@ -2086,6 +2117,21 @@ mod tests {
             vec!["page_hidden: The page reports visibilityState=hidden".to_string()]
         );
         assert!(super::screenshot_warning_messages(&serde_json::Value::Null).is_empty());
+    }
+
+    #[test]
+    fn screenshot_retakes_are_reported() {
+        let used = json!({"from":"window_native","to":"webview_native","reason":"uniform_image","outcome":"used"});
+        assert_eq!(
+            super::screenshot_fallback_note(Some(&used)).unwrap(),
+            "window_native capture was uniform_image; used webview_native instead"
+        );
+        let failed = json!({"from":"dom_rendering","to":"webview_native","reason":"uniform_image","outcome":"failed","error":"capture_timeout"});
+        assert!(super::screenshot_fallback_note(Some(&failed))
+            .unwrap()
+            .ends_with("retake failed: capture_timeout"));
+        assert!(super::screenshot_fallback_note(None).is_none());
+        assert!(super::screenshot_fallback_note(Some(&serde_json::Value::Null)).is_none());
     }
 
     #[test]

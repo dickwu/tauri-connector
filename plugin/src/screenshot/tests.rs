@@ -283,3 +283,34 @@ fn pixel_stages_measure_actual_work_before_safe_output_transcoding() {
         assert!(conversion[stage]["elapsedNs"].as_u64().unwrap() > 0);
     }
 }
+
+#[test]
+fn macos_title_bar_band_is_cropped_from_full_size_content_frames() {
+    // R2-8: tao reported inner == outer (1120x690) while the WKWebView
+    // viewport was 1120x658 below a 32 px title bar.
+    let inset = super::title_bar_inset((1120, 690), (1120, 658));
+    if cfg!(target_os = "macos") {
+        assert_eq!(inset, Some(32));
+        assert_eq!(super::title_bar_inset((2241, 1380), (2240, 1316)), Some(64));
+    } else {
+        assert_eq!(inset, None);
+    }
+    assert_eq!(super::title_bar_inset((1120, 658), (1120, 658)), None);
+    assert_eq!(super::title_bar_inset((1000, 690), (1120, 658)), None);
+    assert_eq!(super::title_bar_inset((1120, 1200), (1120, 658)), None);
+}
+
+#[test]
+fn dom_capture_errors_keep_the_page_capture_code() {
+    assert_eq!(
+        super::dom_capture_error(
+            "execution_failed: capture_backend_unavailable: dom_rendering needs snapdom (requestId: x)"
+        ),
+        "capture_backend_unavailable: dom_rendering needs snapdom (requestId: x)"
+    );
+    assert_eq!(
+        super::dom_capture_error("execution_failed: boom happened"),
+        "execution_failed: boom happened"
+    );
+    assert_eq!(super::dom_capture_error("timeout"), "timeout");
+}

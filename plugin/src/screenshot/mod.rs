@@ -233,6 +233,52 @@ where
     }).await.map_err(|_| "capture_timeout: late native results will be discarded".to_string())?
 }
 
+/// Redacted WebView-native PNG for the legacy screenshot path when its
+/// window or DOM capture came back as a single colour. The output has passed
+/// the same mask pipeline as `--source webview_native`; raw frames still never
+/// leave this module.
+pub async fn webview_native_png(
+    app: &tauri::AppHandle,
+    bridge: &Bridge,
+    window_id: &str,
+    timeout_ms: u64,
+) -> Result<Vec<u8>, String> {
+    let context = bridge
+        .runtime_context(window_id, timeout_ms)
+        .await
+        .map_err(|e| format!("runtime_unavailable: {e}"))?;
+    let context = serde_json::to_value(context).map_err(|_| "context_invalid".to_string())?;
+    let expected = context.clone();
+    let validate = || {
+        let expected = expected.clone();
+        async move {
+            let current = bridge
+                .runtime_context(window_id, timeout_ms)
+                .await
+                .map_err(|e| e.to_string())?;
+            if serde_json::to_value(current).map_err(|e| e.to_string())? != expected {
+                return Err("capture_context_changed".to_string());
+            }
+            Ok(())
+        }
+    };
+    capture_protected(
+        app,
+        bridge,
+        CaptureRequest {
+            window_id: window_id.into(),
+            context,
+            source: CaptureSource::WebviewNative,
+            target: None,
+            timeout_ms,
+            max_width: None,
+        },
+        validate,
+    )
+    .await
+    .map(|capture| capture.png)
+}
+
 async fn probe(bridge: &Bridge, request: &CaptureRequest) -> Result<Probe, String> {
     let value = bridge
         .execute_runtime(
@@ -257,11 +303,18 @@ async fn capture_source(
     bridge: &Bridge,
     request: &CaptureRequest,
     source: CaptureSource,
-    _probe: &Probe,
+    probe: &Probe,
 ) -> Result<RawFrame, String> {
     match source {
         CaptureSource::WebviewNative => native(app, &request.window_id).await,
-        CaptureSource::WindowNative => window_native(app, &request.window_id).await,
+        CaptureSource::WindowNative => {
+            let viewport = &probe.viewport;
+            let expected = (
+                (viewport.width_css * viewport.device_pixel_ratio).round() as u32,
+                (viewport.height_css * viewport.device_pixel_ratio).round() as u32,
+            );
+            window_native(app, &request.window_id, expected).await
+        }
         CaptureSource::DomRendering => {
             use base64::Engine;
             let result = bridge
@@ -273,7 +326,7 @@ async fn capture_source(
                     &uuid::Uuid::new_v4().to_string(),
                 )
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| dom_capture_error(&error.to_string()))?;
             let encoded = result
                 .get("base64")
                 .and_then(Value::as_str)
@@ -327,7 +380,11 @@ async fn native(app: &tauri::AppHandle, window_id: &str) -> Result<RawFrame, Str
         .map_err(|_| "capture_callback_closed".to_string())?
 }
 
-async fn window_native(app: &tauri::AppHandle, window_id: &str) -> Result<RawFrame, String> {
+async fn window_native(
+    app: &tauri::AppHandle,
+    window_id: &str,
+    expected: (u32, u32),
+) -> Result<RawFrame, String> {
     #[cfg(feature = "xcap")]
     {
         let window = app
@@ -405,7 +462,20 @@ async fn window_native(app: &tauri::AppHandle, window_id: &str) -> Result<RawFra
                 )
                 .to_image();
             } else if image.dimensions() != (inner_size.width, inner_size.height) {
-                return Err("geometry_unknown: xcap extent differs from native bounds".into());
+                return Err(format!(
+                    "geometry_unknown: xcap extent {}x{} differs from native window bounds (outer {}x{}, inner {}x{}); use --source webview_native",
+                    image.width(),
+                    image.height(),
+                    outer_size.width,
+                    outer_size.height,
+                    inner_size.width,
+                    inner_size.height
+                ));
+            }
+            if let Some(top) = title_bar_inset(image.dimensions(), expected) {
+                let width = image.width();
+                image = image::imageops::crop_imm(&image, 0, top, width, expected.1)
+                    .to_image();
             }
             Ok(RawFrame::Bitmap {
                 width: image.width(),
@@ -422,9 +492,38 @@ async fn window_native(app: &tauri::AppHandle, window_id: &str) -> Result<RawFra
     }
     #[cfg(not(feature = "xcap"))]
     {
-        let _ = (app, window_id);
-        Err("capture_backend_unavailable: xcap feature".into())
+        let _ = (app, window_id, expected);
+        Err("capture_backend_unavailable: window_native needs the plugin's xcap feature (enabled by default; restore default features or use --source webview_native)".into())
     }
+}
+
+/// Runtime script failures arrive wrapped as `execution_failed: <reason>`;
+/// surface the page's own capture code so callers see the real cause.
+fn dom_capture_error(message: &str) -> String {
+    message
+        .strip_prefix("execution_failed: ")
+        .filter(|inner| {
+            inner.split(':').next().is_some_and(|code| {
+                code.chars().all(|c| c.is_ascii_lowercase() || c == '_') && !code.is_empty()
+            })
+        })
+        .unwrap_or(message)
+        .to_string()
+}
+
+/// macOS windows with a full-size content view report identical inner and
+/// outer bounds while WKWebView insets its layout viewport below the title
+/// bar. The page then occupies the bottom of the client frame at full width;
+/// the top band is window chrome, never page pixels. Other platforms report a
+/// client area that already excludes decorations.
+#[cfg_attr(not(feature = "xcap"), allow(dead_code))]
+fn title_bar_inset(image: (u32, u32), expected: (u32, u32)) -> Option<u32> {
+    const MAX_TITLE_BAR_PX: u32 = 160;
+    if !cfg!(target_os = "macos") || image.0.abs_diff(expected.0) > 1 || image.1 <= expected.1 {
+        return None;
+    }
+    let inset = image.1 - expected.1;
+    (inset <= MAX_TITLE_BAR_PX).then_some(inset)
 }
 
 async fn process_frame(

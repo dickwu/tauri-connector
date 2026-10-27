@@ -55,7 +55,7 @@
       if (!before.ready || before.uncoveredReasons.length) throw new Error('redaction_unavailable');
       const library = window.snapdom;
       const capture = typeof library === 'function' ? library : library && library.snapdom;
-      if (typeof capture !== 'function') throw new Error('capture_backend_unavailable: host-bundled snapdom');
+      if (typeof capture !== 'function') throw new Error("capture_backend_unavailable: dom_rendering needs a host-bundled snapdom on window.snapdom; installing @zumer/snapdom is not enough (this pipeline never imports modules). Add `import { snapdom } from '@zumer/snapdom'; window.snapdom = snapdom;` to the app entry, or use --source webview_native");
       const width = window.innerWidth;
       const height = window.innerHeight;
       const dpr = window.devicePixelRatio || 1;
