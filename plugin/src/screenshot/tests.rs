@@ -340,6 +340,37 @@ fn webview_snapshot_extent_follows_the_css_viewport() {
 }
 
 #[test]
+fn wait_for_rides_out_a_reload_and_reports_the_last_error() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let calls = std::cell::Cell::new(0);
+    let ok = rt.block_on(super::service::wait_for(
+        std::time::Duration::from_millis(1000),
+        std::time::Duration::from_millis(5),
+        || {
+            calls.set(calls.get() + 1);
+            let n = calls.get();
+            async move {
+                if n < 3 {
+                    Err(format!("reloading {n}"))
+                } else {
+                    Ok(n)
+                }
+            }
+        },
+    ));
+    assert_eq!(ok, Ok(3));
+    let err = rt.block_on(super::service::wait_for::<(), _, _>(
+        std::time::Duration::from_millis(30),
+        std::time::Duration::from_millis(5),
+        || async { Err("runtime gone".to_string()) },
+    ));
+    assert_eq!(err, Err("runtime gone".to_string()));
+}
+
+#[test]
 fn a_hidden_page_names_the_window_and_the_remedy() {
     let message = super::service::hidden_window_error(Some("hidden")).unwrap();
     assert!(message.contains("--bring-to-front"));

@@ -876,7 +876,15 @@ pub async fn screenshot(
         if let Some(w) = max_width {
             args["maxWidth"] = json!(w);
         }
-        match client.inspect("webview_screenshot", &args).await {
+        let mut attempt = client.inspect("webview_screenshot", &args).await;
+        // git-strata #8: a reload landing mid-capture invalidates the bound
+        // page; capture the new page once more instead of falling back to
+        // the legacy renderer (which could return the stale frame).
+        if matches!(&attempt, Err(error) if default_capture_fallback(error).as_deref() == Some("capture_context_changed"))
+        {
+            attempt = client.inspect("webview_screenshot", &args).await;
+        }
+        match attempt {
             Ok(report) => {
                 return finish_default_screenshot(
                     report, output, format, overwrite, output_dir, name_hint, instance, resolved,
@@ -1013,7 +1021,9 @@ fn default_capture_fallback(error: &str) -> Option<String> {
         .and_then(|v| v.get("code").and_then(Value::as_str).map(str::to_string))
         .unwrap_or_else(|| error.split(':').next().unwrap_or("").trim().to_string());
     match code.as_str() {
-        "window_not_visible" => None,
+        // Errors about the current page, not the pipeline: the legacy
+        // renderer would not do better and could capture a stale frame.
+        "window_not_visible" | "capture_context_changed" => None,
         "" => Some("unknown".into()),
         _ => Some(code),
     }
@@ -2342,6 +2352,10 @@ mod tests {
                 Some("protocol_mismatch"),
             ),
             (r#"{"code":"window_not_visible","message":"hidden"}"#, None),
+            (
+                r#"{"code":"capture_context_changed","message":"reloaded"}"#,
+                None,
+            ),
         ] {
             assert_eq!(
                 super::default_capture_fallback(error).as_deref(),

@@ -324,13 +324,30 @@ async fn handle_inner(
         Ok(context) => context,
         Err(_) => {
             let visibility = page_visibility(bridge, window).await;
-            return Err(match hidden_window_error(visibility.as_deref()) {
-                Some(message) => error("window_not_visible", &message),
-                None => error(
+            if let Some(message) = hidden_window_error(visibility.as_deref()) {
+                return Err(error("window_not_visible", &message));
+            }
+            // git-strata #8/#9: right after a (hot) reload the old page is
+            // gone and the new runtime is not up yet. Wait for it, within
+            // the request budget, instead of failing or capturing a stale
+            // frame.
+            wait_for(
+                Duration::from_millis(timeout.min(RUNTIME_RELOAD_WAIT_MS)),
+                Duration::from_millis(150),
+                || async {
+                    bridge
+                        .runtime_context(window, timeout.min(1500))
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+            )
+            .await
+            .map_err(|_| {
+                error(
                     "runtime_unavailable",
-                    "Cannot bind screenshot to a ready runtime",
-                ),
-            });
+                    "Cannot bind screenshot to a ready runtime (the page did not finish loading in time)",
+                )
+            })?
         }
     };
     let context = serde_json::to_value(context)
@@ -713,6 +730,31 @@ pub(crate) fn hidden_window_error(visibility: Option<&str>) -> Option<String> {
     (visibility == Some("hidden")).then(|| {
         "The window's page is hidden (minimized, on another Space or desktop, fully covered, or the screen is locked or asleep), so the webview renders no frames to capture. Bring the window to the front and retry, or pass --bring-to-front (MCP: bringToFront: true) to let the connector unminimize, show and focus it first; a locked or sleeping screen must be unlocked".to_string()
     })
+}
+
+/// How long a screenshot waits for the page runtime to come back after a
+/// reload before reporting runtime_unavailable.
+const RUNTIME_RELOAD_WAIT_MS: u64 = 5000;
+
+/// Retry `attempt` every `interval` until it succeeds or `budget` elapses;
+/// returns the last error.
+pub(crate) async fn wait_for<T, F, Fut>(
+    budget: Duration,
+    interval: Duration,
+    mut attempt: F,
+) -> Result<T, String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let deadline = Instant::now() + budget;
+    loop {
+        match attempt().await {
+            Ok(value) => return Ok(value),
+            Err(error) if Instant::now() + interval >= deadline => return Err(error),
+            Err(_) => tokio::time::sleep(interval).await,
+        }
+    }
 }
 
 async fn page_visibility(bridge: &Bridge, window: &str) -> Option<String> {

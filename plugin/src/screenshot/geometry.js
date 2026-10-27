@@ -23,7 +23,24 @@
         timer=setTimeout(()=>finish('capture_not_ready: render_frame_timeout'),1000);
         raf=requestAnimationFrame(()=>{raf=requestAnimationFrame(()=>finish());});
       });
-      return {ready:true};
+      // git-strata #8/#9: right after a (hot) reload the first frames can
+      // still show the old page and innerWidth can briefly report a stale
+      // size (e.g. 1920). Wait, within a small budget, until the document has
+      // parsed and the viewport is unchanged across frames and matches the
+      // native window's logical inner size when the host supplies it.
+      const expected=args.expectedViewport&&Number.isFinite(args.expectedViewport.width)&&Number.isFinite(args.expectedViewport.height)?args.expectedViewport:null;
+      const budget=Number.isFinite(args.settleMs)?Math.max(0,Math.min(args.settleMs,1000)):400;
+      const sample=()=>({w:innerWidth,h:innerHeight,d:devicePixelRatio,r:document.readyState});
+      const fits=s=>!expected||(Math.abs(s.w-expected.width)<=2&&Math.abs(s.h-expected.height)<=2);
+      const until=performance.now()+budget;
+      let prev=sample(),frames=0,settled=false;
+      while(performance.now()<until){
+        await new Promise(resolve=>{const t=setTimeout(resolve,50);requestAnimationFrame(()=>{clearTimeout(t);resolve();});});
+        const next=sample();frames++;
+        if(next.w===prev.w&&next.h===prev.h&&next.d===prev.d&&next.r!=='loading'&&fits(next)){settled=true;break;}
+        prev=next;
+      }
+      return {ready:true,settled,settleFrames:frames};
     }
     if (args.cmd.startsWith('target_')) {
       for (const [key,value] of targets) if (value.until < performance.now()) {clearTimeout(value.timer);targets.delete(key);}

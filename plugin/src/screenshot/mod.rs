@@ -167,9 +167,12 @@ where
     tokio::time::timeout(Duration::from_millis(request.timeout_ms), async {
         let _permit = CAPTURES.acquire().await.map_err(|_| "capture_service_closed")?;
         validate().await?;
-        bridge.execute_runtime(&request.window_id,"geometry",
-            json!({"cmd":"frame_ready","expectedContext":request.context}),
-            request.timeout_ms.min(1500),&uuid::Uuid::new_v4().to_string()).await.map_err(|error|error.to_string())?;
+        let expected_viewport = logical_inner_size(app, &request.window_id)
+            .map(|(width, height)| json!({"width": width, "height": height}));
+        let frame = bridge.execute_runtime(&request.window_id,"geometry",
+            json!({"cmd":"frame_ready","expectedContext":request.context,"expectedViewport":expected_viewport}),
+            request.timeout_ms.min(2000),&uuid::Uuid::new_v4().to_string()).await.map_err(|error|error.to_string())?;
+        let viewport_settled = frame.get("settled").and_then(Value::as_bool).unwrap_or(true);
         validate().await?;
         let before = probe(bridge, &request).await?;
         if !before.ready { return Err("capture_not_ready: document is loading".into()); }
@@ -219,7 +222,7 @@ where
                             "maskedRegions":before.sensitive_rects.len(),"coverage":"declared_regions_and_field_heuristics",
                             "maskFingerprint":crate::runtime::manifest::content_hash(serde_json::to_string(&before.sensitive_rects).map_err(|_|"mask_serialization_failed")?.as_bytes()),
                             "uncoveredReasons":[]},
-                        "consistency":{"status":"stable_context","atomic":false},
+                        "consistency":{"status":"stable_context","atomic":false,"viewportSettled":viewport_settled},
                         "sideEffects":[],"fallbacks":fallbacks,"timings":timings
                     }) });
                 }
@@ -521,6 +524,16 @@ fn dom_capture_error(message: &str) -> String {
         })
         .unwrap_or(message)
         .to_string()
+}
+
+/// The window's logical (CSS px) inner size, which a settled single-webview
+/// page's innerWidth/innerHeight match.
+fn logical_inner_size(app: &tauri::AppHandle, window_id: &str) -> Option<(f64, f64)> {
+    use tauri::Manager;
+    let window = app.get_webview_window(window_id)?;
+    let scale = window.scale_factor().ok()?;
+    let size = window.inner_size().ok()?.to_logical::<f64>(scale);
+    (size.width > 0.0 && size.height > 0.0).then_some((size.width, size.height))
 }
 
 /// Size of the WKWebView snapshot rect, in view points. WebKit's CSS

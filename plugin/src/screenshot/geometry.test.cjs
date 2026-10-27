@@ -13,6 +13,13 @@ const { chromium } = require('playwright');
     await page.evaluate(fs.readFileSync(require.resolve('../semantic/core.js'),'utf8'));
     await page.evaluate(`window.geometryTest=${fs.readFileSync(require.resolve('./geometry.js'),'utf8')}`);
     const invoke = args => page.evaluate(args=>window.geometryTest.dispatch(args),args);
+    // git-strata #8/#9: frame_ready settles on a stable viewport that matches
+    // the native window, and gives up (unsettled) within its budget otherwise.
+    const steady=await invoke({cmd:'frame_ready',expectedViewport:{width:800,height:600}});
+    assert.equal(steady.settled,true);
+    const stale=await invoke({cmd:'frame_ready',expectedViewport:{width:1920,height:600},settleMs:200});
+    assert.equal(stale.settled,false);
+    assert(stale.settleFrames>=1);
     const probe=await invoke({cmd:'probe'});
     assert.equal(probe.viewport.widthCss,800);
     assert.equal(probe.sensitiveRects.length,2);
@@ -46,6 +53,6 @@ const { chromium } = require('playwright');
     await page.evaluate(()=>document.querySelector('[data-connector-picker-ui]').style.visibility='hidden');
     assert(!(await invoke({cmd:'probe'})).uncoveredReasons.includes('picker_decoration_visible'));
     await page.evaluate(()=>window.geometryTest.dispose());
-    console.log(JSON.stringify({status:'passed',checks:11,layer:'chromium_contract',native:false}));
+    console.log(JSON.stringify({status:'passed',checks:12,layer:'chromium_contract',native:false}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
