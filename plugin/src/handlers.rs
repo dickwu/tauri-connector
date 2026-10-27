@@ -190,6 +190,14 @@ fn ref_resolver_block(var_name: &str, ref_id: &str, entry: &RefEntry) -> String 
     )
 }
 
+const TEXT_JS: &str = include_str!("../js/text.js");
+
+/// The `text` strategy resolves to the deepest element containing the text
+/// (NBSP/whitespace-normalised), not the first ancestor such as `<html>`.
+fn text_locator_query(selector_js: &str) -> String {
+    format!("({TEXT_JS}).find({selector_js})")
+}
+
 async fn element_resolver_block(
     state: &PluginState,
     window_id: &str,
@@ -219,9 +227,7 @@ async fn element_resolver_block(
         "xpath" => format!(
             "document.evaluate({selector_js}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue"
         ),
-        "text" => format!(
-            "Array.from(document.querySelectorAll('*')).find(el => el.textContent && el.textContent.includes({selector_js}))"
-        ),
+        "text" => text_locator_query(&selector_js),
         _ => format!("document.querySelector({selector_js})"),
     };
     Ok(format!(
@@ -259,9 +265,7 @@ async fn promise_element_resolver_block(
         "xpath" => format!(
             "document.evaluate({selector_js}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue"
         ),
-        "text" => format!(
-            "Array.from(document.querySelectorAll('*')).find(el => el.textContent && el.textContent.includes({selector_js}))"
-        ),
+        "text" => text_locator_query(&selector_js),
         _ => format!("document.querySelector({selector_js})"),
     };
     let label_js = js_string(label);
@@ -856,21 +860,27 @@ pub async fn interact(
         (Some(sel), _, _) => {
             match element_resolver_block(state, window_id, sel, strategy, "el").await {
                 Ok(js) => js,
-                Err(e) => return Response::error(id.to_string(), e),
+                Err(e) => return Response::not_dispatched(id.to_string(), "stale_ref", e),
             }
         }
         (None, Some(px), Some(py)) => {
             format!(
-                "const el = document.elementFromPoint({px}, {py}); if (!el) return {{ error: 'No element at ({px}, {py})' }};"
+                "const el = document.elementFromPoint({px}, {py}); if (!el) return {{ code: 'target_not_found', error: 'No element at ({px}, {py})', dispatched: false }};"
             )
         }
         _ => {
-            return Response::error(id.to_string(), "Provide selector or x/y coordinates");
+            return Response::not_dispatched(
+                id.to_string(),
+                "invalid_spec",
+                "Provide selector or x/y coordinates",
+            );
         }
     };
 
     let action_code = match action {
-        "click" => "el.click();".to_string(),
+        "click" => format!(
+            "__interaction = ({CLICK_JS})(el); if (__interaction.dispatched === false) return __interaction;"
+        ),
         "double-click" | "dblclick" => {
             "el.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));".to_string()
         }
@@ -915,8 +925,9 @@ pub async fn interact(
             .to_string()
         }
         _ => {
-            return Response::error(
+            return Response::not_dispatched(
                 id.to_string(),
+                "invalid_spec",
                 format!(
                     "Unknown action: {action}. Use: click, double-click, focus, scroll, hover, hover-off, drag"
                 ),
@@ -927,9 +938,10 @@ pub async fn interact(
     let script = format!(
         r#"(() => {{
             {target}
+            let __interaction = {{}};
             {action_code}
             const rect = el.getBoundingClientRect();
-            return {{ action: "{action}", tag: el.tagName.toLowerCase(), rect: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }} }};
+            return {{ ...__interaction, action: "{action}", tag: el.tagName.toLowerCase(), rect: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }} }};
         }})()"#
     );
 
@@ -937,9 +949,35 @@ pub async fn interact(
         .execute_js_for_window_typed(&script, 5_000, window_id)
         .await
     {
-        Ok(result) => Response::success(id.to_string(), result),
+        Ok(result) => match pre_dispatch_failure(&result) {
+            Some(outcome) => Response::outcome_error(id.to_string(), outcome),
+            None => Response::success(id.to_string(), result),
+        },
         Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
     }
+}
+
+const CLICK_JS: &str = include_str!("../js/click.js");
+
+/// Page scripts report failures they detected before dispatching any event as
+/// `{dispatched: false, code?, error}`; resolver blocks report `{error}` before
+/// anything ran. Neither can have an effect, so the lease is not quarantined.
+fn pre_dispatch_failure(result: &serde_json::Value) -> Option<ExecutionOutcome> {
+    let error = result.get("error")?.as_str()?;
+    if result.get("dispatched").and_then(|v| v.as_bool()) == Some(true) {
+        return None;
+    }
+    let code = result.get("code").and_then(|v| v.as_str()).unwrap_or(
+        if result.get("staleRef").is_some() {
+            "stale_ref"
+        } else {
+            "target_not_found"
+        },
+    );
+    let mut outcome =
+        ExecutionOutcome::not_dispatched(WorkflowError::new(code, "resolving", error));
+    outcome.data = result.clone();
+    Some(outcome)
 }
 
 // ============ Drag and Drop ============
@@ -1107,8 +1145,9 @@ pub async fn keyboard(
     bridge: &Bridge,
 ) -> Response {
     if !matches!(action, "type" | "press") {
-        return Response::error(
+        return Response::not_dispatched(
             id.to_string(),
+            "invalid_spec",
             format!("Unknown keyboard action: {action}. Use: type, press"),
         );
     }
@@ -1150,14 +1189,7 @@ async fn execute_input(id: &str, script: &str, window_id: &str, bridge: &Bridge)
         .await
     {
         Ok(result) => Response::with_outcome(id.to_string(), input_outcome(result)),
-        Err(error) => Response::outcome_error(
-            id.to_string(),
-            ExecutionOutcome::unknown(WorkflowError::new(
-                "outcome_unknown",
-                "dispatching",
-                format!("Input failed: {error}"),
-            )),
-        ),
+        Err(error) => Response::outcome_error(id.to_string(), bridge_error_outcome(error)),
     }
 }
 
@@ -1169,10 +1201,21 @@ fn input_outcome(result: serde_json::Value) -> ExecutionOutcome {
             .get("error")
             .and_then(|value| value.as_str())
             .unwrap_or("Input failed");
-        let mut outcome = ExecutionOutcome::failed(
-            WorkflowError::new(code, "executing", message),
-            EffectStatus::Possible,
-        );
+        if result.get("dispatched").and_then(|v| v.as_bool()) == Some(false) {
+            let mut outcome =
+                ExecutionOutcome::not_dispatched(WorkflowError::new(code, "resolving", message));
+            outcome.data = result;
+            return outcome;
+        }
+        // Events were dispatched; the page's effect monitor says whether any
+        // backend-capable call happened since. Without that evidence, stay
+        // conservative.
+        let effect = match result.get("effect").and_then(|v| v.as_str()) {
+            Some("none") => EffectStatus::None,
+            _ => EffectStatus::Possible,
+        };
+        let mut outcome =
+            ExecutionOutcome::failed(WorkflowError::new(code, "executing", message), effect);
         outcome.data = result;
         return outcome;
     }
@@ -1213,7 +1256,7 @@ async fn targeted_input(
             }
         };
         format!(
-            "const matches = document.querySelectorAll({}); if (matches.length !== 1) return {{code: matches.length ? 'ambiguous_target' : 'target_not_found', error: 'Expected exactly one input target', count: matches.length}}; const el = matches[0];",
+            "const matches = document.querySelectorAll({}); if (matches.length !== 1) return {{code: matches.length ? 'ambiguous_target' : 'target_not_found', error: 'Expected exactly one input target', count: matches.length, dispatched: false}}; const el = matches[0];",
             js_string(&selector)
         )
     } else if action == "press" {
@@ -1329,9 +1372,7 @@ async fn build_wait_script(
                     "xpath" => format!(
                         "document.evaluate({selector_js}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue"
                     ),
-                    "text" => format!(
-                        "Array.from(document.querySelectorAll('*')).find(el => el.textContent && el.textContent.includes({selector_js}))"
-                    ),
+                    "text" => text_locator_query(&selector_js),
                     _ => format!("document.querySelector({selector_js})"),
                 };
                 format!(
@@ -1343,10 +1384,7 @@ async fn build_wait_script(
     }
 
     if let Some(t) = text {
-        checks.push(format!(
-            "((document.body && document.body.innerText) || '').includes({})",
-            js_string(t)
-        ));
+        checks.push(format!("({TEXT_JS}).has({})", js_string(t)));
     }
 
     if let Some(pattern) = url {
@@ -1505,7 +1543,7 @@ pub async fn locator(
     });
     let query_js = query.to_string();
     let script = format!(
-        "({})({query_js}, {})",
+        "({})({query_js}, {}, {CLICK_JS})",
         include_str!("../js/locator.js"),
         include_str!("../js/input.js")
     );
@@ -3978,6 +4016,105 @@ mod tests {
     };
     use crate::state::{PluginState, RefEntry};
     use std::path::Path;
+
+    #[test]
+    fn pre_dispatch_input_failures_do_not_quarantine() {
+        use crate::protocol::Response;
+        use connector_client::outcome::ExecutionStatus;
+        use serde_json::json;
+        for code in [
+            "target_not_found",
+            "ambiguous_target",
+            "not_actionable",
+            "target_changed",
+            "unsupported_feature",
+        ] {
+            let response = Response::with_outcome(
+                "input".into(),
+                super::input_outcome(json!({"code": code, "error": "x", "dispatched": false})),
+            );
+            assert!(!response.requires_quarantine(), "{code} quarantined");
+            assert_eq!(
+                response.outcome.unwrap().execution,
+                ExecutionStatus::NotDispatched
+            );
+        }
+        let no_backend = Response::with_outcome(
+            "input".into(),
+            super::input_outcome(
+                json!({"code": "not_actionable", "error": "x", "dispatched": true, "effect": "none"}),
+            ),
+        );
+        assert!(!no_backend.requires_quarantine());
+        for result in [
+            json!({"code": "postcondition_failed", "error": "x", "dispatched": true, "effect": "possible"}),
+            json!({"code": "postcondition_failed", "error": "x"}),
+        ] {
+            let response = Response::with_outcome("input".into(), super::input_outcome(result));
+            assert!(
+                response.requires_quarantine(),
+                "unproven effect must quarantine"
+            );
+        }
+    }
+
+    #[test]
+    fn interaction_resolver_failures_are_not_dispatched() {
+        use connector_client::outcome::ExecutionStatus;
+        use serde_json::json;
+        let missing =
+            super::pre_dispatch_failure(&json!({"error": "Element not found", "selector": "#x"}))
+                .unwrap();
+        assert_eq!(missing.execution, ExecutionStatus::NotDispatched);
+        assert_eq!(missing.error.unwrap().code, "target_not_found");
+        let stale =
+            super::pre_dispatch_failure(&json!({"error": "gone", "staleRef": true})).unwrap();
+        assert_eq!(stale.error.unwrap().code, "stale_ref");
+        let disabled = super::pre_dispatch_failure(
+            &json!({"code": "not_actionable", "error": "disabled", "dispatched": false}),
+        )
+        .unwrap();
+        assert_eq!(disabled.error.unwrap().code, "not_actionable");
+        assert!(super::pre_dispatch_failure(&json!({"error": "x", "dispatched": true})).is_none());
+        assert!(
+            super::pre_dispatch_failure(&json!({"action": "click", "tag": "button"})).is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn argument_errors_are_rejected_before_dispatch() {
+        use connector_client::outcome::ExecutionStatus;
+        let dir = std::env::temp_dir().join(format!("connector-args-{}", uuid::Uuid::new_v4()));
+        let state = PluginState::new(dir.clone()).unwrap();
+        let bridge = crate::bridge::Bridge::start().unwrap();
+        let keyboard = super::keyboard("k", "bogus", None, None, None, "main", &bridge).await;
+        let no_target = super::interact(
+            "i", "click", None, "css", None, None, None, None, "main", &bridge, &state,
+        )
+        .await;
+        let bad_action = super::interact(
+            "i",
+            "bogus",
+            None,
+            "css",
+            Some(1.0),
+            Some(1.0),
+            None,
+            None,
+            "main",
+            &bridge,
+            &state,
+        )
+        .await;
+        for response in [keyboard, no_target, bad_action] {
+            assert!(!response.requires_quarantine());
+            let outcome = response.outcome.expect("typed outcome");
+            assert_eq!(outcome.execution, ExecutionStatus::NotDispatched);
+            assert_eq!(outcome.error.unwrap().code, "invalid_spec");
+        }
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn modern_ref_resolver_never_falls_back_to_css_or_fuzzy_name() {

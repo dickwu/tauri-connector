@@ -541,7 +541,7 @@ tauri-connector wait [selector] [FLAGS]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--text` | | Text to wait for |
+| `--text` | | Text to wait for (NBSP/whitespace-normalised; also matches DOM text hidden from `innerText`, field values and same-origin iframes) |
 | `--url` | | Glob pattern matched against `location.href` |
 | `--load-state` | | `domcontentloaded` or `load`; `networkidle` returns `unsupported_condition` |
 | `--fn` | | JavaScript expression/function/body that returns truthy |

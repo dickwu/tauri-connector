@@ -1,4 +1,4 @@
-(async function connectorLocate(query, connectorInput) {
+(async function connectorLocate(query, connectorInput, connectorClick) {
             const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
             const matchText = (value, expected) => {
                 if (expected == null) return true;
@@ -7,7 +7,7 @@
                 return query.exact ? a === b : a.toLowerCase().includes(b.toLowerCase());
             };
             const semantic = window.__CONNECTOR_SEMANTIC__;
-            if (!semantic) return {code:'runtime_missing', error:'Trusted semantic runtime is missing'};
+            if (!semantic) return {code:'runtime_missing', error:'Trusted semantic runtime is missing', dispatched:false};
             const implicitRole = semantic.getRole;
             const accessibleName = semantic.getAccessibleName;
             const labelText = el => semantic.getLabelTexts(el).join(' ');
@@ -54,17 +54,20 @@
             if (query.nth !== null && query.nth !== undefined) index = Number(query.nth);
             if (query.first) index = 0;
             const el = filtered[index];
-            if (!el) return { count, index, code: 'target_not_found', error: 'No element matched locator' };
+            if (!el) return { count, index, code: 'target_not_found', error: 'No element matched locator', dispatched: false };
             const action = query.action || null;
             const value = query.value || '';
-            if (action && action !== 'text' && count > 1 && !query.first && !query.last && query.nth == null) return {count, code:'ambiguous_target', error:'Locator matched multiple elements; provide a unique locator or explicit index'};
+            if (action && action !== 'text' && count > 1 && !query.first && !query.last && query.nth == null) return {count, code:'ambiguous_target', error:'Locator matched multiple elements; provide a unique locator or explicit index', dispatched:false};
             if (action && action !== 'text') {
-                if (!semantic.checkActionability(el,action).actionable) return {count,index,code:'not_actionable',error:'Target is not actionable'};
+                if (!semantic.checkActionability(el,action).actionable) return {count,index,code:'not_actionable',error:'Target is not actionable',dispatched:false};
                 const current = findMatches();
-                if (current.length !== count || current[index] !== el) return {count,index,code:'target_changed',error:'Target changed before dispatch'};
+                if (current.length !== count || current[index] !== el) return {count,index,code:'target_changed',error:'Target changed before dispatch',dispatched:false};
             }
             if (action) {
-                if (action === 'click') el.click();
+                if (action === 'click') {
+                    const clicked = connectorClick ? connectorClick(el) : (el.click(), null);
+                    if (clicked && clicked.dispatched === false) return { count, index, ...clicked };
+                }
                 else if (action === 'hover') {
                     const rect = el.getBoundingClientRect();
                     const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2 };
@@ -78,7 +81,7 @@
                 }
                 else if (action === 'check') { if (!el.checked) el.click(); }
                 else if (action === 'uncheck') { if (el.checked) el.click(); }
-                else if (action !== 'text') return { count, index, code: 'unsupported_feature', error: 'Unsupported locator action: ' + action };
+                else if (action !== 'text') return { count, index, code: 'unsupported_feature', error: 'Unsupported locator action: ' + action, dispatched: false };
             }
             const rect = el.getBoundingClientRect();
             return {

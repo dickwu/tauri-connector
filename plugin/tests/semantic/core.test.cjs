@@ -113,6 +113,27 @@ async function corpus() {
     const el=document.querySelector('#react'); function SaveButton(){} el.__reactFiber$fixture={type:SaveButton,return:null}; el.focus();
     const snap=window.__CONNECTOR_SNAPSHOT__({mode:'ai',maxTokens:150}); ok(snap.meta.split,'budget did not split'); ok(snap.subtrees.length>0,'missing subtrees'); ok(snap.meta.overlays.length>0,'missing overlay '+JSON.stringify(snap)); ok(snap.snapshot.includes('# overlays:'),'missing overlay header'); ok(JSON.stringify(snap).includes('component=SaveButton'),'missing React '+JSON.stringify(snap)); ok(snap.meta.portalCount>0,'missing portal'); ok(Object.keys(snap.refs).length>0,'missing inline refs');
   });
+  await test('text locator picks the deepest match and normalises NBSP', () => {
+    fixture('<main><div class="card"><span id="label">Save&nbsp;draft</span></div><p hidden>Save draft</p></main>');
+    const t=window.__connectorText; eq(t.find('Save draft').id,'label'); eq(t.find('Save  draft').id,'label'); eq(t.find('missing'),null);
+  });
+  await test('wait text sees NBSP, hidden-from-innerText text, input values and same-origin iframes', async () => {
+    fixture('<div>Total:&nbsp;42</div><input id="q"><iframe id="f"></iframe><div style="visibility:hidden">Offscreen copy</div>');
+    const t=window.__connectorText; ok(t.has('Total: 42'),'nbsp'); ok(t.has('Offscreen copy'),'textContent fallback'); ok(!t.has('Nope'));
+    document.querySelector('#q').value='typed value'; ok(t.has('typed value'),'input value');
+    const frame=document.querySelector('#f'); frame.contentDocument.body.innerHTML='<p>Inside frame</p>'; ok(t.has('Inside frame'),'iframe');
+    fixture('<script>var secret = "Script body";</script>'); ok(!t.has('Script body'),'script text ignored');
+  });
+  await test('click dispatches the full pointer sequence at the hit element and reports cover', () => {
+    fixture('<div id="menu" style="width:100px;height:40px"><span id="inner" style="display:block;height:100%">Open</span></div>');
+    const seen=[]; for (const type of ['pointerdown','mousedown','pointerup','mouseup','click']) document.querySelector('#menu').addEventListener(type,e=>seen.push(type+':'+e.target.id));
+    const r=window.__connectorClick(document.querySelector('#menu'));
+    eq(seen,['pointerdown:inner','mousedown:inner','pointerup:inner','mouseup:inner','click:inner']); eq(r.mismatch,false); eq(r.dispatched,true);
+    fixture('<button id="under" style="position:absolute;left:0;top:0;width:100px;height:40px">Under</button><div id="cover" style="position:absolute;left:0;top:0;width:200px;height:200px"></div>');
+    let clicked=0; document.querySelector('#under').addEventListener('click',()=>clicked++);
+    const covered=window.__connectorClick(document.querySelector('#under')); eq(covered.mismatch,true); eq(covered.hit.id,'cover'); eq(clicked,1);
+    fixture('<button id="off" disabled>Off</button>'); const off=window.__connectorClick(document.querySelector('#off')); eq(off.code,'not_actionable'); eq(off.dispatched,false);
+  });
   return {tests:results.length,failures:results.filter(x=>!x.passed).length,evidenceKind:'browser_chromium',results};
 }
 (async()=>{
@@ -120,6 +141,8 @@ async function corpus() {
   const locator=await readFile(join(__dirname,'../../js/locator.js'),'utf8');
   const bridge=await readFile(join(__dirname,'../../src/bridge.rs'),'utf8');
   const handlers=await readFile(join(__dirname,'../../src/handlers.rs'),'utf8');
+  const textJs=await readFile(join(__dirname,'../../js/text.js'),'utf8');
+  const clickJs=await readFile(join(__dirname,'../../js/click.js'),'utf8');
   const waitState=handlers.split('const __connectorElementState = ')[1].split('            }};')[0].replaceAll('{{','{').replaceAll('}}','}')+'}';
   const snapshot=bridge.split('// === Unified Snapshot Engine ===')[1].split('// === Auto-push DOM via Tauri IPC')[0].replaceAll('{{','{').replaceAll('}}','}').replace('{semantic_source}',semantic);
   const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><html><body></body></html>');});
@@ -128,7 +151,7 @@ async function corpus() {
   try {
     browser=await chromium.launch({headless:true});const page=await browser.newPage();
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    const result=await page.evaluate(`(async()=>{${semantic};${snapshot};window.__semanticLocate=${locator};window.__semanticWaitState=${waitState};return (${corpus.toString()})();})()`);
+    const result=await page.evaluate(`(async()=>{${semantic};${snapshot};window.__semanticLocate=${locator};window.__semanticWaitState=${waitState};window.__connectorText=${textJs};window.__connectorClick=${clickJs};return (${corpus.toString()})();})()`);
     console.log(JSON.stringify({...result,browser:browser.version()},null,2));if(result.failures)process.exitCode=1;
   } finally {await browser?.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

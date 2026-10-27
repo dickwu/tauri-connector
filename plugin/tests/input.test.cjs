@@ -81,3 +81,64 @@ test('cancelled beforeinput does not change the input value', async () => {
   const result = await run(f, 'fill', 'changed');
   assert.equal(result.code, 'not_actionable'); assert.equal(f.target.value, 'old');
 });
+test('pre-dispatch failures report dispatched:false so the lease is not quarantined', async () => {
+  const f = fixture(); f.target.readOnly = true;
+  const result = await run(f, 'fill', 'changed');
+  assert.equal(result.dispatched, false); assert.equal(result.effect, undefined);
+  assert.equal(f.target.events.length, 0);
+  const missing = await run(f, 'fill', 'x', '#nothing');
+  assert.equal(missing.code, 'target_not_found'); assert.equal(missing.dispatched, false);
+});
+test('failures after dispatch carry the page effect evidence', async () => {
+  const f = fixture(); f.target.cancelInput = true;
+  let dispatches = 0;
+  f.context.window.__CONNECTOR_EFFECTS__ = { mark: () => dispatches, unchangedSince: m => m === dispatches };
+  const quiet = await run(f, 'fill', 'changed');
+  assert.equal(quiet.dispatched, true); assert.equal(quiet.effect, 'none');
+  f.target.dispatchEvent = (event) => { if (event.type === 'beforeinput') { dispatches++; return false; } return true; };
+  const noisy = await run(f, 'fill', 'changed');
+  assert.equal(noisy.effect, 'possible');
+});
+function editorFixture({ monaco = false, accept = true } = {}) {
+  const f = fixture();
+  const commands = [];
+  const editor = {
+    tagName: 'DIV', id: 'editor', isConnected: true, isContentEditable: !monaco, textContent: 'hello',
+    focus() { f.context.document.activeElement = this; },
+    contains(node) { return node === this; },
+    closest(selector) { return monaco && selector === '.monaco-editor' ? monacoRoot : null; },
+    getAttribute() { return null; }, matches() { return false; }, dispatchEvent() { return true; },
+  };
+  const monacoRoot = { querySelector: () => editor };
+  f.context.document.execCommand = (name, _ui, value) => {
+    commands.push([name, value]);
+    if (!accept) return false;
+    if (name === 'selectAll') editor.selected = true;
+    if (name === 'insertText') editor.textContent = editor.selected ? value : editor.textContent + value;
+    return true;
+  };
+  return { f, editor, commands };
+}
+async function runEditor(f, el, action, text) {
+  const fn = vm.runInNewContext(fs.readFileSync(helperPath, 'utf8'), f.context);
+  return fn(el, { action, text });
+}
+test('contenteditable type uses execCommand insertText and verifies the text', async () => {
+  const { f, editor, commands } = editorFixture();
+  const result = await runEditor(f, editor, 'type', ' world');
+  assert.equal(result.code, undefined, JSON.stringify(result));
+  assert.equal(result.method, 'execCommand'); assert.equal(editor.textContent, 'hello world');
+  assert.deepEqual(commands, [['insertText', ' world']]);
+  const filled = await runEditor(f, editor, 'fill', 'new');
+  assert.equal(filled.editor, 'contenteditable'); assert.equal(editor.textContent, 'new');
+});
+test('Monaco type goes through insertText; fill and refused editing are honest not_actionable', async () => {
+  const { f, editor } = editorFixture({ monaco: true });
+  const typed = await runEditor(f, editor, 'type', 'let x = 1;');
+  assert.equal(typed.editor, 'monaco'); assert.equal(typed.verified, false);
+  const fill = await runEditor(f, editor, 'fill', 'x');
+  assert.equal(fill.code, 'not_actionable'); assert.equal(fill.dispatched, false);
+  const refused = editorFixture({ accept: false });
+  const result = await runEditor(refused.f, refused.editor, 'type', 'x');
+  assert.equal(result.code, 'not_actionable'); assert.equal(result.dispatched, true);
+});

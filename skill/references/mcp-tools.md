@@ -34,6 +34,8 @@ Perform gestures on elements: click, double-click, focus, scroll, hover, drag.
 | `durationMs` | number | | 300 | Drag total duration in ms |
 | `dragStrategy` | string | | `auto` | `auto` (checks `el.draggable`), `pointer`, `html5dnd`; any other value is rejected |
 
+`click` dispatches pointerover/mouseover/pointermove/mousemove/pointerdown/mousedown/(focus)/pointerup/mouseup/click at the element's visual centre, to the element actually hit there when it is the target or inside it. If another element covers the centre, the events still go to the target and the result has `mismatch: true`, `hit` (the covering element) and a `warning`. The `text` strategy resolves to the deepest element whose NBSP/whitespace-normalised text contains the string (visible matches first), not the first ancestor. A missing target, disabled target, stale ref, missing selector/coordinates or unknown action returns `not_dispatched` with `effect: none`, so it never quarantines the lease.
+
 ### webview_keyboard
 
 Type text or press keys with optional modifiers.
@@ -45,6 +47,8 @@ Type text or press keys with optional modifiers.
 | `key` | string | | Key name for `press`: `Enter`, `Tab`, `Escape`, `Backspace`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, `Home`, `End`, `PageUp`, `PageDown`, `Delete`, `Space`, `F1`-`F12`, or any single character |
 | `modifiers` | string[] | | `ctrl`, `shift`, `alt`, `meta` |
 
+`type` into a contenteditable host or a Monaco editor goes through `document.execCommand('insertText')` (result `method: "execCommand"`, `editor: "contenteditable" | "monaco"`). Monaco results carry `verified: false` -- confirm the model with `wait`/`expect`. `fill` on Monaco, or an editor that refuses `insertText`, returns `not_actionable` instead of a fake success. Failures found before any event is dispatched (no focused target, disabled/read-only target, unsupported element, unknown action) return `not_dispatched` and do not quarantine; failures after dispatch carry the page effect monitor's `effect`.
+
 ### webview_wait_for
 
 Poll for an element state, text, URL glob, document load state, or JavaScript condition (100ms interval). Conditions are combined when more than one is supplied.
@@ -53,7 +57,7 @@ Poll for an element state, text, URL glob, document load state, or JavaScript co
 |---|---|---|---|
 | `selector` | string | | CSS, XPath, or text to wait for |
 | `strategy` | string | `css` | `css`, `xpath`, `text` |
-| `text` | string | | Text content to wait for (alternative to selector) |
+| `text` | string | | Text to wait for. NBSP and runs of whitespace are normalised; matches rendered text (`innerText`), then DOM text (excluding script/style), input/textarea/select values, and same-origin iframes |
 | `url` | string | | Glob pattern matched against `location.href` (for example `**/settings*`) |
 | `loadState` | string | | `domcontentloaded` or `load`; `networkidle` explicitly returns `unsupported_condition` |
 | `fn` | string | | JavaScript expression/function/body that returns truthy |
