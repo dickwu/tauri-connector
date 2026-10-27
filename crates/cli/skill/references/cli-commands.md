@@ -458,7 +458,7 @@ tauri-connector logs [FLAGS]
 | `--level` | `-l` | | Comma-separated: `log`, `info`, `warn`, `error`, `debug` |
 | `--pattern` | `-p` | | Regex match |
 
-Each line is `HH:MM:SS.mmm ±HH:MM LEVEL message` in the machine's local time with its UTC offset. Messages are formatted like devtools: `%s %d %i %f %o %O` are substituted, `%c` and its CSS argument are dropped, and `Error` arguments print as `Name: message` plus the stack. IPC calls appear in `ipc` logs only after `ipc monitor` (or capture) has been started.
+Each line is `HH:MM:SS.mmm ±HH:MM LEVEL message` in the machine's local time with its UTC offset. Messages are formatted like devtools: `%s %d %i %f %o %O` are substituted, `%c` and its CSS argument are dropped, and `Error` arguments print as `Name: message` plus the stack. `Map`/`Set` print their entries (`Map(2) {"a" => 1,...}`), DOM nodes print as a short summary such as `<body#app.dark>`, React elements as `<Card />`, and framework internals (`__react*`, `_reactInternals`) are skipped; objects are cut off at depth 6 and 50 entries per level, and a message is capped at 16 KB. `logs` pulls entries the page has not pushed yet before reading, so a line logged a moment ago shows up immediately (also for `-p`/`-f`/`-l`). IPC calls appear in `ipc` logs only after `ipc monitor` (or capture) has been started.
 
 ### runtime
 

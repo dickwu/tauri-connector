@@ -575,6 +575,7 @@ async fn handle_command_unleased(
                 pattern.as_deref(),
                 level.as_deref(),
                 &window_id,
+                bridge,
                 state,
             )
             .await

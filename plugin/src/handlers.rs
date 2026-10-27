@@ -1984,6 +1984,44 @@ pub async fn ipc_emit_event(
 // ============ Console Logs ============
 
 #[allow(clippy::too_many_arguments)]
+/// Entries the page logged since its last periodic push (every few seconds).
+/// Pulling them before a read means `logs` sees a line logged a moment ago.
+async fn flush_console_logs(window_id: &str, bridge: &Bridge, state: &PluginState) {
+    const TAKE_LOGS: &str = "(function(){return typeof window.__CONNECTOR_TAKE_LOGS__==='function'?window.__CONNECTOR_TAKE_LOGS__():[]})()";
+    let Ok(value) = bridge
+        .execute_js_for_window(TAKE_LOGS, 1_500, window_id)
+        .await
+    else {
+        return;
+    };
+    let entries = pending_log_entries(&value, window_id);
+    if !entries.is_empty() {
+        state.push_logs(entries).await;
+    }
+}
+
+fn pending_log_entries(value: &serde_json::Value, window_id: &str) -> Vec<crate::state::LogEntry> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            Some(crate::state::LogEntry {
+                level: item.get("level")?.as_str()?.to_string(),
+                message: item.get("message")?.as_str()?.to_string(),
+                timestamp: item.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(0),
+                window_id: item
+                    .get("windowId")
+                    .and_then(|w| w.as_str())
+                    .unwrap_or(window_id)
+                    .to_string(),
+            })
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn console_logs(
     id: &str,
     lines: usize,
@@ -1991,6 +2029,7 @@ pub async fn console_logs(
     pattern: Option<&str>,
     level: Option<&str>,
     window_id: &str,
+    bridge: &Bridge,
     state: &PluginState,
 ) -> Response {
     let path = state.log_dir.join("console.log");
@@ -2006,6 +2045,7 @@ pub async fn console_logs(
     let filter_lower = filter.map(|f| f.to_lowercase());
     let wid = window_id.to_string();
 
+    flush_console_logs(&wid, bridge, state).await;
     let _writer = state.console_writer.lock().await;
     let entries = crate::state::read_jsonl_filtered::<crate::state::LogEntry>(
         &path,
@@ -3674,7 +3714,17 @@ pub async fn debug_snapshot(
             obj.insert(
                 "logs".to_string(),
                 response_to_value(
-                    console_logs(id, 100, None, None, Some("error,warn"), window_id, state).await,
+                    console_logs(
+                        id,
+                        100,
+                        None,
+                        None,
+                        Some("error,warn"),
+                        window_id,
+                        bridge,
+                        state,
+                    )
+                    .await,
                 ),
             );
         }
@@ -4365,6 +4415,21 @@ mod tests {
         assert!(
             super::pre_dispatch_failure(&json!({"action": "click", "tag": "button"})).is_none()
         );
+    }
+
+    #[test]
+    fn flushed_page_logs_become_log_entries() {
+        let page = serde_json::json!([
+            {"level": "log", "message": "saved", "timestamp": 1700000000000u64, "windowId": "main"},
+            {"level": "warn", "message": "no window id", "timestamp": 1},
+            {"message": "missing level"},
+        ]);
+        let entries = super::pending_log_entries(&page, "editor");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].message, "saved");
+        assert_eq!(entries[0].window_id, "main");
+        assert_eq!(entries[1].window_id, "editor");
+        assert!(super::pending_log_entries(&serde_json::json!(null), "main").is_empty());
     }
 
     #[tokio::test]

@@ -1047,6 +1047,7 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
   let reconnectTimer = null;
   const consoleLogs = [];
   const MAX_LOGS = 500;
+  let consoleSeq = 0;
 
   // Rejected scripts release their lease only with this page evidence.
   const effectMonitor = ({effects_source})(window, NativeWebSocket, function(socket) {{ return socket === ws; }});
@@ -1066,7 +1067,8 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       consoleLogs.push({{
         level: level,
         message: message,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        seq: ++consoleSeq
       }});
       if (consoleLogs.length > MAX_LOGS) consoleLogs.shift();
       origConsole[level].apply(console, arguments);
@@ -2213,18 +2215,31 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
   observer.observe(document.body, {{ childList: true, subtree: true }});
 
   // === Auto-push console logs via Tauri IPC ===
-  let logPushTimer = null;
-  let lastLogPushIndex = 0;
+  // Entries are tracked by sequence number, not array index: the buffer is
+  // capped at MAX_LOGS and shifts, so an index would stop advancing once full.
+  let lastLogPushSeq = 0;
+
+  function takePendingLogs() {{
+    const pending = [];
+    for (let i = 0; i < consoleLogs.length; i++) {{
+      const l = consoleLogs[i];
+      if (l.seq > lastLogPushSeq) pending.push({{ level: l.level, message: l.message, timestamp: l.timestamp, windowId: WINDOW_ID }});
+    }}
+    if (consoleLogs.length) lastLogPushSeq = Math.max(lastLogPushSeq, consoleLogs[consoleLogs.length - 1].seq);
+    return pending;
+  }}
+
+  // The host calls this before reading console.log so a read right after
+  // logging sees the entries without waiting for the next periodic push.
+  try {{
+    Object.defineProperty(window, '__CONNECTOR_TAKE_LOGS__', {{ value: takePendingLogs, configurable: true }});
+  }} catch (_) {{}}
 
   function autoPushLogs() {{
     const ipc = window.__TAURI_INTERNALS__ || (window.__TAURI__ && window.__TAURI__.core);
     if (!ipc || !ipc.invoke) return;
-    if (consoleLogs.length <= lastLogPushIndex) return;
-
-    const newEntries = consoleLogs.slice(lastLogPushIndex).map(function(l) {{
-      return {{ level: l.level, message: l.message, timestamp: l.timestamp, windowId: WINDOW_ID }};
-    }});
-    lastLogPushIndex = consoleLogs.length;
+    const newEntries = takePendingLogs();
+    if (!newEntries.length) return;
 
     ipc.invoke('plugin:connector|push_logs', {{
       payload: {{ entries: newEntries }}
@@ -3521,6 +3536,58 @@ mod transport_tests {
             );
         }
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// R2-4: the console buffer is capped at 500 entries and shifts; pending
+    /// logs must still be handed over (on demand and by the periodic push)
+    /// after it is full, and each entry exactly once.
+    #[test]
+    fn console_logs_keep_flushing_after_the_buffer_is_full() {
+        let Ok(probe) = std::process::Command::new("node").arg("--version").output() else {
+            eprintln!("node unavailable; skipping console flush check");
+            return;
+        };
+        assert!(probe.status.success());
+        let directory = std::env::temp_dir().join(format!("bridge-logs-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let init = directory.join("init.js");
+        let runner = directory.join("probe.cjs");
+        std::fs::write(&init, bridge_init_script(9555, "main")).unwrap();
+        std::fs::write(&runner, PROBE).unwrap();
+        let output = std::process::Command::new("node")
+            .arg(&runner)
+            .arg(&init)
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            result,
+            json!({"first": 500, "firstHead": "line 20", "second": ["after cap"], "third": 0})
+        );
+        const PROBE: &str = r#"const fs = require('fs');
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const any = () => new Proxy(function () {}, { get: (t, k) => k === Symbol.toPrimitive ? () => '' : k === 'then' ? undefined : any(), apply: () => any(), construct: () => any() });
+const ctx = { console: { log() {}, warn() {}, error() {}, info() {}, debug() {} }, setTimeout() { return 0; }, clearTimeout() {}, setInterval() { return 0; }, clearInterval() {},
+  MutationObserver: class { observe() {} }, addEventListener() {}, removeEventListener() {},
+  __TAURI_INTERNALS__: { invoke() { return Promise.resolve(); } } };
+ctx.window = ctx; ctx.top = ctx; ctx.self = ctx;
+const scope = new Proxy(ctx, {
+  has: () => true,
+  get: (t, k) => k === Symbol.unscopables ? undefined : k in t ? t[k] : k in globalThis ? globalThis[k] : any(),
+});
+new Function('scope', 'with (scope) {' + src + '}')(scope);
+for (let i = 0; i < 520; i++) ctx.console.log('line ' + i);
+const first = ctx.__CONNECTOR_TAKE_LOGS__();
+ctx.console.log('after cap');
+const second = ctx.__CONNECTOR_TAKE_LOGS__();
+process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].message, second: second.map(e => e.message), third: ctx.__CONNECTOR_TAKE_LOGS__().length }));
+"#;
     }
 
     #[tokio::test]

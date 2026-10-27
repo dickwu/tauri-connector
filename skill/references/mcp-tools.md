@@ -390,6 +390,8 @@ Read console logs captured from the webview (in-memory buffer, up to 500 entries
 | `pattern` | string | | Regex match on message |
 | `level` | string | | Comma-separated levels: `log`, `info`, `warn`, `error`, `debug` |
 
+Before reading, the host pulls entries the page has not pushed yet (the periodic push runs every 3 s), so a line logged a moment ago is returned. Messages are formatted like devtools; `Map`/`Set` show their entries, DOM nodes become summaries like `<body#app.dark>`, React elements `<Card />`, framework internals (`__react*`, `_reactInternals`) are skipped, objects are cut at depth 6 / 50 entries per level, and each message is capped at 16 KB.
+
 ### read_log_file
 
 Read historical logs from JSONL files (persisted across app restarts).

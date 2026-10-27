@@ -405,6 +405,7 @@ pub(crate) async fn dispatch_raw(
                 pattern.as_deref(),
                 level.as_deref(),
                 &wid,
+                bridge,
                 state,
             )
             .await
