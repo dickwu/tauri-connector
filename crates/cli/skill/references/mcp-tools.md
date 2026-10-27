@@ -698,7 +698,7 @@ The response is the run report (also what `save` writes):
 
 ### bridge_status
 
-Show the internal JS bridge: `bridge_port`, `workflowProtocolVersion` (`1` on plugins >= 0.15), `clients[]` (`windowId`, `url`, `title`, `ageMs` per connected webview), `pending` evals, and `fallbackAvailable` (whether the pre-dispatch eval+event fallback exists). No parameters. Call it first when a window seems unresponsive or before relying on `workflow_*` tools.
+Show the internal JS bridge: `bridge_port`, `workflowProtocolVersion` (`1` on plugins >= 0.15), `clients[]` (`windowId`, `url`, `title`, `ageMs` per connected webview), `pending` (evals still inside their deadline), `awaitingLateResult` (timed-out evals still listening for a late page result that can lift their quarantine; see `resources`), and `fallbackAvailable` (whether the pre-dispatch eval+event fallback exists). No parameters. Call it first when a window seems unresponsive or before relying on `workflow_*` tools.
 
 ### get_setup_instructions
 

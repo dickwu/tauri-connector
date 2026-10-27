@@ -46,6 +46,9 @@ struct PendingRequest {
     conn_id: String,
     registration_id: uuid::Uuid,
     tx: oneshot::Sender<Result<serde_json::Value, BridgeError>>,
+    /// The caller already timed out; the entry only waits for a late result
+    /// so it can settle quarantine. It is not an in-flight request.
+    awaiting_late_result: bool,
 }
 
 /// Transport failure classification; only `NotDispatched` permits fallback.
@@ -260,6 +263,9 @@ impl Bridge {
         cleanup: impl FnOnce() + Send + 'static,
     ) {
         let hook = self.late_hook.lock().unwrap().clone();
+        if let Some(entry) = self.pending.lock().unwrap().get_mut(request_id) {
+            entry.awaiting_late_result = true;
+        }
         let request_id = request_id.to_string();
         tokio::spawn(async move {
             let outcome = match tokio::time::timeout(LATE_SETTLEMENT_WINDOW, rx).await {
@@ -429,6 +435,7 @@ impl Bridge {
                     conn_id: client.conn_id,
                     registration_id,
                     tx,
+                    awaiting_late_result: false,
                 },
             );
         }
@@ -755,7 +762,11 @@ impl Bridge {
                 })
             })
             .collect();
-        let pending = self.pending.lock().unwrap().len();
+        let (awaiting_late_result, pending) = {
+            let entries = self.pending.lock().unwrap();
+            let late = entries.values().filter(|e| e.awaiting_late_result).count();
+            (late, entries.len() - late)
+        };
         serde_json::json!({
             "bridge_port": self.port,
             "workflowProtocolVersion": 1,
@@ -763,6 +774,7 @@ impl Bridge {
             "inspection": crate::capabilities::inspection(),
             "clients": list,
             "pending": pending,
+            "awaitingLateResult": awaiting_late_result,
             "fallbackAvailable": self.app_handle.lock().await.is_some(),
         })
     }
@@ -3176,7 +3188,8 @@ mod transport_tests {
         assert!(error.contains("outcome_unknown"), "{error}");
         assert!(error.contains(command["id"].as_str().unwrap()), "{error}");
         assert!(rx.try_recv().is_err());
-        // The timed-out request stays registered so a late result can settle it.
+        // The timed-out request stays registered so a late result can settle it,
+        // but bridge_status no longer counts it as an in-flight request.
         assert!(
             bridge
                 .pending
@@ -3184,6 +3197,9 @@ mod transport_tests {
                 .unwrap()
                 .contains_key(command["id"].as_str().unwrap())
         );
+        let status = bridge.status().await;
+        assert_eq!(status["pending"], 0, "{status}");
+        assert_eq!(status["awaitingLateResult"], 1, "{status}");
     }
 
     async fn late_settlement_after_timeout(
@@ -3371,6 +3387,7 @@ mod transport_tests {
                 conn_id: "connection-b".into(),
                 registration_id: uuid::Uuid::new_v4(),
                 tx: other_tx,
+                awaiting_late_result: false,
             },
         );
         reject_connection_pending(&bridge.pending, "connection-a");
