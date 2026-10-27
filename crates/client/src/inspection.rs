@@ -387,6 +387,7 @@ pub const RICH_SCREENSHOT_FIELDS: &[&str] = &[
     "target",
     "redaction",
     "allowWindowPreparation",
+    "bringToFront",
     "includeImage",
     "timeoutMs",
     "authToken",

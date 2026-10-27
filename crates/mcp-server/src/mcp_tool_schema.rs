@@ -555,6 +555,7 @@ fn screenshot_schema() -> serde_json::Value {
                     "target": {"$ref":"#/$defs/locator"},
                     "redaction": {"enum":["required"]},
                     "allowWindowPreparation": {"type":"boolean","default":false},
+                    "bringToFront": {"type":"boolean","default":false,"description":"Unminimize, show and focus the window before capture. A hidden page renders no frames and fails with window_not_visible"},
                     "format": { "type": "string", "enum": ["png", "jpeg", "jpg", "webp"] },
                     "quality": { "type": "number", "minimum": 0, "maximum": 100 },
                     "maxWidth": { "type": "number" },

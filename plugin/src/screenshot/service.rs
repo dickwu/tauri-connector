@@ -193,6 +193,7 @@ async fn handle_inner(
         "selector",
         "redaction",
         "allowWindowPreparation",
+        "bringToFront",
         "format",
         "quality",
         "maxWidth",
@@ -228,7 +229,13 @@ async fn handle_inner(
             "Host policy requires pixel redaction; no client downgrade is permitted",
         ));
     }
-    for key in ["save", "overwrite", "annotate", "includeImage"] {
+    for key in [
+        "save",
+        "overwrite",
+        "annotate",
+        "includeImage",
+        "bringToFront",
+    ] {
         if args.get(key).is_some_and(|v| !v.is_boolean()) {
             return Err(error(
                 "invalid_arguments",
@@ -308,12 +315,24 @@ async fn handle_inner(
                 "webview_screenshot",
                 args,
             ))?;
-    let context = bridge.runtime_context(window, timeout).await.map_err(|_| {
-        error(
-            "runtime_unavailable",
-            "Cannot bind screenshot to a ready runtime",
-        )
-    })?;
+    if args.get("bringToFront") == Some(&json!(true)) {
+        bring_to_front(app, window)
+            .await
+            .map_err(|e| error("window_not_found", &e))?;
+    }
+    let context = match bridge.runtime_context(window, timeout).await {
+        Ok(context) => context,
+        Err(_) => {
+            let visibility = page_visibility(bridge, window).await;
+            return Err(match hidden_window_error(visibility.as_deref()) {
+                Some(message) => error("window_not_visible", &message),
+                None => error(
+                    "runtime_unavailable",
+                    "Cannot bind screenshot to a ready runtime",
+                ),
+            });
+        }
+    };
     let context = serde_json::to_value(context)
         .map_err(|_| error("context_invalid", "Cannot encode screenshot context"))?;
     let locator = if let Some(target) = args.get("target") {
@@ -405,6 +424,16 @@ async fn handle_inner(
             )
             .await;
     }
+    let captured = match captured {
+        Err(e) if e.contains("render_frame_timeout") || e.starts_with("capture_timeout") => {
+            let visibility = page_visibility(bridge, window).await;
+            match hidden_window_error(visibility.as_deref()) {
+                Some(message) => Err(format!("window_not_visible: {message} ({e})")),
+                None => Err(e),
+            }
+        }
+        other => other,
+    };
     let mut capture =
         captured.map_err(|e| error(e.split(':').next().unwrap_or("capture_failed"), &e))?;
     if !state.workflow.inspection_authorized(generation) {
@@ -675,4 +704,35 @@ mod tests {
         assert_eq!(read["timings"]["diskSave"]["status"], "not_applicable");
         assert!(read["timings"]["diskSave"].get("elapsedNs").is_none());
     }
+}
+
+/// Remedy for a capture that failed because the page is hidden. WebKit and
+/// WebView2 render no frames for a minimized, fully covered, other-Space or
+/// screen-locked window, so waiting for a frame can only time out.
+pub(crate) fn hidden_window_error(visibility: Option<&str>) -> Option<String> {
+    (visibility == Some("hidden")).then(|| {
+        "The window's page is hidden (minimized, on another Space or desktop, fully covered, or the screen is locked or asleep), so the webview renders no frames to capture. Bring the window to the front and retry, or pass --bring-to-front (MCP: bringToFront: true) to let the connector unminimize, show and focus it first; a locked or sleeping screen must be unlocked".to_string()
+    })
+}
+
+async fn page_visibility(bridge: &Bridge, window: &str) -> Option<String> {
+    bridge
+        .execute_js_for_window("document.visibilityState", 1500, window)
+        .await
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+}
+
+/// Opt-in window preparation for `bringToFront`: unminimize, show and focus,
+/// then give the compositor a moment to deliver a frame.
+async fn bring_to_front(app: &tauri::AppHandle, window: &str) -> Result<(), String> {
+    use tauri::Manager;
+    let handle = app
+        .get_webview_window(window)
+        .ok_or_else(|| format!("No window labelled {window}"))?;
+    let _ = handle.unminimize();
+    let _ = handle.show();
+    let _ = handle.set_focus();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    Ok(())
 }

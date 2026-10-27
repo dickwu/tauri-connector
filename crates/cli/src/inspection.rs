@@ -197,6 +197,11 @@ pub struct ScreenshotOptions {
     /// Requires host permission; passive host policy rejects this preparation request.
     #[arg(long)]
     pub allow_window_preparation: bool,
+    /// Unminimize, show and focus the window before a protected capture.
+    /// A hidden page renders no frames, so capture otherwise fails with
+    /// window_not_visible. Off by default: capture never moves windows.
+    #[arg(long)]
+    pub bring_to_front: bool,
 }
 impl ScreenshotOptions {
     pub fn is_rich(&self) -> bool {
@@ -204,6 +209,7 @@ impl ScreenshotOptions {
             || self.target.is_some()
             || self.redaction.is_some()
             || self.allow_window_preparation
+            || self.bring_to_front
     }
     pub fn add_args(&self, args: &mut Value) -> Result<(), String> {
         if let Some(source) = &self.source {
@@ -217,6 +223,9 @@ impl ScreenshotOptions {
             args["redaction"] = json!(redaction);
         }
         args["allowWindowPreparation"] = json!(self.allow_window_preparation);
+        if self.bring_to_front {
+            args["bringToFront"] = json!(true);
+        }
         Ok(())
     }
 }

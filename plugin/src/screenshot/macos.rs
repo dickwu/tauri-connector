@@ -10,7 +10,11 @@ use objc2_core_graphics::{CGDataProvider, CGImage};
 use objc2_foundation::NSError;
 use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
 
-pub(super) fn schedule(window: &tauri::WebviewWindow, callback: Callback) -> Result<(), String> {
+pub(super) fn schedule(
+    window: &tauri::WebviewWindow,
+    css_viewport: (f64, f64),
+    callback: Callback,
+) -> Result<(), String> {
     window
         .with_webview(move |platform| {
             if !callback_pending(&callback) {
@@ -31,14 +35,25 @@ pub(super) fn schedule(window: &tauri::WebviewWindow, callback: Callback) -> Res
             // view coordinates, never infer a hardcoded title-bar pixel offset.
             let bounds = webview.bounds();
             let mut region = bounds;
-            if webview.respondsToSelector(sel!(safeAreaRect)) {
-                // WK's snapshot raster starts at content origin, even when the
-                // containing NSView extends under a title bar. Its default extent
-                // still uses the larger view bounds. Preserve the content origin
-                // and use the unobscured extent; applying safeAreaRect's origin
-                // again would crop the first content rows (native marker-tested).
-                region.size = webview.safeAreaRect().size;
-            }
+            // WK's snapshot raster starts at content origin, even when the
+            // containing NSView extends under a title bar. Its default extent
+            // still uses the larger view bounds. Preserve the content origin;
+            // applying safeAreaRect's origin again would crop the first
+            // content rows (native marker-tested). The extent is whichever of
+            // the safe area or full bounds matches the CSS viewport, so an
+            // Overlay title bar (page under the traffic lights) keeps its
+            // full height.
+            let safe = webview
+                .respondsToSelector(sel!(safeAreaRect))
+                .then(|| webview.safeAreaRect().size)
+                .map(|size| (size.width, size.height));
+            let (width, height) = super::webview_snapshot_extent(
+                (bounds.size.width, bounds.size.height),
+                safe,
+                css_viewport,
+            );
+            region.size.width = width;
+            region.size.height = height;
             // SAFETY: configuration and view are used on their owning AppKit
             // thread; safeAreaRect is a native region within these view bounds.
             let configuration = unsafe { WKSnapshotConfiguration::new(main_thread) };

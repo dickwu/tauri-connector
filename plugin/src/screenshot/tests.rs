@@ -314,3 +314,36 @@ fn dom_capture_errors_keep_the_page_capture_code() {
     );
     assert_eq!(super::dom_capture_error("timeout"), "timeout");
 }
+
+#[test]
+fn webview_snapshot_extent_follows_the_css_viewport() {
+    use super::webview_snapshot_extent as extent;
+    // Default title bar: the view extends under it, the CSS viewport doesn't.
+    assert_eq!(
+        extent((1200.0, 828.0), Some((1200.0, 800.0)), (1200.0, 800.0)),
+        (1200.0, 800.0)
+    );
+    // Overlay title bar: page content spans the full view; the safe area
+    // still excludes the 32pt traffic-light band.
+    assert_eq!(
+        extent((1200.0, 800.0), Some((1200.0, 768.0)), (1200.0, 800.0)),
+        (1200.0, 800.0)
+    );
+    // No safe-area API: full bounds.
+    assert_eq!(extent((900.0, 600.0), None, (900.0, 600.0)), (900.0, 600.0));
+    // Neither matches (zoomed page): keep the previous safe-area choice and let
+    // the pixel pipeline's geometry check decide.
+    assert_eq!(
+        extent((1200.0, 828.0), Some((1200.0, 800.0)), (960.0, 640.0)),
+        (1200.0, 800.0)
+    );
+}
+
+#[test]
+fn a_hidden_page_names_the_window_and_the_remedy() {
+    let message = super::service::hidden_window_error(Some("hidden")).unwrap();
+    assert!(message.contains("--bring-to-front"));
+    assert!(message.contains("locked"));
+    assert!(super::service::hidden_window_error(Some("visible")).is_none());
+    assert!(super::service::hidden_window_error(None).is_none());
+}

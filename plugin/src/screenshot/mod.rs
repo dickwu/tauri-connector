@@ -306,7 +306,15 @@ async fn capture_source(
     probe: &Probe,
 ) -> Result<RawFrame, String> {
     match source {
-        CaptureSource::WebviewNative => native(app, &request.window_id).await,
+        CaptureSource::WebviewNative => {
+            let viewport = &probe.viewport;
+            native(
+                app,
+                &request.window_id,
+                (viewport.width_css, viewport.height_css),
+            )
+            .await
+        }
         CaptureSource::WindowNative => {
             let viewport = &probe.viewport;
             let expected = (
@@ -343,7 +351,11 @@ async fn capture_source(
     }
 }
 
-async fn native(app: &tauri::AppHandle, window_id: &str) -> Result<RawFrame, String> {
+async fn native(
+    app: &tauri::AppHandle,
+    window_id: &str,
+    css_viewport: (f64, f64),
+) -> Result<RawFrame, String> {
     let window = app
         .get_webview_window(window_id)
         .ok_or("window_not_found")?;
@@ -360,7 +372,7 @@ async fn native(app: &tauri::AppHandle, window_id: &str) -> Result<RawFrame, Str
         _permit: Some(permit),
     }));
     #[cfg(all(feature = "native-screenshot", target_os = "macos"))]
-    macos::schedule(&window, callback)?;
+    macos::schedule(&window, css_viewport, callback)?;
     #[cfg(all(feature = "native-screenshot", target_os = "windows"))]
     windows::schedule(&window, callback)?;
     #[cfg(all(feature = "native-screenshot", target_os = "linux"))]
@@ -370,7 +382,7 @@ async fn native(app: &tauri::AppHandle, window_id: &str) -> Result<RawFrame, Str
         any(target_os = "macos", target_os = "windows", target_os = "linux")
     )))]
     {
-        let _ = (window, callback);
+        let _ = (window, callback, css_viewport);
         return Err("capture_backend_unavailable: native-screenshot feature or platform".into());
     }
     #[allow(unreachable_code)]
@@ -509,6 +521,29 @@ fn dom_capture_error(message: &str) -> String {
         })
         .unwrap_or(message)
         .to_string()
+}
+
+/// Size of the WKWebView snapshot rect, in view points. WebKit's CSS
+/// viewport is the authority: with the default title bar it excludes the
+/// safe-area inset (use the safe-area size), while an Overlay title bar puts
+/// page content under the traffic lights, so the CSS viewport spans the whole
+/// view (use the full bounds). Picking the safe-area size there cropped the
+/// bottom inset off a full-height page (1200x800 viewport -> 2400x1536).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn webview_snapshot_extent(
+    bounds: (f64, f64),
+    safe_area: Option<(f64, f64)>,
+    css_viewport: (f64, f64),
+) -> (f64, f64) {
+    let fits = |size: (f64, f64)| {
+        (size.0 - css_viewport.0).abs() <= 1.0 && (size.1 - css_viewport.1).abs() <= 1.0
+    };
+    match safe_area {
+        Some(safe) if fits(safe) => safe,
+        _ if fits(bounds) => bounds,
+        Some(safe) => safe,
+        None => bounds,
+    }
 }
 
 /// macOS windows with a full-size content view report identical inner and
