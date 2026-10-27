@@ -1834,6 +1834,13 @@ pub async fn window_resize(
 /// moment to deliver a frame. Works while the page is hidden because it never
 /// touches the webview.
 pub(crate) async fn bring_window_to_front(window: &tauri::WebviewWindow) -> Result<(), String> {
+    // A hidden application (Cmd-H, or hidden by another tool) keeps its
+    // windows ordered out even after window.show(); unhide it first.
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::Manager;
+        let _ = window.app_handle().show();
+    }
     let _ = window.unminimize();
     let _ = window.show();
     let focus = window.set_focus().map_err(|e| e.to_string());

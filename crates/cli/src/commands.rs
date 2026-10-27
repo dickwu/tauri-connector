@@ -681,7 +681,10 @@ pub async fn wait(
     if let Some(selector_state) = selector_state {
         cmd["state"] = json!(selector_state);
     }
-    let result = client.send_with_timeout(cmd, timeout_ms + 5000).await?;
+    let result = client
+        .send_with_timeout(cmd, timeout_ms + 5000)
+        .await
+        .map_err(page_silent_hint)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&result).unwrap_or_default()
@@ -747,7 +750,9 @@ pub async fn eval_js(
         return Err("eval needs a script, e.g. tauri-connector eval 'document.title'".into());
     }
     let page_timeout = timeout_ms.unwrap_or(connector_client::DEFAULT_EVAL_TIMEOUT_MS);
-    let result = exec_js(client, script, page_timeout).await?;
+    let result = exec_js(client, script, page_timeout)
+        .await
+        .map_err(page_silent_hint)?;
     match &result {
         Value::String(s) => println!("{s}"),
         _ => println!(
@@ -841,6 +846,18 @@ pub async fn windows(client: &ConnectorClient) -> Result<(), String> {
         serde_json::to_string_pretty(&result).unwrap_or_default()
     );
     Ok(())
+}
+
+/// A page that never answered is often a background or screen-locked
+/// window; say so and name the native remedy.
+pub(crate) fn page_silent_hint(error: String) -> String {
+    if error.contains("WS bridge timeout") || error.contains("render_frame_timeout") {
+        format!(
+            "{error}\n\nhint: the page did not answer. A background, minimized, covered or screen-locked window may stop running page code; run `tauri-connector windows focus` (or pass --bring-to-front), then `tauri-connector resources release --all` if the window was quarantined, and retry"
+        )
+    } else {
+        error
+    }
 }
 
 fn window_focus_error(error: String) -> String {
@@ -2291,6 +2308,17 @@ pub(crate) fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn silent_pages_and_old_plugins_get_a_hint() {
+        let hinted = super::page_silent_hint("{\"error\":\"WS bridge timeout\"}".into());
+        assert!(hinted.contains("windows focus") && hinted.contains("--bring-to-front"));
+        assert_eq!(super::page_silent_hint("boom".into()), "boom");
+        let old =
+            super::window_focus_error("unknown variant `window_focus`, expected one of ...".into());
+        assert!(old.contains("0.17.4"));
+    }
+
     use super::sha256_hex;
     use super::{prepare_batch_spec_value, read_batch_spec_input};
     use serde_json::json;

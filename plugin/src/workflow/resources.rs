@@ -380,7 +380,21 @@ pub fn tool_resources(name: &str, args: &Value) -> Vec<String> {
         | "get_tauri_info"
         | "ping"
         | "resources"
-        | "workflow_capabilities" => Vec::new(),
+        | "workflow_capabilities"
+        // Native window reads and focus never run page code, so they stay
+        // available while a window is quarantined: focus is the recovery
+        // step for a background window that stopped answering.
+        | "window_list"
+        | "window_info"
+        | "window_focus" => Vec::new(),
+        "manage_window"
+            if matches!(
+                args.get("action").and_then(Value::as_str),
+                Some("list" | "info" | "focus")
+            ) =>
+        {
+            Vec::new()
+        }
         "webview_interact"
         | "webview_keyboard"
         | "webview_screenshot"
@@ -421,6 +435,21 @@ pub async fn acquire(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_window_reads_and_focus_skip_the_lease() {
+        for name in ["window_list", "window_info", "window_focus"] {
+            assert!(tool_resources(name, &serde_json::json!({})).is_empty());
+        }
+        for action in ["list", "info", "focus"] {
+            assert!(
+                tool_resources("manage_window", &serde_json::json!({"action": action})).is_empty()
+            );
+        }
+        assert!(
+            !tool_resources("manage_window", &serde_json::json!({"action": "resize"})).is_empty()
+        );
+    }
 
     #[test]
     fn parent_scope_conflicts_with_children_but_not_similar_prefixes() {
