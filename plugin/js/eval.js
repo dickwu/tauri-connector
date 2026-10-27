@@ -7,10 +7,15 @@
 //    The syntax check compiles without running, so nothing executes twice.
 // 3. Otherwise the script is an async function body (`await`, `return`).
 // A promise still pending at the deadline rejects with `timeoutMark` so the
-// bridge reports a clear timeout plus the page's effect evidence instead of a
-// transport timeout with an unknown outcome.
+// bridge reports a clear timeout instead of a transport timeout with an
+// unknown outcome, but only while the effect monitor proves no IPC/network
+// effect started. Once an effect may have started (or no monitor is present)
+// the promise is left pending: the bridge deadline then reports
+// outcome_unknown and a late result can still settle the quarantine.
 (function connectorEval(source, deadlineMs, timeoutMark) {
   'use strict';
+  const fx = typeof window !== 'undefined' ? window.__CONNECTOR_EFFECTS__ : undefined;
+  const mark = fx ? fx.mark() : 0;
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   let run;
   try {
@@ -33,10 +38,11 @@
   }
   let timer;
   const deadline = new Promise((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(timeoutMark + ': script still pending after ' + deadlineMs + ' ms')),
-      deadlineMs
-    );
+    timer = setTimeout(() => {
+      if (fx && fx.unchangedSince(mark)) {
+        reject(new Error(timeoutMark + ': script still pending after ' + deadlineMs + ' ms'));
+      }
+    }, deadlineMs);
   });
   return Promise.race([Promise.resolve().then(run), deadline]).finally(() => clearTimeout(timer));
 })

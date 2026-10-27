@@ -397,8 +397,12 @@ fn eval_error_outcome(error: BridgeError, timeout_ms: u64) -> ExecutionOutcome {
                 "Script did not settle within {timeout_ms} ms (execution_timeout). No IPC, mutating fetch/XHR, beacon or WebSocket send was observed, so nothing was quarantined; raise --timeout / timeout_ms for slow reads"
             )
         } else {
+            // js/eval.js only rejects while no effect is observed, so this is the
+            // narrow race of an effect starting at the deadline. The page already
+            // answered, so no late result will lift the quarantine.
+            outcome.execution = connector_client::outcome::ExecutionStatus::OutcomeUnknown;
             format!(
-                "Script did not settle within {timeout_ms} ms (execution_timeout) after it may have dispatched IPC or network effects; the resource stays quarantined until the result arrives or `resources release`"
+                "Script did not settle within {timeout_ms} ms (execution_timeout) after it may have dispatched IPC or network effects; the resource stays quarantined until `resources release` after you check the app"
             )
         };
         outcome.error = Some(WorkflowError::new(
@@ -4442,6 +4446,7 @@ mod tests {
 
         let possible = super::eval_error_outcome(failed(EffectStatus::Possible), 1000);
         assert_eq!(possible.error.as_ref().unwrap().code, "execution_timeout");
+        assert_eq!(possible.execution, ExecutionStatus::OutcomeUnknown);
         let response = crate::protocol::Response::outcome_error("id".into(), possible);
         assert!(response.requires_quarantine());
 

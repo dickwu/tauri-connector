@@ -536,7 +536,7 @@ tauri-connector eval --timeout 120000 "await longTask()"
 
 The script may be an expression, a statement list whose last expression is printed (`eval "const n = document.querySelectorAll('li').length; n * 2"`), or an async function body with `return`/`await`; expressions are tried first, so existing scripts keep their meaning.
 
-`--timeout <ms>` sets the page-side deadline (default 30000, max 600000); the CLI waits 5 s longer so the plugin's typed timeout, with its requestId, always arrives. An empty script is rejected before anything is sent. A promise still pending at the deadline fails with `execution_timeout`: a read-only script (`effect: none`) releases the window, one that may have dispatched IPC or a write stays quarantined. Only a page that never answers leaves the outcome unknown and quarantines the window -- see `resources`.
+`--timeout <ms>` sets the page-side deadline (default 30000, max 600000); the CLI waits 5 s longer so the plugin's typed timeout, with its requestId, always arrives. An empty script is rejected before anything is sent. A read-only promise (no IPC or write observed) still pending at the deadline fails with `execution_timeout` and releases the window. A script that may have dispatched IPC or a write, or a page that never answers, leaves the outcome unknown and quarantines the window until its late result settles it or `resources release` -- see `resources`.
 
 ### resources
 

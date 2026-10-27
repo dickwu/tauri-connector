@@ -206,7 +206,7 @@ A script that throws or rejects reports `execution_failed`. Its `effect` is `non
 | `timeoutMs` | integer | no | Page-side deadline, 1–600000 ms (default 30000). The standalone MCP server waits 5 s longer |
 | `windowId` | string | | Target window |
 
-A promise still pending at the deadline fails with `execution_timeout` (the page enforces the deadline about 1 s, at most a quarter of `timeoutMs`, before the bridge does). Like any failure, `effect: none` releases the window and `effect: possible` quarantines it; the promise may keep running in the page and work it does afterwards is not observed. Only a page that never answers (blocked main thread, suspended webview) returns `outcome_unknown` with `outcome.dispatch.requestId` and quarantines the window. If the page finishes later, a success or an `effect: none` failure lifts that quarantine automatically; otherwise use `resources`.
+A promise still pending at the deadline with no IPC, mutating fetch/XHR, beacon or WebSocket send observed fails with `execution_timeout` and `effect: none`, releasing the window (the page enforces the deadline about 1 s, at most a quarter of `timeoutMs`, before the bridge does); the promise may keep running and work it does afterwards is not observed. A script that may have dispatched such an effect is left running instead, so like a page that never answers (blocked main thread, suspended webview) it returns `outcome_unknown` with `outcome.dispatch.requestId` and quarantines the window. If the page finishes later, a success or an `effect: none` failure lifts that quarantine automatically; otherwise use `resources`.
 
 ### resources
 

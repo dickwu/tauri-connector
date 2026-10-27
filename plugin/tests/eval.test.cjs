@@ -1,4 +1,4 @@
-const {test}=require('node:test');
+const {test,after}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
@@ -41,7 +41,27 @@ test('genuine syntax errors are reported',async()=>{
   assert.throws(()=>run('} foo(); {'),SyntaxError);
 });
 
+test('an effectful pending promise is left to the bridge deadline',async()=>{
+  let changed=false;
+  globalThis.window={__CONNECTOR_EFFECTS__:{mark:()=>0,unchangedSince:()=>!changed}};
+  try{
+    changed=true;
+    const pending=run('new Promise(r => setTimeout(() => r(11), 120))',30);
+    // Past the page deadline the effectful script still resolves normally.
+    assert.equal(await pending,11);
+    changed=false;
+    await assert.rejects(run('new Promise(() => {})',30),/connector_eval_timeout/);
+  }finally{globalThis.window=undefined;delete globalThis.window;}
+});
+
+test('without an effect monitor the page never claims a clean timeout',async()=>{
+  const outcome=await Promise.race([run('new Promise(() => {})',20).then(()=>'settled',()=>'rejected'),new Promise(r=>setTimeout(()=>r('pending'),150))]);
+  assert.equal(outcome,'pending');
+});
+
 test('a pending promise rejects with the timeout mark at the page deadline',async()=>{
+  globalThis.window={__CONNECTOR_EFFECTS__:{mark:()=>0,unchangedSince:()=>true}};
+  after(()=>{delete globalThis.window;});
   const started=Date.now();
   await assert.rejects(run('new Promise(() => {})',50),/^Error: connector_eval_timeout: script still pending after 50 ms/);
   assert.ok(Date.now()-started<1000);
