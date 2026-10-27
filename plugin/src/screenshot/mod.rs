@@ -376,6 +376,9 @@ async fn native(
     }));
     #[cfg(all(feature = "native-screenshot", target_os = "macos"))]
     macos::schedule(&window, css_viewport, callback)?;
+    // Only the macOS backend crops to the CSS viewport.
+    #[cfg(not(target_os = "macos"))]
+    let _ = css_viewport;
     #[cfg(all(feature = "native-screenshot", target_os = "windows"))]
     windows::schedule(&window, callback)?;
     #[cfg(all(feature = "native-screenshot", target_os = "linux"))]
@@ -542,7 +545,6 @@ fn logical_inner_size(app: &tauri::AppHandle, window_id: &str) -> Option<(f64, f
 /// page content under the traffic lights, so the CSS viewport spans the whole
 /// view (use the full bounds). Picking the safe-area size there cropped the
 /// bottom inset off a full-height page (1200x800 viewport -> 2400x1536).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[cfg_attr(
     not(all(feature = "native-screenshot", target_os = "macos")),
     allow(dead_code)
