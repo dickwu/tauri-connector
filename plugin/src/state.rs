@@ -159,6 +159,16 @@ impl PluginState {
     pub fn new(log_dir: PathBuf) -> Result<Self, String> {
         fs::create_dir_all(&log_dir).map_err(|e| format!("failed to create log dir: {e}"))?;
 
+        // Each launch starts fresh logs so `logs -l error` never reports the
+        // previous run's entries as current. The last run stays readable as
+        // `<name>.prev.log` for post-mortems.
+        for name in ["console", "ipc", "events", "runtime"] {
+            let current = log_dir.join(format!("{name}.log"));
+            if fs::metadata(&current).is_ok_and(|m| m.len() > 0) {
+                let _ = fs::rename(&current, log_dir.join(format!("{name}.prev.log")));
+            }
+        }
+
         let open_append = |name: &str| -> Result<File, String> {
             OpenOptions::new()
                 .create(true)
@@ -380,6 +390,26 @@ mod explicit_snapshot_tests {
         assert_eq!(
             state.get_dom("main").await.unwrap().refs["e1"].name,
             "Commit message"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // git-strata retest (5): `logs -l error,warn` showed entries from before
+    // the current launch.
+    #[test]
+    fn each_launch_starts_fresh_logs_and_keeps_the_previous_run() {
+        let dir = std::env::temp_dir().join(format!("connector-logs-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("console.log"), "{\"level\":\"error\"}\n").unwrap();
+        let _state = PluginState::new(dir.clone()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("console.log")).unwrap(),
+            ""
+        );
+        assert!(
+            std::fs::read_to_string(dir.join("console.prev.log"))
+                .unwrap()
+                .contains("error")
         );
         let _ = std::fs::remove_dir_all(dir);
     }
