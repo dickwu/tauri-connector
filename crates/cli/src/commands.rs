@@ -859,6 +859,40 @@ pub async fn screenshot(
     instance: Option<&ConnectorInstance>,
     resolved: &ResolvedConnection,
 ) -> Result<(), String> {
+    // A plain full-window screenshot uses the protected pipeline (viewport
+    // crop, captureSource/viewport/geometry metadata) so it matches
+    // `--source auto` and MCP. Selector/annotate captures and hosts that
+    // cannot serve it (no token, older plugin, missing backend) keep the
+    // legacy renderer.
+    let mut rich_warning = None;
+    if selector.is_none() && !annotate {
+        let mut args = json!({
+            "windowId": window_id(),
+            "source": "auto",
+            "format": format,
+            "quality": quality,
+            "includeImage": true,
+        });
+        if let Some(w) = max_width {
+            args["maxWidth"] = json!(w);
+        }
+        match client.inspect("webview_screenshot", &args).await {
+            Ok(report) => {
+                return finish_default_screenshot(
+                    report, output, format, overwrite, output_dir, name_hint, instance, resolved,
+                );
+            }
+            Err(error) => match default_capture_fallback(&error) {
+                Some(code) => {
+                    rich_warning = Some(json!({
+                        "code": "legacy_renderer",
+                        "message": format!("protected capture unavailable ({code}); used the legacy renderer"),
+                    }))
+                }
+                None => return Err(error),
+            },
+        }
+    }
     let mut cmd = json!({
         "type": "screenshot",
         "format": format,
@@ -938,7 +972,13 @@ pub async fn screenshot(
             artifact.path.display()
         );
     }
-    let warnings = result.get("warnings").cloned().unwrap_or(Value::Null);
+    let mut warnings = result.get("warnings").cloned().unwrap_or(Value::Null);
+    if let Some(warning) = rich_warning {
+        match warnings.as_array_mut() {
+            Some(list) => list.push(warning),
+            None => warnings = json!([warning]),
+        }
+    }
     for message in screenshot_warning_messages(&warnings) {
         eprintln!("warning: {message}");
     }
@@ -962,6 +1002,143 @@ pub async fn screenshot(
         .unwrap_or_default()
     );
     Ok(())
+}
+
+/// Whether a failed protected default capture should fall back to the legacy
+/// renderer. Hidden windows and other definite capture failures are reported
+/// as-is: the legacy renderer cannot see a page that renders no frames either.
+fn default_capture_fallback(error: &str) -> Option<String> {
+    let code = serde_json::from_str::<Value>(error.trim_start_matches("Error: "))
+        .ok()
+        .and_then(|v| v.get("code").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| error.split(':').next().unwrap_or("").trim().to_string());
+    match code.as_str() {
+        "window_not_visible" => None,
+        "" => Some("unknown".into()),
+        _ => Some(code),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_default_screenshot(
+    mut report: Value,
+    output: Option<&str>,
+    format: &str,
+    overwrite: bool,
+    output_dir: Option<&Path>,
+    name_hint: Option<&str>,
+    instance: Option<&ConnectorInstance>,
+    resolved: &ResolvedConnection,
+) -> Result<(), String> {
+    let encoded = report
+        .get("base64")
+        .and_then(Value::as_str)
+        .ok_or("No base64 data in screenshot response")?;
+    let bytes = b64_decode(encoded)?;
+    if let Some(object) = report.as_object_mut() {
+        object.remove("base64");
+    }
+    let target = resolve_screenshot_path(output, output_dir, format, name_hint, None, instance)?;
+    let artifact = write_screenshot_artifact(&target, &bytes, overwrite)?;
+    let width = report["image"]["widthPx"].as_u64().unwrap_or(0);
+    let height = report["image"]["heightPx"].as_u64().unwrap_or(0);
+    let created_at = now_ms();
+    let artifact_id = format!(
+        "shot_{}",
+        artifact
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("screenshot")
+    );
+    let metadata = json!({
+        "artifactId": artifact_id.clone(),
+        "id": artifact_id,
+        "kind": "screenshot",
+        "captureKind": "full",
+        "path": artifact.path.to_string_lossy(),
+        "requestedPath": artifact.requested_path.to_string_lossy(),
+        "resolvedFromCollision": artifact.resolved_from_collision,
+        "overwrote": artifact.overwrote,
+        "sha256": sha256_hex(&bytes),
+        "bytes": bytes.len(),
+        "width": width,
+        "height": height,
+        "format": format,
+        "createdAt": created_at,
+        "createdAtMs": created_at,
+        "source": "viewport",
+        "selector": Value::Null,
+        "windowId": window_id(),
+        "annotated": false,
+        "annotations": Value::Null,
+        "snapshotId": latest_ref_cache_snapshot_id(resolved).unwrap_or(Value::Null),
+        "refsPath": latest_ref_cache_path(resolved).unwrap_or(Value::Null),
+        "devicePixelRatio": report["viewport"]["devicePixelRatio"].clone(),
+        "captureSource": report["captureSource"].clone(),
+        "protectedArtifactId": report["artifactId"].clone(),
+    });
+    append_cli_artifact_manifest(instance, &metadata)?;
+    if artifact.resolved_from_collision {
+        eprintln!(
+            "Requested path existed; saved unique screenshot to {}",
+            artifact.path.display()
+        );
+    }
+    let warnings = report.get("warnings").cloned().unwrap_or(json!([]));
+    for message in screenshot_warning_messages(&warnings) {
+        eprintln!("warning: {message}");
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&default_screenshot_output(
+            report, &artifact, &metadata, &bytes, width, height, warnings
+        ))
+        .unwrap_or_default()
+    );
+    Ok(())
+}
+
+/// Legacy top-level fields first (path, width, height, sizeKb, sha256,
+/// artifact, warnings) so existing parsers keep working, plus the protected
+/// capture's captureSource/image/viewport/geometry/redaction/fallbacks.
+fn default_screenshot_output(
+    report: Value,
+    artifact: &ArtifactWrite,
+    metadata: &Value,
+    bytes: &[u8],
+    width: u64,
+    height: u64,
+    warnings: Value,
+) -> Value {
+    let mut out = json!({
+        "path": artifact.path,
+        "warnings": warnings,
+        "requestedPath": artifact.requested_path,
+        "resolvedFromCollision": artifact.resolved_from_collision,
+        "overwrote": artifact.overwrote,
+        "sha256": metadata["sha256"].clone(),
+        "width": width,
+        "height": height,
+        "sizeKb": bytes.len() / 1024,
+        "artifact": metadata,
+    });
+    for key in [
+        "captureSource",
+        "image",
+        "viewport",
+        "geometry",
+        "redaction",
+        "fallbacks",
+        "consistency",
+        "context",
+        "timings",
+    ] {
+        if let Some(value) = report.get(key) {
+            out[key] = value.clone();
+        }
+    }
+    out
 }
 
 /// Describe a plugin-side capture retake, e.g. a uniform window capture that
@@ -2147,6 +2324,67 @@ mod tests {
             vec!["page_hidden: The page reports visibilityState=hidden".to_string()]
         );
         assert!(super::screenshot_warning_messages(&serde_json::Value::Null).is_empty());
+    }
+
+    #[test]
+    fn default_screenshot_falls_back_only_when_protected_capture_is_unavailable() {
+        for (error, expected) in [
+            (
+                r#"{"code":"unauthorized","message":"x"}"#,
+                Some("unauthorized"),
+            ),
+            (
+                "capability_unavailable: no backend",
+                Some("capability_unavailable"),
+            ),
+            (
+                r#"Error: {"code":"protocol_mismatch"}"#,
+                Some("protocol_mismatch"),
+            ),
+            (r#"{"code":"window_not_visible","message":"hidden"}"#, None),
+        ] {
+            assert_eq!(
+                super::default_capture_fallback(error).as_deref(),
+                expected,
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn default_screenshot_output_keeps_legacy_fields_and_adds_capture_shape() {
+        let artifact = super::ArtifactWrite {
+            path: std::path::PathBuf::from("/tmp/a.png"),
+            requested_path: std::path::PathBuf::from("/tmp/a.png"),
+            resolved_from_collision: false,
+            overwrote: true,
+        };
+        let report = json!({
+            "captureSource": "webview_native",
+            "image": {"widthPx": 1200, "heightPx": 800},
+            "viewport": {"widthCss": 1200.0, "heightCss": 800.0, "devicePixelRatio": 1.0},
+            "geometry": {"status": "known"},
+            "fallbacks": [],
+        });
+        let metadata = json!({"sha256": "abc"});
+        let out = super::default_screenshot_output(
+            report,
+            &artifact,
+            &metadata,
+            &[0u8; 4096],
+            1200,
+            800,
+            json!([]),
+        );
+        for key in [
+            "path", "width", "height", "sizeKb", "sha256", "artifact", "warnings",
+        ] {
+            assert!(out.get(key).is_some(), "{key}");
+        }
+        assert_eq!(out["width"], 1200);
+        assert_eq!(out["sizeKb"], 4);
+        assert_eq!(out["captureSource"], "webview_native");
+        assert_eq!(out["viewport"]["heightCss"], 800.0);
     }
 
     #[test]
