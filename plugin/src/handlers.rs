@@ -2085,7 +2085,18 @@ pub async fn screenshot(
             )
             .await
         }
-        Err(e) => Response::error(id.to_string(), format!("Screenshot failed: {e}")),
+        Err(e) => {
+            let hint = page_hidden_warning(&serde_json::Value::Null, false, window_id, bridge)
+                .await
+                .map(|warning| {
+                    format!(
+                        " (page_hidden: {})",
+                        warning["message"].as_str().unwrap_or("")
+                    )
+                })
+                .unwrap_or_default();
+            Response::error(id.to_string(), format!("Screenshot failed: {e}{hint}"))
+        }
     }
 }
 
