@@ -331,13 +331,73 @@ fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
 
 // ============ JavaScript Execution ============
 
-pub async fn execute_js(id: &str, script: &str, window_id: &str, bridge: &Bridge) -> Response {
+/// Default page-side deadline for `execute_js`.
+pub const DEFAULT_EVAL_TIMEOUT_MS: u64 = 30_000;
+/// Upper bound for a caller-supplied `execute_js` deadline (10 minutes).
+pub const MAX_EVAL_TIMEOUT_MS: u64 = 600_000;
+
+pub async fn execute_js(
+    id: &str,
+    script: &str,
+    window_id: &str,
+    timeout_ms: Option<u64>,
+    bridge: &Bridge,
+) -> Response {
+    if script.trim().is_empty() {
+        return Response::not_dispatched(
+            id.to_string(),
+            "invalid_arguments",
+            "script is empty; pass the JavaScript to evaluate",
+        );
+    }
+    let timeout_ms = timeout_ms
+        .unwrap_or(DEFAULT_EVAL_TIMEOUT_MS)
+        .clamp(1, MAX_EVAL_TIMEOUT_MS);
     match bridge
-        .execute_js_for_window_typed(script, 30_000, window_id)
+        .execute_js_for_window_typed(script, timeout_ms, window_id)
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
         Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
+    }
+}
+
+// ============ Resource quarantine ============
+
+/// `resources` list/release. Releasing is explicit host resolution: the caller
+/// asserts it checked the app after an unknown outcome.
+pub fn resources(
+    id: &str,
+    action: Option<&str>,
+    request_id: Option<&str>,
+    all: bool,
+    state: &PluginState,
+) -> Response {
+    let arbiter = &state.workflow.resources;
+    match action.unwrap_or("list") {
+        "list" => Response::success(id.to_string(), arbiter.list()),
+        "release" => {
+            let target = match (request_id, all) {
+                (Some(request_id), false) => Some(request_id),
+                (None, true) => None,
+                _ => {
+                    return Response::not_dispatched(
+                        id.to_string(),
+                        "invalid_arguments",
+                        "release needs exactly one of requestId or all=true",
+                    );
+                }
+            };
+            let released = arbiter.release(target);
+            let mut report = arbiter.list();
+            report["released"] = serde_json::json!(released);
+            Response::success(id.to_string(), report)
+        }
+        other => Response::not_dispatched(
+            id.to_string(),
+            "invalid_arguments",
+            format!("Unknown resources action '{other}' (expected list or release)"),
+        ),
     }
 }
 
@@ -4331,7 +4391,7 @@ mod tests {
             outcome.data["waitOutcome"]["error"]["code"],
             "condition_timeout"
         );
-        let query = super::execute_js("query", "readStoredValue()", "main", &bridge).await;
+        let query = super::execute_js("query", "readStoredValue()", "main", None, &bridge).await;
         assert!(
             matches!(query.payload, ResponsePayload::Success { .. }),
             "business error fields are not tool errors"

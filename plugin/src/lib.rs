@@ -465,6 +465,7 @@ impl ConnectorBuilder {
 
                 let handle = app.clone();
                 let log_dir_for_pid = log_dir.clone();
+                let late_arbiter = plugin_state.workflow.resources.clone();
 
                 tauri::async_runtime::spawn(async move {
                     // 1. Start internal bridge (JS <-> plugin via WebSocket)
@@ -475,6 +476,13 @@ impl ConnectorBuilder {
                             return;
                         }
                     };
+
+                    // 1a. Results that arrive after a timeout settle their quarantine.
+                    bridge.set_late_settlement_hook(std::sync::Arc::new(move |request_id, outcome| {
+                        if late_arbiter.settle_late(request_id, outcome) {
+                            println!("[connector] Late result for {request_id} released its resource quarantine");
+                        }
+                    }));
 
                     // 1b. Set app handle on bridge for eval fallback
                     bridge.set_app_handle(handle.clone()).await;

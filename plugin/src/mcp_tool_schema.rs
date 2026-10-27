@@ -74,11 +74,20 @@ pub fn tool_definitions() -> serde_json::Value {
             tool_def("ipc_capture", "Manage authorized app-owned IPC capture v2 sessions. Start confirms hook readiness; stop does not stop other sessions. Invoke observations do not prove business persistence.", ipc_capture_schema()),
             tool_def("ipc_query", "Read bounded, redacted IPC v2 event pages and pending invocation evidence from an authorized capture session.", json!({"type":"object","additionalProperties":false,"required":["captureSessionId"],"properties":{"authToken":{"type":"string"},"captureSessionId":{"type":"string","minLength":1},"cursor":{"type":"string","minLength":1,"maxLength":256,"description":"Opaque nextCursor returned by ipc_query; preserve it unchanged and use it only for the same session"},"invocationId":{"type":"string"},"phase":{"enum":["started","succeeded","failed"]},"limit":{"type":"integer","minimum":1,"maximum":500,"default":100},"maxBytes":{"type":"integer","minimum":1024,"maximum":65536,"default":32768}}})),
             tool_def("webview_execute_js",
-                "Execute JavaScript in the Tauri webview and return the JSON-serialized result. Use an IIFE for return values: \"(() => { return value; })()\"",
+                "Execute JavaScript in the Tauri webview and return the JSON-serialized result. Use an IIFE for return values: \"(() => { return value; })()\". A timeout leaves the outcome unknown and quarantines UI/backend scopes until the page settles late without effects or `resources` action=release is called.",
                 json!({ "type": "object", "properties": {
-                    "script": { "type": "string" },
-                    "windowId": { "type": "string" }
+                    "script": { "type": "string", "minLength": 1 },
+                    "windowId": { "type": "string" },
+                    "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 600000, "default": 30000, "description": "Page-side deadline in milliseconds" }
                 }, "required": ["script"] })
+            ),
+            tool_def("resources",
+                "List or release resource quarantines. An operation whose outcome is unknown (for example a timed-out eval) quarantines its scopes and later calls fail with resource_busy naming its requestId. A late page result with no effects lifts it automatically; otherwise check the app and release by requestId or all=true.",
+                json!({ "type": "object", "additionalProperties": false, "properties": {
+                    "action": { "type": "string", "enum": ["list", "release"], "default": "list" },
+                    "requestId": { "type": "string", "minLength": 1, "description": "Quarantine requestId (or id) to release" },
+                    "all": { "type": "boolean", "description": "Release every quarantine" }
+                } })
             ),
             tool_def("bridge_status",
                 "Show internal JS bridge clients, pending evals, and fallback availability",

@@ -19,6 +19,29 @@ use crate::protocol::{BridgeCommand, BridgeResult};
 
 type PendingMap = Arc<StdMutex<HashMap<String, PendingRequest>>>;
 
+/// Receives page results that arrive after their caller stopped waiting.
+pub type LateSettlementHook =
+    Arc<dyn Fn(&str, crate::workflow::resources::LateOutcome) + Send + Sync>;
+
+/// How long a timed-out request keeps listening for its page result.
+const LATE_SETTLEMENT_WINDOW: Duration = Duration::from_secs(600);
+
+fn late_outcome(
+    result: &Result<serde_json::Value, BridgeError>,
+) -> crate::workflow::resources::LateOutcome {
+    use crate::workflow::resources::LateOutcome;
+    match result {
+        Ok(_) => LateOutcome::Succeeded,
+        Err(BridgeError::ExecutionFailed { effect, .. })
+            if *effect == connector_client::outcome::EffectStatus::None =>
+        {
+            LateOutcome::FailedWithoutEffect
+        }
+        Err(BridgeError::ExecutionFailed { .. }) => LateOutcome::Failed,
+        Err(_) => LateOutcome::Lost,
+    }
+}
+
 struct PendingRequest {
     conn_id: String,
     registration_id: uuid::Uuid,
@@ -176,6 +199,8 @@ pub struct Bridge {
     /// App handle for eval-based fallback execution
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     runtime: Arc<crate::runtime::RuntimeManager>,
+    /// Lifts resource quarantine when a timed-out request settles later.
+    late_hook: Arc<StdMutex<Option<LateSettlementHook>>>,
 }
 
 /// Inclusive port range for the internal bridge listener.
@@ -204,6 +229,7 @@ impl Bridge {
             pending: pending.clone(),
             app_handle: Arc::new(Mutex::new(None)),
             runtime: Arc::new(crate::runtime::RuntimeManager::default()),
+            late_hook: Arc::new(StdMutex::new(None)),
         };
 
         let bridge_clone = bridge.clone();
@@ -219,6 +245,32 @@ impl Bridge {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Install the receiver for results that arrive after a caller timed out.
+    pub fn set_late_settlement_hook(&self, hook: LateSettlementHook) {
+        *self.late_hook.lock().unwrap() = Some(hook);
+    }
+
+    /// Keep waiting for a timed-out request's page result, then report it.
+    fn watch_late_settlement(
+        &self,
+        request_id: &str,
+        rx: oneshot::Receiver<Result<serde_json::Value, BridgeError>>,
+        cleanup: impl FnOnce() + Send + 'static,
+    ) {
+        let hook = self.late_hook.lock().unwrap().clone();
+        let request_id = request_id.to_string();
+        tokio::spawn(async move {
+            let outcome = match tokio::time::timeout(LATE_SETTLEMENT_WINDOW, rx).await {
+                Ok(Ok(result)) => late_outcome(&result),
+                _ => crate::workflow::resources::LateOutcome::Lost,
+            };
+            cleanup();
+            if let Some(hook) = hook {
+                hook(&request_id, outcome);
+            }
+        });
     }
 
     /// Set the app handle for eval-based fallback JS execution.
@@ -364,7 +416,7 @@ impl Bridge {
         let msg = serde_json::to_string(&cmd)
             .map_err(|error| request.not_dispatched(error.to_string()))?;
         request.ensure_budget()?;
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
         let registration_id = uuid::Uuid::new_v4();
         {
             let mut pending = self.pending.lock().unwrap();
@@ -380,7 +432,7 @@ impl Bridge {
                 },
             );
         }
-        let _waiter = CleanupGuard(Some(|| {
+        let mut waiter = CleanupGuard(Some(|| {
             let mut pending = self.pending.lock().unwrap();
             if pending
                 .get(request.id)
@@ -399,10 +451,26 @@ impl Bridge {
         self.runtime.record_transmission(script, transmitted_bytes);
         drop(clients);
         // Once queued, even a socket send failure cannot safely trigger replay.
-        match tokio::time::timeout_at(request.deadline, rx).await {
+        match tokio::time::timeout_at(request.deadline, &mut rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(request.unknown("Bridge response channel closed")),
-            Err(_) => Err(request.unknown("WS bridge timeout")),
+            Err(_) => {
+                // The page may still finish; keep the pending entry so its
+                // result can settle the request (and lift quarantine) later.
+                waiter.0.take();
+                let pending = self.pending.clone();
+                let id = request.id.to_string();
+                self.watch_late_settlement(request.id, rx, move || {
+                    let mut pending = pending.lock().unwrap();
+                    if pending
+                        .get(&id)
+                        .is_some_and(|entry| entry.registration_id == registration_id)
+                    {
+                        pending.remove(&id);
+                    }
+                });
+                Err(request.unknown("WS bridge timeout"))
+            }
         }
     }
 
@@ -426,7 +494,7 @@ impl Bridge {
         let id = request.id.to_string();
         // Keep the event name valid even when a caller uses a non-UUID ID.
         let event_name = format!("connector-eval-{}", uuid::Uuid::new_v4());
-        let (tx, rx) = oneshot::channel::<Result<serde_json::Value, BridgeError>>();
+        let (tx, mut rx) = oneshot::channel::<Result<serde_json::Value, BridgeError>>();
         let tx = StdMutex::new(Some(tx));
         let expected_id = id.clone();
         let listener_id = app.listen(&event_name, move |event| {
@@ -456,17 +524,22 @@ impl Bridge {
                 let _ = tx.send(result);
             }
         });
-        let _listener = CleanupGuard(Some(|| app.unlisten(listener_id)));
+        let mut listener = CleanupGuard(Some(|| app.unlisten(listener_id)));
         let js = eval_script(script, &id, &event_name);
         self.enqueue_eval(request, || {
             self.runtime.record_transmission(script, js.len());
             window.eval(&js).map_err(|error| error.to_string())
         })
         .await?;
-        match tokio::time::timeout_at(request.deadline, rx).await {
+        match tokio::time::timeout_at(request.deadline, &mut rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(request.unknown("Eval result channel closed")),
-            Err(_) => Err(request.unknown("Script execution timeout (eval path)")),
+            Err(_) => {
+                listener.0.take();
+                let app = app.clone();
+                self.watch_late_settlement(request.id, rx, move || app.unlisten(listener_id));
+                Err(request.unknown("Script execution timeout (eval path)"))
+            }
         }
     }
 
@@ -2205,6 +2278,7 @@ pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<Str
         pending: Arc::new(StdMutex::new(HashMap::new())),
         app_handle: Arc::new(Mutex::new(None)),
         runtime: Arc::new(crate::runtime::RuntimeManager::default()),
+        late_hook: Arc::new(StdMutex::new(None)),
     };
     bridge.clients.lock().await.insert(
         "main".into(),
@@ -3102,7 +3176,67 @@ mod transport_tests {
         assert!(error.contains("outcome_unknown"), "{error}");
         assert!(error.contains(command["id"].as_str().unwrap()), "{error}");
         assert!(rx.try_recv().is_err());
+        // The timed-out request stays registered so a late result can settle it.
+        assert!(
+            bridge
+                .pending
+                .lock()
+                .unwrap()
+                .contains_key(command["id"].as_str().unwrap())
+        );
+    }
+
+    async fn late_settlement_after_timeout(
+        page_result: serde_json::Value,
+    ) -> (String, crate::workflow::resources::LateOutcome) {
+        let (bridge, mut rx) = queued_bridge().await;
+        let (seen_tx, seen_rx) = oneshot::channel();
+        let seen_tx = StdMutex::new(Some(seen_tx));
+        bridge.set_late_settlement_hook(Arc::new(move |id, outcome| {
+            if let Some(tx) = seen_tx.lock().unwrap().take() {
+                let _ = tx.send((id.to_string(), outcome));
+            }
+        }));
+        let error = bridge
+            .execute_js_for_window_typed("slowWrite()", 1, "main")
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            BridgeError::DispatchedOutcomeUnknown { .. }
+        ));
+        let command: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        let id = command["id"].as_str().unwrap().to_string();
+        let mut message = page_result;
+        message["id"] = json!(id);
+        super::test_page_message(&bridge, message).await;
+        let (seen_id, outcome) = tokio::time::timeout(Duration::from_secs(5), seen_rx)
+            .await
+            .expect("late settlement reported")
+            .unwrap();
+        assert_eq!(seen_id, id);
         assert!(bridge.pending.lock().unwrap().is_empty());
+        (seen_id, outcome)
+    }
+
+    #[tokio::test]
+    async fn a_late_page_result_reports_success_after_timeout() {
+        use crate::workflow::resources::LateOutcome;
+        let (_, outcome) = late_settlement_after_timeout(json!({"result": 1})).await;
+        assert_eq!(outcome, LateOutcome::Succeeded);
+    }
+
+    #[tokio::test]
+    async fn a_late_effect_free_failure_is_reported_as_releasable() {
+        use crate::workflow::resources::LateOutcome;
+        let (_, outcome) =
+            late_settlement_after_timeout(json!({"error": "boom", "effect": "none"})).await;
+        assert_eq!(outcome, LateOutcome::FailedWithoutEffect);
+        assert!(outcome.releases_quarantine());
+        let (_, outcome) =
+            late_settlement_after_timeout(json!({"error": "boom", "effect": "possible"})).await;
+        assert_eq!(outcome, LateOutcome::Failed);
+        assert!(!outcome.releases_quarantine());
     }
 
     #[tokio::test]

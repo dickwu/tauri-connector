@@ -151,6 +151,7 @@ pub async fn dispatch_tool(
         "driver_session" => Err("driver_session is not allowed inside batch_actions".to_string()),
         "batch_actions" => Err("batch_actions cannot be nested".to_string()),
         "webview_execute_js" => handle_execute_js(client, args).await,
+        "resources" => handle_resources(client, args).await,
         "bridge_status" => handle_bridge_status(client).await,
         "webview_screenshot" => handle_screenshot(client, args).await,
         "webview_dom_snapshot" => handle_dom_snapshot(client, args).await,
@@ -331,10 +332,35 @@ async fn handle_driver_session(
 
 async fn handle_execute_js(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
     let script = str_arg(args, "script").ok_or("Missing 'script' parameter")?;
+    if script.trim().is_empty() {
+        return Err("'script' is empty; pass the JavaScript to evaluate".to_string());
+    }
     let wid = window_id(args);
+    let timeout_ms = num_arg(args, "timeoutMs").map(|n| n as u64);
+    let mut command = json!({ "type": "execute_js", "script": script, "window_id": wid });
+    if let Some(timeout_ms) = timeout_ms {
+        command["timeout_ms"] = json!(timeout_ms);
+    }
     client
-        .send(json!({ "type": "execute_js", "script": script, "window_id": wid }))
+        .send_with_timeout(
+            command,
+            connector_client::eval_client_timeout_ms(timeout_ms),
+        )
         .await
+}
+
+async fn handle_resources(client: &ConnectorClient, args: &Value) -> Result<Value, String> {
+    let mut command = json!({ "type": "resources" });
+    for (from, to) in [
+        ("action", "action"),
+        ("requestId", "request_id"),
+        ("all", "all"),
+    ] {
+        if let Some(value) = args.get(from) {
+            command[to] = value.clone();
+        }
+    }
+    client.send(command).await
 }
 
 async fn handle_bridge_status(client: &ConnectorClient) -> Result<Value, String> {
@@ -1250,8 +1276,8 @@ mod tests {
         );
 
         // Pin the totals so accidental additions/deletions are caught.
-        assert_eq!(embedded.len(), 46, "shared tool count changed");
-        assert_eq!(standalone.len(), 47, "standalone tool count changed");
+        assert_eq!(embedded.len(), 47, "shared tool count changed");
+        assert_eq!(standalone.len(), 48, "standalone tool count changed");
     }
 
     #[test]

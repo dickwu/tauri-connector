@@ -23,6 +23,21 @@ pub mod workflow;
 
 const DEFAULT_TIMEOUT_MS: u64 = 35_000;
 
+/// Page-side `execute_js` deadline the plugin applies when none is given.
+pub const DEFAULT_EVAL_TIMEOUT_MS: u64 = 30_000;
+/// Largest `execute_js` deadline the plugin accepts.
+pub const MAX_EVAL_TIMEOUT_MS: u64 = 600_000;
+/// Margin so the plugin's typed timeout reply arrives before the client gives up.
+pub const EVAL_CLIENT_MARGIN_MS: u64 = 5_000;
+
+/// Client wait for an `execute_js` with the given page deadline.
+pub fn eval_client_timeout_ms(page_timeout_ms: Option<u64>) -> u64 {
+    page_timeout_ms
+        .unwrap_or(DEFAULT_EVAL_TIMEOUT_MS)
+        .clamp(1, MAX_EVAL_TIMEOUT_MS)
+        + EVAL_CLIENT_MARGIN_MS
+}
+
 type _WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 struct PendingRequest {
@@ -340,6 +355,14 @@ impl Default for ConnectorClient {
 
 #[cfg(test)]
 mod transport_tests {
+    #[test]
+    fn eval_client_deadline_outlives_the_page_deadline() {
+        assert_eq!(super::eval_client_timeout_ms(None), 35_000);
+        assert_eq!(super::eval_client_timeout_ms(Some(120_000)), 125_000);
+        assert_eq!(super::eval_client_timeout_ms(Some(0)), 5_001);
+        assert_eq!(super::eval_client_timeout_ms(Some(u64::MAX)), 605_000);
+    }
+
     use super::*;
     use serde_json::json;
 

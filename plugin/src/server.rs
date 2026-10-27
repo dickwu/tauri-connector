@@ -189,6 +189,21 @@ async fn handle_command(
             Err(error) => Response::error(id, error.to_string()),
         };
     }
+    if let Command::Resources {
+        action,
+        request_id,
+        all,
+    } = &command
+    {
+        // Never leased: releasing must work while the scopes are quarantined.
+        return crate::handlers::resources(
+            &id,
+            action.as_deref(),
+            request_id.as_deref(),
+            all.unwrap_or(false),
+            state,
+        );
+    }
     let args = match serde_json::to_value(&command) {
         Ok(args) => args,
         Err(error) => return Response::not_dispatched(id, "invalid_spec", error.to_string()),
@@ -222,7 +237,7 @@ async fn handle_command(
     let id = response.id.clone();
     let response = Response::with_outcome(id, response.into_outcome(tool));
     if response.requires_quarantine() {
-        lease.quarantine("outcome_unknown");
+        lease.quarantine_response("outcome_unknown", &response);
     }
     response
 }
@@ -241,9 +256,22 @@ async fn handle_command_unleased(
         Command::Ping => Response::success(id, serde_json::json!("pong")),
 
         // JS Execution
-        Command::ExecuteJs { script, window_id } => {
-            handlers::execute_js(&id, &script, &window_id, bridge).await
-        }
+        Command::ExecuteJs {
+            script,
+            window_id,
+            timeout_ms,
+        } => handlers::execute_js(&id, &script, &window_id, timeout_ms, bridge).await,
+        Command::Resources {
+            action,
+            request_id,
+            all,
+        } => handlers::resources(
+            &id,
+            action.as_deref(),
+            request_id.as_deref(),
+            all.unwrap_or(false),
+            state,
+        ),
         Command::BridgeStatus => Response::success(id, bridge.status().await),
 
         // Screenshot
@@ -1065,6 +1093,93 @@ mod lease_release_tests {
             assert_eq!(outcome["effect"], "possible", "{report:?}");
             assert_eq!(state.workflow.resources.quarantined(), 1, "{report:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn timed_out_eval_quarantine_lifts_when_the_page_settles_late() {
+        let state = isolated_state();
+        let (bridge, mut rx) = crate::bridge::test_queued_bridge().await;
+        let arbiter = state.workflow.resources.clone();
+        bridge.set_late_settlement_hook(std::sync::Arc::new(move |id, outcome| {
+            arbiter.settle_late(id, outcome);
+        }));
+        let command: Command = serde_json::from_value(
+            json!({"type":"execute_js","script":"slowButHarmless()","timeout_ms":50}),
+        )
+        .unwrap();
+        let response = handle_command("ws".into(), command, &bridge, None, &state).await;
+        let outcome = serde_json::to_value(response.outcome.unwrap()).unwrap();
+        assert_eq!(outcome["execution"], "outcome_unknown", "{outcome}");
+        let request = next_page_command(&mut rx).await;
+        let request_id = request["id"].as_str().unwrap().to_string();
+
+        // The next command is told exactly which request holds the quarantine.
+        let command: Command =
+            serde_json::from_value(json!({"type":"execute_js","script":"1"})).unwrap();
+        let busy = handle_command("ws".into(), command, &bridge, None, &state).await;
+        let busy = serde_json::to_value(busy.outcome.unwrap()).unwrap();
+        assert_eq!(busy["error"]["code"], "resource_busy", "{busy}");
+        assert!(
+            busy["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(&request_id),
+            "{busy}"
+        );
+
+        // The page finishes later without effects: the quarantine lifts itself.
+        crate::bridge::test_page_message(
+            &bridge,
+            json!({"id": request_id, "error": "TypeError: x", "effect": "none"}),
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while state.workflow.resources.quarantined() > 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("late settlement released the quarantine");
+        let listed = state.workflow.resources.list();
+        assert_eq!(
+            listed["lateSettlements"][0]["requestId"],
+            request_id.as_str()
+        );
+        assert_released(&state);
+    }
+
+    #[tokio::test]
+    async fn resources_command_lists_and_releases_quarantines_without_a_lease() {
+        let state = isolated_state();
+        let (bridge, _rx) = crate::bridge::test_queued_bridge().await;
+        let lease = state
+            .workflow
+            .resources
+            .try_acquire(vec!["ui".into()])
+            .unwrap();
+        lease.quarantine_request("outcome_unknown", Some("req-9"));
+        drop(lease);
+        let run = |value: serde_json::Value| {
+            let command: Command = serde_json::from_value(value).unwrap();
+            handle_command("ws".into(), command, &bridge, None, &state)
+        };
+        let listed = run(json!({"type":"resources"})).await;
+        let listed = serde_json::to_value(&listed).unwrap();
+        assert_eq!(
+            listed["result"]["quarantined"][0]["requestId"], "req-9",
+            "{listed}"
+        );
+        let refused = run(json!({"type":"resources","action":"release"})).await;
+        assert!(refused.requires_quarantine() || refused.outcome.is_some());
+        assert_eq!(state.workflow.resources.quarantined(), 1);
+        let released =
+            run(json!({"type":"resources","action":"release","requestId":"req-9"})).await;
+        let released = serde_json::to_value(&released).unwrap();
+        assert_eq!(
+            released["result"]["released"][0]["requestId"], "req-9",
+            "{released}"
+        );
+        assert_released(&state);
     }
 
     #[tokio::test]

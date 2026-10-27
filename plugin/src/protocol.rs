@@ -33,8 +33,21 @@ pub enum Command {
         script: String,
         #[serde(default = "default_window")]
         window_id: String,
+        /// Page-side deadline; defaults to 30 s.
+        #[serde(default, alias = "timeoutMs", skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u64>,
     },
     BridgeStatus,
+
+    /// List or release resource quarantines left by unknown outcomes.
+    Resources {
+        #[serde(default)]
+        action: Option<String>,
+        #[serde(default, alias = "requestId")]
+        request_id: Option<String>,
+        #[serde(default)]
+        all: Option<bool>,
+    },
 
     // --- Screenshot ---
     Screenshot {

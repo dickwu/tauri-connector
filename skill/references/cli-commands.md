@@ -525,7 +525,22 @@ Execute arbitrary JavaScript and print the result.
 
 ```bash
 tauri-connector eval <script>
+tauri-connector eval --timeout 120000 "await longTask()"
 ```
+
+`--timeout <ms>` sets the page-side deadline (default 30000, max 600000); the CLI waits 5 s longer so the plugin's typed timeout, with its requestId, always arrives. An empty script is rejected before anything is sent. A timeout leaves the outcome unknown and quarantines the window -- see `resources`.
+
+### resources
+
+List or release resource quarantines. An operation whose outcome is unknown (an eval or interaction that timed out or lost its connection, or a throw with `effect: possible`) quarantines its scopes; later commands fail with `resource_busy`, whose message names the quarantining requestId and reason.
+
+```bash
+tauri-connector resources                       # quarantined requestIds, reasons, scopes, recent late results
+tauri-connector resources release <requestId>   # lift one after checking the app
+tauri-connector resources release --all
+```
+
+A quarantine lifts in three ways: the page later reports the timed-out request finished (success, or a throw with `effect: none`), an explicit `tauri-connector resources release <requestId>` / `--all` (MCP `resources` action=release) after you have checked the app, or an app restart. A timed-out request keeps listening for its page result for 10 minutes; a late success or effect-free failure lifts its quarantine automatically and appears under "late result". A late failure with possible effects keeps it.
 
 ### state
 

@@ -8,7 +8,7 @@ Complete parameter tables for tauri-connector MCP tools. Configure in `.mcp.json
 
 The standalone MCP server (`tauri-connector-mcp`) adds one additional tool, `driver_session`, and reads `TAURI_CONNECTOR_WORKFLOW_TOKEN` from its environment for the `workflow_*` tools (put it in the `env` block of its `.mcp.json` entry). Legacy `/sse` remains available for older clients.
 
-**Response envelope (0.15+).** Every tool result can carry a typed `outcome` (`structuredContent.outcome` on success, `structuredContent.{error, outcome}` on failure) with `execution`, `verification`, `effect`, and a stable `error.code` -- see "Run report fields" and "Error codes" under Workflow tools. A legacy handler error without a typed outcome surfaces as `outcome_unknown`. Mutating tools, plus `webview_screenshot`, `webview_dom_snapshot`, `webview_find_element`, `webview_get_styles`, and `webview_wait_for`, take an application-owned lease on the target window and can return `resource_busy` while a workflow, batch, or another tool holds it; read-only diagnostics such as `read_logs`, `bridge_status`, `ipc_get_backend_state`, `artifact_list`, and `artifact_read` are never blocked. A lease quarantined by an uncertain write (`quarantined: true`) is released only by restarting the app -- no tool clears it. A failure that provably dispatched nothing (`effect: none`) releases its lease instead: failed screenshot, snapshot, element, style, and wait tools, and `webview_execute_js` scripts that throw or reject without dispatching anything. Mutating tools can also fail with `persistence_unavailable` when the app's data directory is unusable, because the lease journal must be writable first.
+**Response envelope (0.15+).** Every tool result can carry a typed `outcome` (`structuredContent.outcome` on success, `structuredContent.{error, outcome}` on failure) with `execution`, `verification`, `effect`, and a stable `error.code` -- see "Run report fields" and "Error codes" under Workflow tools. A legacy handler error without a typed outcome surfaces as `outcome_unknown`. Mutating tools, plus `webview_screenshot`, `webview_dom_snapshot`, `webview_find_element`, `webview_get_styles`, and `webview_wait_for`, take an application-owned lease on the target window and can return `resource_busy` while a workflow, batch, or another tool holds it; read-only diagnostics such as `read_logs`, `bridge_status`, `ipc_get_backend_state`, `artifact_list`, and `artifact_read` are never blocked. A lease quarantined by an uncertain write (`quarantined: true`) lists the quarantining `requestId` and `reason` in `quarantines[]` and the message. A quarantine lifts in three ways: the page later reports the timed-out request finished (success, or a throw with `effect: none`), an explicit `tauri-connector resources release <requestId>` / `--all` (MCP `resources` action=release) after you have checked the app, or an app restart. A failure that provably dispatched nothing (`effect: none`) releases its lease instead: failed screenshot, snapshot, element, style, and wait tools, and `webview_execute_js` scripts that throw or reject without dispatching anything. Mutating tools can also fail with `persistence_unavailable` when the app's data directory is unusable, because the lease journal must be writable first.
 
 ---
 
@@ -193,12 +193,27 @@ All shown JSON requires envelope authorization from the host adapter; no credent
 
 Execute arbitrary JavaScript in the webview. Use IIFE for return values.
 
-A script that throws or rejects reports `execution_failed`. Its `effect` is `none` -- and the window lease is released -- only when the page observed no backend-capable dispatch while it ran: no app IPC (`invoke`), no non-GET/HEAD/OPTIONS `fetch` or XHR, no `sendBeacon`, and no app WebSocket send. Anything else, including app background traffic during the script or an unobservable channel, reports `effect: possible` and quarantines the window until the app restarts. Work scheduled to run after the rejection (timers, later event handlers) is not observed, and same-origin iframes are outside the monitor.
+A script that throws or rejects reports `execution_failed`. Its `effect` is `none` -- and the window lease is released -- only when the page observed no backend-capable dispatch while it ran: no app IPC (`invoke`), no non-GET/HEAD/OPTIONS `fetch` or XHR, no `sendBeacon`, and no app WebSocket send. Anything else, including app background traffic during the script or an unobservable channel, reports `effect: possible` and quarantines the window until it is released with `resources` or the app restarts. Work scheduled to run after the rejection (timers, later event handlers) is not observed, and same-origin iframes are outside the monitor.
 
 | Param | Type | Required | Description |
 |---|---|---|---|
-| `script` | string | yes | JavaScript code. Wrap in `(() => { return value; })()` to get a return value |
+| `script` | string | yes | JavaScript code. Wrap in `(() => { return value; })()` to get a return value. Empty scripts are rejected |
+| `timeoutMs` | integer | no | Page-side deadline, 1–600000 ms (default 30000). The standalone MCP server waits 5 s longer |
 | `windowId` | string | | Target window |
+
+A timeout returns `outcome_unknown` with `outcome.dispatch.requestId` and quarantines the window. If the page finishes later, a success or an `effect: none` failure lifts that quarantine automatically; otherwise use `resources`.
+
+### resources
+
+List or release resource quarantines. Never leased, so it works while scopes are quarantined.
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `action` | `list` \| `release` | no | Default `list` |
+| `requestId` | string | release | Quarantine requestId (or quarantine `id`) to release |
+| `all` | boolean | release | Release every quarantine instead of one |
+
+Returns `quarantined[]` (`id`, `requestId`, `reason`, `resources`, `sinceMs`), `lateSettlements[]` (`requestId`, `outcome`: `succeeded` / `failed_without_effect` / `failed` / `lost`, `releasedQuarantine`, `atMs`) and, for release, `released[]`. Release is explicit host resolution: check the app state first. Active (non-quarantined) leases are never released.
 
 ### webview_screenshot
 
@@ -606,11 +621,11 @@ Every outcome -- workflow steps and, since 0.15, legacy tools inside `batch_acti
 | `binding_missing`, `binding_type_mismatch` | `fromInput` / `fromStep` did not resolve, or resolved to the wrong JSON type |
 | `precondition_failed`, `postcondition_failed`, `condition_timeout` | The last verified boundary no longer holds before dispatch; a required `expect`/`goal` failed; a `wait` or expectation ran out of time |
 | `execution_failed` | The action itself threw; read `effect` to see whether it may still have landed. `effect: none` leaves no quarantine, so the next call can run |
-| `outcome_unknown` | Dispatched, result lost: `effect: possible`, resources quarantined until the app restarts. Inspect, then `reconcile`; never replay |
+| `outcome_unknown` | Dispatched, result lost: `effect: possible`, resources quarantined. A late page result without effects lifts it; otherwise inspect, then `reconcile` (workflows) or `resources` release; never replay |
 | `run_key_conflict`, `run_not_found`, `run_expired` | Key reused with a different spec; unknown run id; run or evidence no longer retained in this app instance |
 | `stale_checkpoint`, `resume_not_safe`, `app_instance_changed`, `resume_requires_inputs` | Resume rejected: re-read the report for the current `revision`/`checkpointId`; the run is still executing or has nothing to reconcile; the app restarted (history is read-only); continuing needs inputs that were not persisted |
 | `cancel_requested`, `cancelled_before_dispatch` | Cancellation reasons, with or without a dispatched step |
-| `resource_busy` | A conflicting operation holds the window resource (`retryableBeforeDispatch: true`; `quarantined: true` means an uncertain write holds it, and only an app restart releases that), or the 4-active / 16-queued workflow capacity is full |
+| `resource_busy` | A conflicting operation holds the window resource (`retryableBeforeDispatch: true`; `quarantined: true` means an uncertain write holds it; `quarantines[]` names its `requestId` and `reason`, and `resources` releases it), or the 4-active / 16-queued workflow capacity is full |
 | `persistence_unavailable`, `evidence_persistence_failed`, `capture_incomplete`, `observation_failed` | Journal storage unusable (workflows fail closed), evidence could not be stored, a result exceeded the retention budget, or the page observation failed |
 
 ## Batch Tool

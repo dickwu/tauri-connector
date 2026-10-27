@@ -21,12 +21,28 @@ fn window_id() -> &'static str {
     WINDOW_ID.get().map(String::as_str).unwrap_or("main")
 }
 
-/// Execute JS in the webview via the connector.
-async fn exec_js(client: &ConnectorClient, script: &str, timeout_ms: u64) -> Result<Value, String> {
+/// Wire command for `execute_js` with a page-side deadline. The default is
+/// omitted so older plugins see an unchanged request.
+fn execute_js_command(script: &str, page_timeout_ms: u64) -> Value {
+    let mut command = json!({ "type": "execute_js", "script": script, "window_id": window_id() });
+    if page_timeout_ms != connector_client::DEFAULT_EVAL_TIMEOUT_MS {
+        command["timeout_ms"] = json!(page_timeout_ms);
+    }
+    command
+}
+
+/// Execute JS in the webview via the connector. `page_timeout_ms` is the
+/// plugin's deadline; the client waits a little longer so the plugin's typed
+/// timeout (with its requestId) arrives instead of a bare client timeout.
+async fn exec_js(
+    client: &ConnectorClient,
+    script: &str,
+    page_timeout_ms: u64,
+) -> Result<Value, String> {
     client
         .send_with_timeout(
-            json!({ "type": "execute_js", "script": script, "window_id": window_id() }),
-            timeout_ms,
+            execute_js_command(script, page_timeout_ms),
+            connector_client::eval_client_timeout_ms(Some(page_timeout_ms)),
         )
         .await
 }
@@ -770,8 +786,16 @@ pub async fn locator(
 }
 
 /// Evaluate arbitrary JavaScript.
-pub async fn eval_js(client: &ConnectorClient, script: &str) -> Result<(), String> {
-    let result = exec_js(client, script, 30_000).await?;
+pub async fn eval_js(
+    client: &ConnectorClient,
+    script: &str,
+    timeout_ms: Option<u64>,
+) -> Result<(), String> {
+    if script.trim().is_empty() {
+        return Err("eval needs a script, e.g. tauri-connector eval 'document.title'".into());
+    }
+    let page_timeout = timeout_ms.unwrap_or(connector_client::DEFAULT_EVAL_TIMEOUT_MS);
+    let result = exec_js(client, script, page_timeout).await?;
     match &result {
         Value::String(s) => println!("{s}"),
         _ => println!(
@@ -1912,6 +1936,79 @@ fn prepare_batch_spec_value(
     Ok(value)
 }
 
+/// List or release resource quarantines left by unknown outcomes.
+pub async fn resources(
+    client: &ConnectorClient,
+    action: &str,
+    request_id: Option<&str>,
+    all: bool,
+) -> Result<(), String> {
+    let mut command = json!({ "type": "resources", "action": action });
+    if let Some(request_id) = request_id {
+        command["request_id"] = json!(request_id);
+    }
+    if all {
+        command["all"] = json!(true);
+    }
+    let result = client.send(command).await?;
+    print!("{}", format_resources(&result));
+    Ok(())
+}
+
+fn format_resources(result: &Value) -> String {
+    let mut out = String::new();
+    if let Some(released) = result["released"].as_array() {
+        if released.is_empty() {
+            out.push_str("Nothing released\n");
+        }
+        for entry in released {
+            out.push_str(&format!(
+                "released {} ({})\n",
+                entry["requestId"]
+                    .as_str()
+                    .or(entry["id"].as_str())
+                    .unwrap_or("?"),
+                entry["reason"].as_str().unwrap_or("unknown")
+            ));
+        }
+    }
+    let quarantined = result["quarantined"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if quarantined.is_empty() {
+        out.push_str("No quarantined resources\n");
+    }
+    for entry in &quarantined {
+        let scopes: Vec<&str> = entry["resources"]
+            .as_array()
+            .map(|r| r.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "quarantined {} ({}) scopes: {}\n",
+            entry["requestId"]
+                .as_str()
+                .or(entry["id"].as_str())
+                .unwrap_or("?"),
+            entry["reason"].as_str().unwrap_or("unknown"),
+            scopes.join(", ")
+        ));
+    }
+    for entry in result["lateSettlements"].as_array().into_iter().flatten() {
+        out.push_str(&format!(
+            "late result {}: {}{}\n",
+            entry["requestId"].as_str().unwrap_or("?"),
+            entry["outcome"].as_str().unwrap_or("?"),
+            if entry["releasedQuarantine"].as_bool() == Some(true) {
+                " (released quarantine)"
+            } else {
+                ""
+            }
+        ));
+    }
+    out
+}
+
 fn print_json_result(result: Result<Value, String>) -> Result<(), String> {
     let result = result?;
     println!(
@@ -1980,6 +2077,39 @@ mod tests {
         );
         assert_eq!(super::merge_snapshot_refs(inline, None).len(), 1);
         assert_eq!(super::ref_count_summary(4, 4), "4 refs captured");
+    }
+
+    #[test]
+    fn eval_sends_custom_page_deadlines_only() {
+        let default = super::execute_js_command("1", 30_000);
+        assert!(default.get("timeout_ms").is_none());
+        let custom = super::execute_js_command("1", 120_000);
+        assert_eq!(custom["timeout_ms"], 120_000);
+    }
+
+    #[tokio::test]
+    async fn eval_rejects_empty_scripts_before_sending() {
+        let client = connector_client::ConnectorClient::new();
+        let error = super::eval_js(&client, "   ", None).await.unwrap_err();
+        assert!(error.contains("needs a script"), "{error}");
+    }
+
+    #[test]
+    fn resources_output_names_request_ids_and_reasons() {
+        let text = super::format_resources(&serde_json::json!({
+            "released": [{"id": "q1", "requestId": "req-1", "reason": "outcome_unknown"}],
+            "quarantined": [{"id": "q2", "requestId": null, "reason": "interrupted", "resources": ["backend", "ui"]}],
+            "lateSettlements": [{"requestId": "req-0", "outcome": "succeeded", "releasedQuarantine": true}]
+        }));
+        assert!(text.contains("released req-1 (outcome_unknown)"), "{text}");
+        assert!(
+            text.contains("quarantined q2 (interrupted) scopes: backend, ui"),
+            "{text}"
+        );
+        assert!(
+            text.contains("late result req-0: succeeded (released quarantine)"),
+            "{text}"
+        );
     }
 
     #[test]

@@ -84,8 +84,17 @@ pub(crate) async fn dispatch_raw(
         "webview_execute_js" => {
             let script = str_arg(args, "script").unwrap_or_default();
             let wid = window_id(args);
-            handlers::execute_js(id, &script, &wid, bridge).await
+            let timeout_ms = num_arg(args, "timeoutMs").map(|n| n as u64);
+            handlers::execute_js(id, &script, &wid, timeout_ms, bridge).await
         }
+
+        "resources" => handlers::resources(
+            id,
+            str_arg(args, "action").as_deref(),
+            str_arg(args, "requestId").as_deref(),
+            args.get("all").and_then(Value::as_bool).unwrap_or(false),
+            state,
+        ),
 
         "bridge_status" => Response::success(id.to_string(), bridge.status().await),
 
@@ -724,7 +733,7 @@ pub(crate) async fn call_raw(
     let id = response.id.clone();
     let response = Response::with_outcome(id, response.into_outcome(name));
     if response.requires_quarantine() {
-        lease.quarantine("outcome_unknown");
+        lease.quarantine_response("outcome_unknown", &response);
     }
     response
 }

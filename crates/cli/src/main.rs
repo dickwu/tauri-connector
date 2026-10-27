@@ -46,6 +46,20 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Subcommand, Debug, Clone)]
+enum ResourcesAction {
+    /// Show quarantined scopes with their requestIds and reasons (default)
+    List,
+    /// Lift a quarantine after checking the app state
+    Release {
+        /// requestId (or quarantine id) from `resources` or a resource_busy error
+        request_id: Option<String>,
+        /// Release every quarantine
+        #[arg(long)]
+        all: bool,
+    },
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Start, query or cancel active element selection (host token required).
@@ -141,6 +155,14 @@ enum Commands {
     Eval {
         /// JS expression
         script: Vec<String>,
+        /// Page-side deadline in milliseconds (default 30000, max 600000)
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+    /// List or release resource quarantines left by unknown outcomes
+    Resources {
+        #[command(subcommand)]
+        action: Option<ResourcesAction>,
     },
     /// Console logs
     Logs {
@@ -1098,7 +1120,19 @@ async fn run_cli(cli: Cli) {
             )
             .await
         }
-        Commands::Eval { script } => commands::eval_js(&client, &script.join(" ")).await,
+        Commands::Eval { script, timeout } => {
+            commands::eval_js(&client, &script.join(" "), timeout).await
+        }
+        Commands::Resources { action } => match action.unwrap_or(ResourcesAction::List) {
+            ResourcesAction::List => commands::resources(&client, "list", None, false).await,
+            ResourcesAction::Release { request_id, all } => {
+                if request_id.is_some() == all {
+                    Err("resources release needs a requestId or --all".to_string())
+                } else {
+                    commands::resources(&client, "release", request_id.as_deref(), all).await
+                }
+            }
+        },
         Commands::Logs {
             lines,
             filter,
