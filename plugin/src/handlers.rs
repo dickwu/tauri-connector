@@ -1907,8 +1907,46 @@ pub async fn ipc_execute_command(
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
+        Err(BridgeError::ExecutionFailed {
+            request_id, error, ..
+        }) if ipc_denied_before_running(command, &error) => {
+            // Tauri's ACL/command lookup refused the invoke before the
+            // command ran, and this script does nothing else: no effect,
+            // so the window must not be quarantined.
+            let mut outcome = ExecutionOutcome::failed(
+                WorkflowError::new(
+                    "ipc_not_allowed",
+                    "executing",
+                    format!(
+                        "{error}\n\nhint: grant the command in the app's capabilities (src-tauri/capabilities/*.json) for this window, or check the command name"
+                    ),
+                ),
+                EffectStatus::None,
+            );
+            outcome.dispatch = serde_json::json!({"requestId": request_id, "dispatched": true});
+            Response::outcome_error(id.to_string(), outcome)
+        }
         Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
     }
+}
+
+/// True for Tauri's own refusals of `command` (ACL denial, unknown plugin or
+/// command), which are raised before any command code runs.
+fn ipc_denied_before_running(command: &str, error: &str) -> bool {
+    let error = error.trim_start_matches("Error: ").trim();
+    if error == format!("Command {command} not found") {
+        return true;
+    }
+    let pretty = match command
+        .strip_prefix("plugin:")
+        .and_then(|c| c.split_once('|'))
+    {
+        Some((plugin, name)) => format!("{plugin}.{name}"),
+        None => command.to_string(),
+    };
+    error
+        .strip_prefix(&pretty)
+        .is_some_and(|rest| rest.starts_with(" not allowed"))
 }
 
 pub async fn ipc_monitor(
@@ -4790,6 +4828,35 @@ mod tests {
         assert_eq!(entries[0].window_id, "main");
         assert_eq!(entries[1].window_id, "editor");
         assert!(super::pending_log_entries(&serde_json::json!(null), "main").is_empty());
+    }
+
+    #[test]
+    fn tauri_ipc_refusals_are_recognised_as_effect_free() {
+        use super::ipc_denied_before_running as denied;
+        assert!(denied(
+            "plugin:dialog|open",
+            "dialog.open not allowed. Plugin not found"
+        ));
+        assert!(denied(
+            "plugin:window|close",
+            "window.close not allowed. Permissions associated with this command: core:window:allow-close"
+        ));
+        assert!(denied(
+            "save_file",
+            "save_file not allowed on window \"main\", webview \"main\", URL: local"
+        ));
+        assert!(denied("save_file", "Command save_file not found"));
+        assert!(denied(
+            "plugin:fs|read",
+            "Error: fs.read not allowed on origin [x]"
+        ));
+        // The command's own failure is not a refusal, and neither is another
+        // command's denial text.
+        assert!(!denied(
+            "save_file",
+            "disk full: save_file not allowed to grow"
+        ));
+        assert!(!denied("save_file", "other not allowed. Command not found"));
     }
 
     #[tokio::test]
