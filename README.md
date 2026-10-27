@@ -509,7 +509,7 @@ Sections reported:
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.17.1
+tauri-connector doctor v0.17.2
 
 Plugin Setup
   ✓ Cargo dependency: tauri-plugin-connector = "0.17" (optional, feature-gated)
@@ -720,7 +720,7 @@ A Rust CLI with ref-based element addressing is also available:
 brew install dickwu/tap/tauri-connector
 
 # Or install the version-matched CLI from crates.io
-cargo install connector-cli --version 0.17.1 --locked
+cargo install connector-cli --version 0.17.2 --locked
 
 # Or build from source
 cargo build -p connector-cli --release
