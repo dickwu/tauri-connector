@@ -18,7 +18,7 @@ The targeted `cargo clean` removes only generated plugin artifacts before switch
 
 Fixture options (environment variables read at launch):
 
-- `CONNECTOR_FIXTURE_PORT=<port>`: fixed connector port instead of the default range.
+- `CONNECTOR_FIXTURE_PORT=<port>`: connector port instead of the default 19555, e.g. one in the 9555-9655 discovery range for `status` port-scan checks (MCP uses port + 1).
 - `CONNECTOR_FIXTURE_CSP=strict`: serve the page under a strict Content-Security-Policy (no inline scripts or eval) to check that the connector works under CSP.
 - `CONNECTOR_FIXTURE_OVERLAY=1`: use the macOS Overlay title bar style so the webview spans the title bar, to check capture geometry.
 
