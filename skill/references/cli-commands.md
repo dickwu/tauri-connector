@@ -417,7 +417,7 @@ tauri-connector screenshot /tmp/s.webp -f webp
 tauri-connector screenshot /tmp/s.jpg -f jpeg -q 60
 ```
 
-The command prints the final resolved path and `sha256` as JSON. Annotated screenshots also include `annotations`, `snapshotId`, and `refsPath`; artifact manifest rows include `path`, `sha256`, `refsPath`, `snapshotId`, `windowId`, `selector`, `width`, and `height`. Do not assume a reused requested path is the latest capture unless `--overwrite` was used.
+The command prints the final resolved path and `sha256` as JSON. Annotated screenshots also include `annotations`, `snapshotId`, and `refsPath`; artifact manifest rows include `path`, `sha256`, `refsPath`, `snapshotId`, `windowId`, `selector`, `width`, and `height`. Do not assume a reused requested path is the latest capture unless `--overwrite` was used. If the page reports `document.visibilityState` `hidden` (window minimised, occluded or on another space) or a full-window image is a single colour, the JSON output carries `warnings: [{code: "page_hidden", reasons, visibilityState, message}]` and stderr prints `warning: page_hidden: ...`; the image is still returned but may be blank or stale. Bring the app to the front and capture again.
 
 ### artifacts
 

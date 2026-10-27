@@ -984,10 +984,15 @@ pub async fn screenshot(
             artifact.path.display()
         );
     }
+    let warnings = result.get("warnings").cloned().unwrap_or(Value::Null);
+    for message in screenshot_warning_messages(&warnings) {
+        eprintln!("warning: {message}");
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
             "path": artifact.path,
+            "warnings": warnings,
             "requestedPath": artifact.requested_path,
             "resolvedFromCollision": artifact.resolved_from_collision,
             "overwrote": artifact.overwrote,
@@ -1000,6 +1005,25 @@ pub async fn screenshot(
         .unwrap_or_default()
     );
     Ok(())
+}
+
+/// One line per plugin screenshot warning, e.g. `page_hidden: ...`.
+fn screenshot_warning_messages(warnings: &Value) -> Vec<String> {
+    warnings
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|warning| {
+            format!(
+                "{}: {}",
+                warning
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("warning"),
+                warning.get("message").and_then(Value::as_str).unwrap_or("")
+            )
+        })
+        .collect()
 }
 
 struct ArtifactWrite {
@@ -2092,6 +2116,17 @@ mod tests {
         let client = connector_client::ConnectorClient::new();
         let error = super::eval_js(&client, "   ", None).await.unwrap_err();
         assert!(error.contains("needs a script"), "{error}");
+    }
+
+    #[test]
+    fn screenshot_warnings_are_printed_with_their_code() {
+        let warnings =
+            json!([{"code":"page_hidden","message":"The page reports visibilityState=hidden"}]);
+        assert_eq!(
+            super::screenshot_warning_messages(&warnings),
+            vec!["page_hidden: The page reports visibilityState=hidden".to_string()]
+        );
+        assert!(super::screenshot_warning_messages(&serde_json::Value::Null).is_empty());
     }
 
     #[test]

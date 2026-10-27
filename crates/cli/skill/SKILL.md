@@ -489,6 +489,7 @@ bun run $SCRIPTS/hover.ts ".trigger"      # Hover (--off to leave)
 bun run $SCRIPTS/logs.ts 50               # Console logs
 bun run $SCRIPTS/screenshot.ts /tmp/s.png # Screenshot
 bun run $SCRIPTS/eval.ts "document.title" # Execute JS
+bun run $SCRIPTS/resources.ts            # List quarantines (release <requestId> | release --all)
 bun run $SCRIPTS/find.ts "button"         # Find elements
 bun run $SCRIPTS/wait.ts ".loaded"        # Wait for selector
 bun run $SCRIPTS/state.ts                 # App metadata

@@ -2315,6 +2315,11 @@ async fn finish_screenshot_response(
     {
         return Response::error(id.to_string(), e);
     }
+    if let Some(warning) = page_hidden_warning(&result, selector.is_none(), window_id, bridge).await
+        && let Some(obj) = result.as_object_mut()
+    {
+        obj.insert("warnings".to_string(), serde_json::json!([warning]));
+    }
     if save {
         match save_screenshot_artifact(
             &result, output_dir, name_hint, overwrite, selector, window_id, state,
@@ -2335,6 +2340,84 @@ async fn finish_screenshot_response(
         }
     }
     Response::success(id.to_string(), result)
+}
+
+/// How long the screenshot path waits for `document.visibilityState`.
+const PAGE_HIDDEN_PROBE_MS: u64 = 1_500;
+
+/// Warn when a capture probably shows a hidden or unpainted page instead of
+/// the app: the document reports `visibilityState: hidden`, or a full-window
+/// image is a single colour. The image is still returned.
+async fn page_hidden_warning(
+    result: &serde_json::Value,
+    full_window: bool,
+    window_id: &str,
+    bridge: &Bridge,
+) -> Option<serde_json::Value> {
+    let visibility = bridge
+        .execute_js_for_window("document.visibilityState", PAGE_HIDDEN_PROBE_MS, window_id)
+        .await
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string));
+    let uniform = full_window && screenshot_is_uniform(result);
+    page_hidden_warning_for(visibility.as_deref(), uniform)
+}
+
+fn page_hidden_warning_for(visibility: Option<&str>, uniform: bool) -> Option<serde_json::Value> {
+    let hidden = visibility == Some("hidden");
+    if !hidden && !uniform {
+        return None;
+    }
+    let mut reasons = Vec::new();
+    if hidden {
+        reasons.push("visibility_hidden");
+    }
+    if uniform {
+        reasons.push("uniform_image");
+    }
+    let message = if hidden {
+        "The page reports visibilityState=hidden (window minimised, occluded or on another space), so the capture may be blank or stale. Bring the app to the front and capture again."
+    } else {
+        "The capture is a single colour, which usually means the page was hidden or not painted yet. Bring the app to the front, wait for it to render and capture again."
+    };
+    Some(serde_json::json!({
+        "code": "page_hidden",
+        "message": message,
+        "reasons": reasons,
+        "visibilityState": visibility,
+    }))
+}
+
+/// True when the encoded image decodes to a single colour (per-channel
+/// tolerance of 2 for lossy formats).
+#[cfg(feature = "capture-codec")]
+fn screenshot_is_uniform(result: &serde_json::Value) -> bool {
+    let Some(data) = result.get("base64").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else {
+        return false;
+    };
+    let Ok(decoded) = image::load_from_memory(&bytes) else {
+        return false;
+    };
+    let rgba = decoded.to_rgba8();
+    let mut pixels = rgba.pixels();
+    let Some(first) = pixels.next().copied() else {
+        return false;
+    };
+    pixels.all(|pixel| {
+        pixel
+            .0
+            .iter()
+            .zip(first.0.iter())
+            .all(|(a, b)| a.abs_diff(*b) <= 2)
+    })
+}
+
+#[cfg(not(feature = "capture-codec"))]
+fn screenshot_is_uniform(_result: &serde_json::Value) -> bool {
+    false
 }
 
 #[cfg(feature = "xcap")]
@@ -4076,6 +4159,53 @@ mod tests {
     };
     use crate::state::{PluginState, RefEntry};
     use std::path::Path;
+
+    #[test]
+    fn hidden_pages_and_uniform_captures_warn_page_hidden() {
+        assert!(super::page_hidden_warning_for(Some("visible"), false).is_none());
+        assert!(super::page_hidden_warning_for(None, false).is_none());
+
+        let hidden = super::page_hidden_warning_for(Some("hidden"), false).unwrap();
+        assert_eq!(hidden["code"], "page_hidden");
+        assert_eq!(hidden["reasons"], serde_json::json!(["visibility_hidden"]));
+        assert_eq!(hidden["visibilityState"], "hidden");
+
+        let blank = super::page_hidden_warning_for(Some("visible"), true).unwrap();
+        assert_eq!(blank["reasons"], serde_json::json!(["uniform_image"]));
+        assert!(blank["message"].as_str().unwrap().contains("single colour"));
+    }
+
+    #[cfg(feature = "capture-codec")]
+    fn png_result(image: image::RgbaImage) -> serde_json::Value {
+        use base64::Engine;
+        let mut bytes = Vec::new();
+        image
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        serde_json::json!({
+            "base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+            "mimeType": "image/png",
+        })
+    }
+
+    #[cfg(feature = "capture-codec")]
+    #[test]
+    fn uniform_detection_flags_only_single_colour_images() {
+        let blank = image::RgbaImage::from_pixel(64, 48, image::Rgba([255, 255, 255, 255]));
+        assert!(super::screenshot_is_uniform(&png_result(blank.clone())));
+
+        let mut painted = blank;
+        painted.put_pixel(10, 10, image::Rgba([0, 0, 0, 255]));
+        assert!(!super::screenshot_is_uniform(&png_result(painted)));
+
+        assert!(!super::screenshot_is_uniform(&serde_json::json!({})));
+        assert!(!super::screenshot_is_uniform(
+            &serde_json::json!({"base64": "not an image"})
+        ));
+    }
 
     #[test]
     fn pre_dispatch_input_failures_do_not_quarantine() {
