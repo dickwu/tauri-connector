@@ -1323,6 +1323,17 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       return NodeFilter.FILTER_ACCEPT;
     }}
 
+    function directTextOf(el) {{
+      var tagName = el.tagName;
+      if (tagName === 'TEXTAREA' || tagName === 'SELECT' || tagName === 'OPTION') return '';
+      var parts = [];
+      var nodes = el.childNodes || [];
+      for (var ti = 0; ti < nodes.length; ti++) {{
+        if (nodes[ti].nodeType === 3) parts.push(nodes[ti].textContent || '');
+      }}
+      return parts.join(' ').replace(/[\s\u00a0\u2000-\u200b\u202f\u205f\u3000]+/g, ' ').trim();
+    }}
+
     // Build a tree node for one element
     function buildNode(el, depth) {{
       const role = getRole(el);
@@ -1422,6 +1433,16 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
         depth: depth,
         el: el
       }};
+
+      // Accessibility mode shows text that sits directly in an element whose
+      // accessible name does not already carry it (a generic div holding a
+      // total, a paragraph between links). AI mode (-i) stays ref-focused.
+      if (mode === 'accessibility' && !sensitive) {{
+        var directText = directTextOf(el);
+        if (directText && (name || '').indexOf(directText) === -1) {{
+          nodeObj.children.push({{ label: 'text', name: directText.substring(0, 200), attrs: [], children: [], depth: depth + 1, el: null }});
+        }}
+      }}
 
       if (detectOverlays) {{
         try {{
@@ -1880,13 +1901,16 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     }}
 
     // === Render: recursive stringify ===
-    function renderNode(node, depth) {{
+    function renderNode(node, depth, skipOverlays) {{
+      if (skipOverlays && skipOverlays.has(node)) {{
+        return '  '.repeat(depth) + '- [overlay ' + skipOverlays.get(node) + ': shown above]';
+      }}
       var line = '  '.repeat(depth) + '- ' + node.label;
       if (node.name) line += ' "' + node.name.replace(/"/g, '\\"') + '"';
       if (node.attrs.length > 0) line += ' [' + node.attrs.join(', ') + ']';
       var lines = [line];
       for (var ci = 0; ci < node.children.length; ci++) {{
-        lines.push(renderNode(node.children[ci], depth + 1));
+        lines.push(renderNode(node.children[ci], depth + 1, skipOverlays));
       }}
       return lines.join('\n');
     }}
@@ -1918,73 +1942,97 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
       if (budgetActive) usedTokens += estimateTokens(overlayHeader);
     }}
 
-    // Sections: a body- or single-container-rooted walk yields one top node
-    // holding everything, so budget granularity comes from that node's
-    // children; the container's own line renders first.
-    var sections = rootNode.children;
-    var sectionDepth = 0;
-    if (rootNode.children.length === 1 && rootNode.children[0].children.length > 0) {{
-      var topNode = rootNode.children[0];
-      var tline = '- ' + topNode.label;
-      if (topNode.name) tline += ' "' + topNode.name.replace(/"/g, '\\"') + '"';
-      if (topNode.attrs.length > 0) tline += ' [' + topNode.attrs.join(', ') + ']';
-      snapshotLines.push(tline);
-      if (budgetActive) usedTokens += estimateTokens(tline);
-      sections = topNode.children;
-      sectionDepth = 1;
+    // With a budget, overlays render first (focused, then z-desc) so an open
+    // modal stays inline and the background page spills instead; the overlay's
+    // place in the page tree keeps a one-line pointer. Unlimited output keeps
+    // pure DOM order.
+    var inlineFirst = new Map();
+    if (budgetActive) {{
+      for (var ofi = 0; ofi < overlayEntries.length; ofi++) {{
+        if (overlayEntries[ofi].node && overlayEntries[ofi].id) inlineFirst.set(overlayEntries[ofi].node, overlayEntries[ofi].id);
+      }}
     }}
 
-    // Section order: with a budget and detected overlays, overlay sections render
-    // first (focused, then z-desc) so the open modal stays inline and the
-    // background page spills instead. Unlimited output keeps pure DOM order.
-    var sectionIndices = [];
-    for (var si = 0; si < sections.length; si++) sectionIndices.push(si);
-    if (budgetActive && overlayEntries.length > 0) {{
-      var sectionRank = {{}};
-      for (var oi2 = 0; oi2 < overlayEntries.length; oi2++) {{
-        for (var sj = 0; sj < sections.length; sj++) {{
-          var secEl = sections[sj].el;
-          if (secEl && (secEl === overlayEntries[oi2].topEl || secEl.contains(overlayEntries[oi2].topEl))) {{
-            if (sectionRank[sj] === undefined) sectionRank[sj] = oi2;
-            break;
+    function ownLine(node, depth) {{
+      var line = '  '.repeat(depth) + '- ' + node.label;
+      if (node.name) line += ' "' + node.name.replace(/"/g, '\\"') + '"';
+      if (node.attrs.length > 0) line += ' [' + node.attrs.join(', ') + ']';
+      return line;
+    }}
+
+    function sectionLabelOf(node) {{
+      var label = node.label || 'section';
+      try {{
+        if (node.el) {{
+          if (node.el.id) {{
+            label += '#' + node.el.id;
+          }} else if (node.el.className && typeof node.el.className === 'string') {{
+            var scls = node.el.className.trim().split(/\s+/).slice(0, 2).filter(Boolean);
+            if (scls.length > 0) label += '.' + scls.join('.');
           }}
         }}
-      }}
-      sectionIndices.sort(function(a, b) {{
-        var ra = sectionRank[a] === undefined ? 9999 : sectionRank[a];
-        var rb = sectionRank[b] === undefined ? 9999 : sectionRank[b];
-        if (ra !== rb) return ra - rb;
-        return a - b;
-      }});
+        if (node.name) label += ' "' + node.name.substring(0, 30) + '"';
+      }} catch (_) {{}}
+      return label;
     }}
 
-    for (var rii = 0; rii < sectionIndices.length; rii++) {{
-      var ri = sectionIndices[rii];
-      var sectionText = renderNode(sections[ri], sectionDepth);
-      var sectionTokens = budgetActive ? estimateTokens(sectionText) : 0;
+    function spill(label, content, depth) {{
+      split = true;
+      subtrees.push({{ label: label, content: content }});
+      var placeholder = '  '.repeat(depth) + '- [subtree: ' + label + '] (' + estimateTokens(content) + ' tokens, see subtrees[' + (subtrees.length - 1) + '])';
+      snapshotLines.push(placeholder);
+      // Charge placeholder lines too: the budget tracks the whole payload.
+      usedTokens += estimateTokens(placeholder);
+    }}
 
-      if (!budgetActive || (usedTokens + sectionTokens) <= maxTokens) {{
-        snapshotLines.push(sectionText);
-        usedTokens += sectionTokens;
-      }} else {{
-        split = true;
-        var secNode = sections[ri];
-        var sectionLabel = secNode.label || ('section-' + ri);
-        try {{
-          if (secNode.el) {{
-            if (secNode.el.id) {{
-              sectionLabel += '#' + secNode.el.id;
-            }} else if (secNode.el.className && typeof secNode.el.className === 'string') {{
-              var scls = secNode.el.className.trim().split(/\s+/).slice(0, 2).filter(Boolean);
-              if (scls.length > 0) sectionLabel += '.' + scls.join('.');
-            }}
-          }}
-          if (secNode.name) sectionLabel += ' "' + secNode.name.substring(0, 30) + '"';
-        }} catch (_) {{}}
-        subtrees.push({{ label: sectionLabel, content: sectionText }});
-        snapshotLines.push('  '.repeat(sectionDepth) + '- [subtree: ' + sectionLabel + '] (' + sectionTokens + ' tokens, see subtrees[' + (subtrees.length - 1) + '])');
-        // Charge placeholder line to budget (tracks total payload, not just content)
-        usedTokens += estimateTokens(snapshotLines[snapshotLines.length - 1]);
+    // A node that does not fit keeps its own line inline and recurses into its
+    // children, so one oversized wrapper (an app root, a layout shell) no longer
+    // spills the entire page into a single subtree.
+    var MIN_RECURSE_TOKENS = 48;
+    function emitNode(node, depth, level, skipOverlays) {{
+      var text = renderNode(node, depth, skipOverlays);
+      if (!budgetActive) {{ snapshotLines.push(text); return; }}
+      var tokens = estimateTokens(text);
+      var overlayPointer = skipOverlays && skipOverlays.has(node);
+      if (overlayPointer || usedTokens + tokens <= maxTokens) {{
+        snapshotLines.push(text);
+        usedTokens += tokens;
+        return;
+      }}
+      var line = ownLine(node, depth);
+      var lineTokens = estimateTokens(line);
+      var canRecurse = node.children.length > 0 && level < 24 &&
+        maxTokens - usedTokens >= lineTokens + MIN_RECURSE_TOKENS;
+      if (!canRecurse) {{
+        spill(sectionLabelOf(node), text, depth);
+        return;
+      }}
+      split = true;
+      snapshotLines.push(line);
+      usedTokens += lineTokens;
+      for (var ci = 0; ci < node.children.length; ci++) {{
+        if (maxTokens - usedTokens < MIN_RECURSE_TOKENS / 2 && ci < node.children.length - 1) {{
+          var rest = [];
+          for (var rj = ci; rj < node.children.length; rj++) rest.push(renderNode(node.children[rj], depth + 1, skipOverlays));
+          spill('rest of ' + sectionLabelOf(node) + ' (' + (node.children.length - ci) + ' nodes)', rest.join('\n'), depth + 1);
+          return;
+        }}
+        emitNode(node.children[ci], depth + 1, level + 1, skipOverlays);
+      }}
+    }}
+
+    var fullParts = [];
+    for (var fpi = 0; fpi < rootNode.children.length; fpi++) fullParts.push(renderNode(rootNode.children[fpi], 0));
+    var fullText = fullParts.join('\n');
+    if (!budgetActive || usedTokens + estimateTokens(fullText) <= maxTokens) {{
+      if (fullText) snapshotLines.push(fullText);
+      if (budgetActive) usedTokens += estimateTokens(fullText);
+    }} else {{
+      inlineFirst.forEach(function(oid, overlayNode) {{
+        emitNode(overlayNode, 0, 0, null);
+      }});
+      for (var rii = 0; rii < rootNode.children.length; rii++) {{
+        emitNode(rootNode.children[rii], 0, 0, inlineFirst);
       }}
     }}
 

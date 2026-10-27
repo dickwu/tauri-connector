@@ -134,6 +134,39 @@ async function corpus() {
     const covered=window.__connectorClick(document.querySelector('#under')); eq(covered.mismatch,true); eq(covered.hit.id,'cover'); eq(clicked,1);
     fixture('<button id="off" disabled>Off</button>'); const off=window.__connectorClick(document.querySelector('#off')); eq(off.code,'not_actionable'); eq(off.dispatched,false);
   });
+  await test('oversized wrappers split recursively instead of spilling the whole page', () => {
+    fixture('<div id="app"><div class="shell"><nav>'+Array.from({length:4},(_,i)=>`<button class="nav-${i}">Nav ${i}</button>`).join('')+'</nav><main>'+Array.from({length:60},(_,i)=>`<button class="item-${i}">Item number ${i}</button>`).join('')+'</main></div></div>');
+    const snap=window.__CONNECTOR_SNAPSHOT__({mode:'ai',maxTokens:300});
+    ok(snap.meta.split,'did not split'); ok(snap.snapshot.includes('Nav 0'),'nav not inline: '+snap.snapshot);
+    ok(Object.keys(snap.refs).length>=4,'too few inline refs '+Object.keys(snap.refs).length);
+    ok(snap.subtrees.length>0,'no subtrees'); ok(Object.keys(snap.allRefs).length>=64,'allRefs incomplete');
+    ok(!snap.subtrees.some(t=>t.content.includes('Nav 0')),'nav was spilled as well');
+  });
+  await test('budgeted snapshots render an open overlay before the background page', () => {
+    fixture('<main>'+Array.from({length:80},(_,i)=>`<button class="bg-${i}">Background button ${i}</button>`).join('')+'</main><div role="dialog" aria-label="Confirm" aria-modal="true" style="position:fixed;left:0;top:0;width:300px;height:200px;z-index:50"><button id="ok">Confirm delete</button></div>');
+    const snap=window.__CONNECTOR_SNAPSHOT__({mode:'ai',maxTokens:250});
+    ok(snap.snapshot.includes('Confirm delete'),'overlay not inline: '+snap.snapshot);
+    ok(snap.snapshot.includes('[overlay o1: shown above]'),'missing overlay pointer');
+    ok(snap.snapshot.indexOf('Confirm delete')<snap.snapshot.indexOf('Background button'),'overlay not first');
+    const small=window.__CONNECTOR_SNAPSHOT__({mode:'ai',maxTokens:100000});
+    ok(!small.snapshot.includes('shown above'),'fitting output must keep DOM order');
+  });
+  await test('large containers are not redacted when the descendant budget runs out', () => {
+    fixture('<section aria-label="Workspace" id="ws">'+'<span>x</span>'.repeat(1500)+'<input type="password"></section><button id="big">'+'<span>y</span>'.repeat(1500)+'</button>');
+    ok(!sem.isSensitive(document.querySelector('#ws')),'container redacted on budget');
+    ok(sem.isSensitive(document.querySelector('#big')),'name-from-content roles must stay fail-closed');
+    fixture('<form aria-label="Sign in" id="s"><input type="password"></form><button id="b"><span data-sensitive="true">x</span></button><section aria-labelledby="l" id="r"></section><div id="l"><input type="password"></div>');
+    ok(!sem.isSensitive(document.querySelector('#s')),'form named by aria-label redacted because of a password field');
+    ok(!sem.isSensitive(document.body),'body redacted because of a password field');
+    ok(sem.isSensitive(document.querySelector('#b')),'content-named button with sensitive child must be redacted');
+    ok(sem.isSensitive(document.querySelector('#r')),'labelledby subtree with password must be redacted');
+  });
+  await test('accessibility snapshots show direct text leaves and ai mode hides them', () => {
+    fixture('<div class="total">Total:&nbsp;$42</div><button>Save</button><input type="password" value="hunter2">');
+    const a=window.__CONNECTOR_SNAPSHOT__({mode:'accessibility'}).snapshot;
+    ok(a.includes('- text "Total: $42"'),a); ok(!a.includes('text "Save"'),'duplicate text for named button'); ok(!a.includes('hunter2'));
+    ok(!window.__CONNECTOR_SNAPSHOT__({mode:'ai'}).snapshot.includes('- text '),'ai mode shows text leaves');
+  });
   return {tests:results.length,failures:results.filter(x=>!x.passed).length,evidenceKind:'browser_chromium',results};
 }
 (async()=>{

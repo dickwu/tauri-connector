@@ -105,13 +105,21 @@ pub async fn snapshot(
         }
     }
 
-    let refs: RefMap = result
+    let inline_refs: RefMap = result
         .get("refs")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
-
-    let count = refs.len();
-    eprintln!("\n{count} refs captured");
+    let inline_count = inline_refs.len();
+    // A split snapshot only inlines the refs it shows; the full map is written
+    // next to the subtree files. Cache all of them so refs read from a subtree
+    // file work with click/fill too.
+    let all_refs = result
+        .pointer("/meta/allRefsPath")
+        .and_then(|v| v.as_str())
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|data| serde_json::from_str::<RefMap>(&data).ok());
+    let refs = merge_snapshot_refs(inline_refs, all_refs);
+    eprintln!("\n{}", ref_count_summary(inline_count, refs.len()));
 
     let snapshot_id = result
         .pointer("/meta/snapshotId")
@@ -123,6 +131,27 @@ pub async fn snapshot(
         snapshot_id,
         snapshot_mode,
     })
+}
+
+fn merge_snapshot_refs(inline: RefMap, all: Option<RefMap>) -> RefMap {
+    match all {
+        Some(mut all) => {
+            all.extend(inline);
+            all
+        }
+        None => inline,
+    }
+}
+
+fn ref_count_summary(inline: usize, total: usize) -> String {
+    if total > inline {
+        format!(
+            "{total} refs captured ({inline} inline, {} in subtree files)",
+            total - inline
+        )
+    } else {
+        format!("{total} refs captured")
+    }
 }
 
 /// List recent snapshot sessions from the app snapshot directory.
@@ -1928,6 +1957,30 @@ mod tests {
     use super::sha256_hex;
     use super::{prepare_batch_spec_value, read_batch_spec_input};
     use serde_json::json;
+
+    #[test]
+    fn split_snapshots_report_and_cache_every_ref() {
+        let entry = |selector: &str| -> crate::snapshot::RefEntry {
+            serde_json::from_value(json!({"tag": "button", "name": "", "selector": selector}))
+                .unwrap()
+        };
+        let inline: super::RefMap = [("e0".to_string(), entry("#a"))].into();
+        let all: super::RefMap = [
+            ("e0".to_string(), entry("#stale")),
+            ("e1".to_string(), entry("#b")),
+            ("e2".to_string(), entry("#c")),
+        ]
+        .into();
+        let merged = super::merge_snapshot_refs(inline.clone(), Some(all));
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged["e0"].selector, "#a");
+        assert_eq!(
+            super::ref_count_summary(1, merged.len()),
+            "3 refs captured (1 inline, 2 in subtree files)"
+        );
+        assert_eq!(super::merge_snapshot_refs(inline, None).len(), 1);
+        assert_eq!(super::ref_count_summary(4, 4), "4 refs captured");
+    }
 
     #[test]
     fn log_times_are_local_with_an_offset_label() {

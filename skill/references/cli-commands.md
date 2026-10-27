@@ -110,7 +110,9 @@ tauri-connector snapshot -i --max-tokens 0         # Unlimited (legacy behavior)
 tauri-connector snapshot -i --no-split             # Full output, never write subtree files
 ```
 
-When the budget fires, stderr prints the snapshot UUID plus each spilled subtree's label, estimated tokens, and absolute path under the app connector log directory's `snapshots/<uuid>/`.
+When the budget fires, stderr prints the snapshot UUID plus each spilled subtree's label, estimated tokens, and absolute path under the app connector log directory's `snapshots/<uuid>/`. Splitting is recursive: an oversized wrapper keeps its own line inline and splits its children, so one app-root `div` no longer spills the whole page. The closing `N refs captured (I inline, S in subtree files)` line counts every ref, and all of them are cached, so a ref read from a subtree file works with `click`/`fill`.
+
+Accessibility mode (the default without `-i`) adds `- text "…"` leaves for text that sits directly in an element whose name does not already include it (a generic `div` holding a total, a paragraph between links). `-i` (ai mode) leaves them out. Containers such as `body`, `main` or a `form` are no longer `[redacted]` just because a password field sits inside them; elements whose name comes from their content (buttons, links, headings, options…) still are.
 
 ### snapshots
 

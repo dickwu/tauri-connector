@@ -181,13 +181,41 @@
         if (!current || seen.has(current)) continue;
         seen.add(current);charge(limit);
         if (directlySensitive(current)) return true;
-        for (const child of current.children||[]) pending.push(child);
+        // An element whose name cannot come from its content (body, main, a
+        // form, a generic div) only leaks through captions and references, so
+        // a password field inside it does not make its own label sensitive.
+        const children=Array.from(current.children||[]);
+        if (current===el&&!nameFromContent(el)) {for (const child of children) if (captionTags.has(child.tagName)) pending.push(child);}
+        else for (const child of children) pending.push(child);
         for (const key of ['aria-labelledby','aria-describedby','aria-owns']) {
           for (const ref of references(current,key)) pending.push(ref);
         }
         for (const label of current.labels||[]) pending.push(label);
-        if (pending.length>limit.maxNodes) return true;
+        if (pending.length>limit.maxNodes) return overBudgetSensitive(el);
       }
+      return false;
+    } catch (error) {return error?.code==='semantic_budget_exceeded'?overBudgetSensitive(el):true;}
+  }
+  // A large container (body, main, a long list) can exceed the descendant
+  // budget. Its own name never comes from that content, so redacting it would
+  // only hide useful labels; each sensitive descendant is still redacted on its
+  // own. Roles whose name is computed from content stay fail-closed.
+  const captionTags=new Set(['LEGEND','FIGCAPTION','CAPTION','title']);
+  function nameFromContent(el) {
+    try {
+      const t=tag(el);
+      if (contentRoles.has(getRole(el))) return true;
+      return t==='label'||t==='summary'||t==='output'||t==='legend'||t==='figcaption'||t==='caption';
+    } catch (_) {return true;}
+  }
+  function overBudgetSensitive(el) {
+    try {
+      if (nameFromContent(el)) return true;
+      if (directlySensitive(el)) return true;
+      for (const key of ['aria-labelledby','aria-describedby']) {
+        for (const ref of references(el,key)) if (directlySensitive(ref)) return true;
+      }
+      for (const label of Array.from(el.labels||[])) if (directlySensitive(label)) return true;
       return false;
     } catch (_) {return true;}
   }
