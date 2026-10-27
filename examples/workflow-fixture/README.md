@@ -16,6 +16,12 @@ node examples/workflow-fixture/scripts/native-test.mjs
 
 The targeted `cargo clean` removes only generated plugin artifacts before switching between the root workspace and this standalone fixture; sharing `target/` across their feature graphs can otherwise reuse incompatible Tauri metadata. Run builds sequentially.
 
+Fixture options (environment variables read at launch):
+
+- `CONNECTOR_FIXTURE_PORT=<port>`: fixed connector port instead of the default range.
+- `CONNECTOR_FIXTURE_CSP=strict`: serve the page under a strict Content-Security-Policy (no inline scripts or eval) to check that the connector works under CSP.
+- `CONNECTOR_FIXTURE_OVERLAY=1`: use the macOS Overlay title bar style so the webview spans the title bar, to check capture geometry.
+
 The full native suite includes the genuine 30-second lost-response timeout. `--skip-unknown` skips that long test for development. `CONNECTOR_FIXTURE_BINARY` can select a different fixture binary; `CONNECTOR_FIXTURE_OUTPUT` can select an evidence directory. Do not point either harness at a production application's binary.
 
 The suite checks:

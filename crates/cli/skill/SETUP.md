@@ -149,9 +149,9 @@ In `package.json`, add a script that flips the cargo feature on for `tauri dev`:
 
 From now on, `bun run tauri:dev` (or `cargo tauri dev --features dev-connector`) compiles the plugin in. Plain `bun run tauri dev` / `tauri build` skip the feature entirely.
 
-## Step 4: Verify `withGlobalTauri` (REQUIRED, both patterns)
+## Step 4: `withGlobalTauri` (optional)
 
-Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` section. This is **required** for the eval+event fallback JS execution path and the auto-push DOM feature. (Since 0.15 the fallback is only used before a command is dispatched; a slow, failed, or lost response is never replayed through it.) If missing, add it:
+The connector bridge, including apps with a strict Content-Security-Policy, works without `withGlobalTauri` (since 0.17.4 the runtime is delivered through native webview evaluation, which CSP does not block). Set `"withGlobalTauri": true` under the `app` section of `src-tauri/tauri.conf.json` only if you want the eval+event fallback JS execution path; `tauri-connector doctor` reports it as an optional warning. (Since 0.15 the fallback is only used before a command is dispatched; a slow, failed, or lost response is never replayed through it.) If missing, add it:
 
 ```json
 {
@@ -161,9 +161,9 @@ Check `src-tauri/tauri.conf.json` for `"withGlobalTauri": true` under the `app` 
 }
 ```
 
-## Step 5: Install snapdom (screenshot fallback)
+## Step 5: Install snapdom (optional DOM-render fallback)
 
-The screenshot tool uses `xcap` for native window capture (cross-platform). When `xcap` is unavailable (e.g. Wayland without permissions, or CI environments), it falls back to `snapdom` — a fast DOM-to-image library that captures exactly what the web engine renders.
+Screenshots use the WebView's native snapshot (`webview_native`) or the native window capture (`window_native`), which need nothing from the frontend. `snapdom`, a DOM-to-image library, is only needed for `--source dom_rendering` and for the legacy renderer when native capture is unavailable (e.g. Wayland without permissions, or CI). `tauri-connector doctor` reports a missing snapdom as an optional warning; without it a DOM-render request fails with `capability_unavailable` / `capture_backend_unavailable` naming this remedy.
 
 Install in your frontend project:
 
