@@ -7,9 +7,16 @@ use std::sync::{Arc, Mutex};
 /// Late settlements kept for diagnostics and for results that beat quarantine.
 const LATE_HISTORY: usize = 32;
 
+/// How long a request waits for a conflicting, unquarantined lease to be
+/// released before it reports `resource_busy` (Inter: a screenshot and an
+/// eval sent together). A quarantine is never waited on.
+pub const LEASE_QUEUE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
 #[derive(Clone, Default)]
 pub struct ResourceArbiter {
     inner: Arc<Mutex<ArbiterState>>,
+    /// Woken whenever a lease or quarantine is released.
+    released: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Default)]
@@ -195,6 +202,43 @@ impl ResourceArbiter {
         })
     }
 
+    /// Like [`Self::try_acquire`], but a conflict with an active
+    /// (unquarantined) lease waits up to `wait` for it to be released. A
+    /// quarantined conflict, or one still held at the end of the wait, is
+    /// reported as before; nothing is dispatched while waiting.
+    pub async fn acquire_within(
+        &self,
+        resources: Vec<String>,
+        wait: std::time::Duration,
+    ) -> Result<Lease, Value> {
+        let started = tokio::time::Instant::now();
+        let deadline = started + wait;
+        loop {
+            let notified = self.released.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            match self.try_acquire(resources.clone()) {
+                Ok(lease) => return Ok(lease),
+                Err(mut error) => {
+                    let quarantined = error["quarantined"].as_bool().unwrap_or(false);
+                    let now = tokio::time::Instant::now();
+                    if quarantined || now >= deadline {
+                        if !quarantined && !wait.is_zero() {
+                            let waited = now.duration_since(started).as_millis() as u64;
+                            error["waitedMs"] = json!(waited);
+                            error["message"] = json!(format!(
+                                "{} (still held after waiting {waited} ms; retry when it finishes)",
+                                error["message"].as_str().unwrap_or_default()
+                            ));
+                        }
+                        return Err(error);
+                    }
+                    let _ = tokio::time::timeout_at(deadline, notified).await;
+                }
+            }
+        }
+    }
+
     pub fn quarantined(&self) -> usize {
         self.lock()
             .held
@@ -259,12 +303,16 @@ impl ResourceArbiter {
             })
             .map(|(id, _)| id.clone())
             .collect();
-        ids.iter()
+        let released: Vec<Value> = ids
+            .iter()
             .filter_map(|id| {
                 let held = state.held.remove(id)?;
                 describe(id, &held)
             })
-            .collect()
+            .collect();
+        drop(state);
+        self.released.notify_waiters();
+        released
     }
 
     /// A page result arrived after the caller gave up. A settled result with known
@@ -288,6 +336,10 @@ impl ResourceArbiter {
             }
         }
         state.record_late(request_id, outcome, release);
+        drop(state);
+        if release {
+            self.released.notify_waiters();
+        }
         release
     }
 }
@@ -351,6 +403,8 @@ impl Drop for Lease {
             .is_some_and(|h| h.quarantine.is_none())
         {
             state.held.remove(&self.owner);
+            drop(state);
+            self.arbiter.released.notify_waiters();
         }
     }
 }
@@ -429,12 +483,62 @@ pub async fn acquire(
     if !resources.is_empty() {
         state.workflow.recover_before_write().await?;
     }
-    state.workflow.resources.try_acquire(resources)
+    state
+        .workflow
+        .resources
+        .acquire_within(resources, LEASE_QUEUE_WAIT)
+        .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_conflicting_active_lease_is_waited_for_not_rejected() {
+        // Inter: screenshot + eval sent together used to fail resource_busy.
+        let arbiter = ResourceArbiter::default();
+        let first = arbiter.try_acquire(vec!["ui".into()]).unwrap();
+        let waiter = {
+            let arbiter = arbiter.clone();
+            tokio::spawn(async move {
+                arbiter
+                    .acquire_within(vec!["ui".into()], std::time::Duration::from_secs(5))
+                    .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!waiter.is_finished(), "the second request queues");
+        drop(first);
+        let lease = tokio::time::timeout(std::time::Duration::from_secs(2), waiter)
+            .await
+            .expect("woken on release")
+            .unwrap();
+        assert!(lease.is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_queue_wait_is_bounded_and_never_waits_on_a_quarantine() {
+        let arbiter = ResourceArbiter::default();
+        let held = arbiter.try_acquire(vec!["ui".into()]).unwrap();
+        let busy = arbiter
+            .acquire_within(vec!["ui".into()], std::time::Duration::from_millis(80))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(busy["code"], "resource_busy");
+        assert_eq!(busy["retryableBeforeDispatch"], true);
+        assert!(busy["waitedMs"].as_u64().unwrap() >= 70);
+        held.quarantine("outcome_unknown");
+        let started = std::time::Instant::now();
+        let quarantined = arbiter
+            .acquire_within(vec!["ui".into()], std::time::Duration::from_secs(5))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(quarantined["quarantined"], true);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
 
     #[test]
     fn native_window_reads_and_focus_skip_the_lease() {
