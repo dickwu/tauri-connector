@@ -211,6 +211,9 @@ pub struct Bridge {
     native_sink: Arc<StdMutex<Option<mpsc::UnboundedSender<String>>>>,
     /// Test seam: overrides the native "window is in the background" check.
     background_override: Arc<StdMutex<Option<bool>>>,
+    /// When a script that starts a navigation (reload, `location` change,
+    /// form submit) was last sent to each window.
+    nav_requested: Arc<StdMutex<HashMap<String, Instant>>>,
 }
 
 /// Pause between attempts while a gated script reports the page is not ready.
@@ -256,6 +259,7 @@ impl Bridge {
             late_hook: Arc::new(StdMutex::new(None)),
             native_sink: Arc::new(StdMutex::new(None)),
             background_override: Arc::new(StdMutex::new(None)),
+            nav_requested: Arc::new(StdMutex::new(HashMap::new())),
         };
 
         let bridge_clone = bridge.clone();
@@ -435,6 +439,8 @@ impl Bridge {
             deadline: Instant::now() + Duration::from_millis(timeout_ms),
             authorize,
         };
+        let starts_navigation =
+            !script.ws.starts_with("/*__CONNECTOR_") && requests_navigation(&script.ws);
         let script = script.gated();
         // git-strata: a page in a background window can be suspended; a
         // command sent there used to wait out the whole deadline and then
@@ -442,9 +448,21 @@ impl Bridge {
         if self.window_in_background(window_id).await
             && !self.page_answers_probe(window_id, &request).await
         {
-            return Err(request.not_dispatched(
-                "window_not_visible: the page did not answer a liveness probe while its window is in the background, so the script was not sent. Run `tauri-connector windows focus` (MCP manage_window action=focus) and retry; if the window is visible, the page's main thread may be blocked",
-            ));
+            // An unfocused window whose page is being replaced (the old
+            // document stops answering) is navigating, not hidden.
+            let navigating = self.navigation_recently_requested(window_id)
+                || self.provisional_navigation(window_id).await;
+            return Err(request.not_dispatched(if navigating {
+                "page_navigating: the page did not answer a liveness probe right after a navigation started (reload, location change or form submit), so the script was not sent; retry once the new page has loaded"
+            } else {
+                "window_not_visible: the page did not answer a liveness probe while its window is in the background, so the script was not sent. Run `tauri-connector windows focus` (MCP manage_window action=focus) and retry; if the window is visible, the page's main thread may be blocked"
+            }));
+        }
+        if starts_navigation {
+            self.nav_requested
+                .lock()
+                .unwrap()
+                .insert(window_id.to_string(), Instant::now());
         }
         let mut reinjected = false;
         // The page's last refusal: once the deadline passes after one, report
@@ -580,6 +598,16 @@ impl Bridge {
             pending.remove(&id);
         }
         answered
+    }
+
+    /// A navigation-starting script was sent to this window within
+    /// [`NAV_REQUEST_WINDOW_MS`].
+    fn navigation_recently_requested(&self, window_id: &str) -> bool {
+        self.nav_requested
+            .lock()
+            .unwrap()
+            .get(window_id)
+            .is_some_and(|at| at.elapsed() < Duration::from_millis(NAV_REQUEST_WINDOW_MS))
     }
 
     #[cfg(test)]
@@ -2935,6 +2963,7 @@ pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<Str
         late_hook: Arc::new(StdMutex::new(None)),
         native_sink: Arc::new(StdMutex::new(None)),
         background_override: Arc::new(StdMutex::new(None)),
+        nav_requested: Arc::new(StdMutex::new(HashMap::new())),
     };
     bridge.clients.lock().await.insert(
         "main".into(),
@@ -4473,6 +4502,56 @@ process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].m
             other => panic!("expected not dispatched, got {other:?}"),
         }
         pump.abort();
+    }
+
+    /// 0.17.6 live retest: an unfocused window whose page stops answering
+    /// right after a script reloaded it is navigating, not hidden, so the
+    /// refusal is the retryable page_navigating.
+    #[tokio::test]
+    async fn an_unanswered_probe_right_after_a_reload_is_page_navigating() {
+        let (bridge, mut rx) = queued_bridge().await;
+        bridge.force_background(Some(true));
+        assert!(requests_navigation(
+            "setTimeout(()=>location.reload(),50); 1"
+        ));
+        bridge
+            .nav_requested
+            .lock()
+            .unwrap()
+            .insert("main".into(), Instant::now());
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_typed("document.title", 30_000, "main")
+                .await
+        });
+        let probe: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(probe["script"], "/*__CONNECTOR_LIVENESS__*/1");
+        match task.await.unwrap() {
+            Err(BridgeError::NotDispatched { reason, .. }) => {
+                assert!(reason.starts_with("page_navigating"), "{reason}")
+            }
+            other => panic!("expected page_navigating, got {other:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "the script itself was never sent");
+        // Long after the reload the same silence means a hidden window.
+        bridge.nav_requested.lock().unwrap().insert(
+            "main".into(),
+            Instant::now() - Duration::from_millis(NAV_REQUEST_WINDOW_MS + 1),
+        );
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_typed("document.title", 30_000, "main")
+                .await
+        });
+        let _probe = rx.recv().await.unwrap();
+        match task.await.unwrap() {
+            Err(BridgeError::NotDispatched { reason, .. }) => {
+                assert!(reason.starts_with("window_not_visible"), "{reason}")
+            }
+            other => panic!("expected window_not_visible, got {other:?}"),
+        }
     }
 
     /// git-strata: a command to a suspended page in a background window is

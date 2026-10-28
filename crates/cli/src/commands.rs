@@ -1169,14 +1169,32 @@ fn default_capture_fallback(error: &str) -> Option<String> {
         .ok()
         .and_then(|v| v.get("code").and_then(Value::as_str).map(str::to_string))
         .unwrap_or_else(|| error.split(':').next().unwrap_or("").trim().to_string());
+    // Errors about the current page or a contended/uncertain command, not
+    // the pipeline: the legacy renderer would not do better, could capture a
+    // stale frame, and must not run a second page script. The code can sit
+    // behind a prefix ("Screenshot failed: not_dispatched: window_not_visible: ...").
+    if NO_LEGACY_FALLBACK
+        .iter()
+        .any(|page_code| code == *page_code || error.contains(page_code))
+    {
+        return None;
+    }
     match code.as_str() {
-        // Errors about the current page, not the pipeline: the legacy
-        // renderer would not do better and could capture a stale frame.
-        "window_not_visible" | "capture_context_changed" | "page_navigating" => None,
         "" => Some("unknown".into()),
         _ => Some(code),
     }
 }
+
+const NO_LEGACY_FALLBACK: [&str; 8] = [
+    "window_not_visible",
+    "capture_context_changed",
+    "page_navigating",
+    "page_not_ready",
+    "page_loading",
+    "resource_busy",
+    "outcome_unknown",
+    "quarantined",
+];
 
 #[allow(clippy::too_many_arguments)]
 fn finish_default_screenshot(
@@ -2597,6 +2615,18 @@ mod tests {
                 r#"{"code":"capture_context_changed","message":"reloaded"}"#,
                 None,
             ),
+            // 0.17.6 live retest: prefixed bridge refusals fell back to the
+            // legacy renderer ("snapdom not available").
+            (
+                "Screenshot failed: not_dispatched: window_not_visible: the page did not answer",
+                None,
+            ),
+            (
+                "Screenshot failed: not_dispatched: page_navigating: retry",
+                None,
+            ),
+            (r#"{"code":"resource_busy","message":"held"}"#, None),
+            ("outcome_unknown: deadline", None),
         ] {
             assert_eq!(
                 super::default_capture_fallback(error).as_deref(),
