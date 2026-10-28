@@ -14,6 +14,7 @@ mod inspection;
 mod skills;
 mod snapshot;
 mod update;
+mod versions;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 
@@ -928,6 +929,13 @@ async fn run_cli(cli: Cli) {
             let scanned = discovery::scan_statuses(&host, &statuses).await;
             statuses.extend(scanned);
         }
+        let version_warnings = versions::current_warnings(
+            resolved
+                .as_ref()
+                .and_then(|r| r.identity.as_ref())
+                .and_then(|identity| identity.plugin_version.as_deref()),
+        );
+        let exit_code = status_exit_code(resolve_error.as_deref());
         if *json {
             println!(
                 "{}",
@@ -935,6 +943,7 @@ async fn run_cli(cli: Cli) {
                     "resolved": resolved,
                     "resolveError": resolve_error,
                     "instances": statuses,
+                    "versionWarnings": version_warnings,
                 }))
                 .unwrap_or_default()
             );
@@ -991,8 +1000,11 @@ async fn run_cli(cli: Cli) {
                     }
                 }
             }
+            for warning in &version_warnings {
+                println!("warning: {}\n  fix: {}", warning.message, warning.fix);
+            }
         }
-        return;
+        std::process::exit(exit_code);
     }
 
     let resolved = match discovery::resolve_connection(connection_options).await {
@@ -1272,7 +1284,14 @@ async fn run_cli(cli: Cli) {
                 }
                 match inspection.add_args(&mut args) {
                     Ok(()) => {
-                        inspection::screenshot(&client, args, output.as_deref(), overwrite).await
+                        inspection::screenshot(
+                            &client,
+                            args,
+                            output.as_deref(),
+                            overwrite,
+                            Some(&resolved),
+                        )
+                        .await
                     }
                     Err(error) => Err(error),
                 }
@@ -1655,6 +1674,27 @@ EXAMPLES:
   tauri-connector eval "document.title"
 "##
     );
+}
+
+/// `status` exits like every other command (`windows`, `eval`, ...): `0`
+/// when it selected an app, `1` when it could not (`connected: none`, a
+/// refusal such as `ambiguous_app` or `project_mismatch`). The report,
+/// including every instance, is printed either way.
+fn status_exit_code(resolve_error: Option<&str>) -> i32 {
+    i32::from(resolve_error.is_some())
+}
+
+#[cfg(test)]
+mod status_exit_tests {
+    #[test]
+    fn status_exits_one_when_no_app_is_selected_like_windows() {
+        assert_eq!(super::status_exit_code(None), 0);
+        assert_eq!(
+            super::status_exit_code(Some("ambiguous_app: 2 apps running")),
+            1
+        );
+        assert_eq!(super::status_exit_code(Some("no running app found")), 1);
+    }
 }
 
 #[cfg(test)]

@@ -245,6 +245,13 @@ fn check_environment(cwd: &Path, project: Option<&PathBuf>) -> Section {
     let mut checks = Vec::new();
 
     checks.push(Check::ok(format!("CLI version {CURRENT_VERSION}")));
+    let binaries = crate::versions::path_binaries();
+    let tap = crate::versions::local_tap_version();
+    checks.extend(version_checks(crate::versions::warnings(
+        &binaries,
+        None,
+        tap.as_deref(),
+    )));
     checks.push(Check::ok(format!("Working directory {}", cwd.display())));
 
     match project {
@@ -269,6 +276,16 @@ fn check_environment(cwd: &Path, project: Option<&PathBuf>) -> Section {
         name: "Environment",
         checks,
     }
+}
+
+/// Version drift warnings as doctor checks (warn, never fail).
+fn version_checks(warnings: Vec<crate::versions::VersionWarning>) -> Vec<Check> {
+    warnings
+        .into_iter()
+        .map(|warning| {
+            Check::warn(warning.message, warning.fix).with_detail(warning.code.to_string())
+        })
+        .collect()
 }
 
 // ----- setup pattern classification ----------------------------------------
@@ -500,6 +517,13 @@ fn check_runtime_add_capability(root: &Path) -> Check {
         ))
     } else if build_rs_generates_connector_capability(root) {
         Check::ok("Capability written by build.rs only when the connector feature is enabled")
+    } else if build_rs_sets_capability_pattern(root) && custom_dir_grants_connector(root) {
+        // The pattern is computed in a way doctor cannot evaluate, but
+        // build.rs sets one and a non-default directory grants the
+        // permission: loading it is build.rs's job, not app.add_capability.
+        Check::ok(
+            "Capability directory set by build.rs capabilities_path_pattern (pattern not resolved statically; a non-default capability directory grants connector:default)",
+        )
     } else if has_runtime_add_capability(&src) {
         Check::ok(
             "Capability loaded at runtime via app.add_capability(include_str!(\"../capabilities-dev/...\"))",
@@ -560,6 +584,31 @@ fn any_capability_grants_connector(root: &Path) -> bool {
     })
 }
 
+fn build_rs_sets_capability_pattern(root: &Path) -> bool {
+    fs::read_to_string(root.join("src-tauri").join("build.rs"))
+        .is_ok_and(|text| text.contains("capabilities_path_pattern"))
+}
+
+/// A capability directory other than tauri-build's default `capabilities/`
+/// grants `connector:default`.
+fn custom_dir_grants_connector(root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(root.join("src-tauri")) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            return false;
+        };
+        path.is_dir()
+            && !matches!(
+                name,
+                "capabilities" | "target" | "gen" | "src" | "icons" | "node_modules"
+            )
+            && capability_in_dir(root, name, "connector:default")
+    })
+}
+
 /// lib.rs, main.rs and the other `.rs` files under `src-tauri/src`
 /// (bounded, so a huge tree cannot stall doctor).
 fn read_tauri_sources(root: &Path) -> String {
@@ -608,29 +657,65 @@ fn build_rs_capability_dirs(root: &Path) -> Vec<String> {
 }
 
 fn capability_dirs_from_build_rs(text: &str) -> Vec<String> {
+    // The pattern is often not an inline literal: a `const`, a `let`, a
+    // `cfg!` branch, `concat!(env!("CARGO_MANIFEST_DIR"), "/caps/**/*")` or
+    // a `format!`. When build.rs sets a pattern at all, every string
+    // literal that looks like a capability path names a candidate directory.
     let mut dirs = Vec::new();
-    for (idx, _) in text.match_indices("capabilities_path_pattern") {
-        let rest = &text[idx + "capabilities_path_pattern".len()..];
-        let Some(rest) = rest.trim_start().strip_prefix('(') else {
+    if !text.contains("capabilities_path_pattern") {
+        return dirs;
+    }
+    for literal in string_literals(text) {
+        let looks_like_path = literal.contains('*') || literal.ends_with(".json");
+        if !looks_like_path || !literal.contains('/') {
             continue;
-        };
-        let Some(rest) = rest.trim_start().strip_prefix('"') else {
-            continue;
-        };
-        let Some(end) = rest.find('"') else {
-            continue;
-        };
-        let dir = rest[..end]
+        }
+        let dir = literal
             .split('/')
-            .filter(|part| !part.is_empty() && *part != ".")
+            .filter(|part| !part.is_empty() && *part != "." && *part != "..")
+            .skip_while(|part| part.contains('{') || part.contains('$') || *part == "src-tauri")
             .take_while(|part| !part.contains('*') && !part.ends_with(".json"))
             .collect::<Vec<_>>()
             .join("/");
-        if !dir.is_empty() && !dirs.contains(&dir) {
+        if !dir.is_empty() && !dir.contains('{') && !dirs.contains(&dir) {
             dirs.push(dir);
         }
     }
     dirs
+}
+
+/// The contents of `"..."` and `r"..."`/`r#"..."#` literals, skipping
+/// `//` comments. Escapes are kept verbatim (paths rarely use them).
+fn string_literals(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let code = match line.find("//") {
+            // `//` inside a literal ("https://...") is not a comment, but
+            // capability paths never contain it, so cutting there is safe.
+            Some(idx) if !line[..idx].contains('"') => &line[..idx],
+            _ => line,
+        };
+        let mut rest = code;
+        while let Some(open) = rest.find('"') {
+            let after = &rest[open + 1..];
+            let mut end = None;
+            let mut escaped = false;
+            for (i, c) in after.char_indices() {
+                match c {
+                    '\\' if !escaped => escaped = true,
+                    '"' if !escaped => {
+                        end = Some(i);
+                        break;
+                    }
+                    _ => escaped = false,
+                }
+            }
+            let Some(end) = end else { break };
+            out.push(after[..end].to_string());
+            rest = after[end + 1..].trim_start_matches('#');
+        }
+    }
+    out
 }
 
 /// Three-substring heuristic: a project that contains all three substrings
@@ -1131,12 +1216,20 @@ fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
 }
 
 fn capability_in_dir(root: &Path, dir_name: &str, permission: &str) -> bool {
-    let dir = root.join("src-tauri").join(dir_name);
+    capability_in_tree(&root.join("src-tauri").join(dir_name), permission, 3)
+}
+
+/// A capability JSON granting `permission` in `dir` or (for `**` patterns)
+/// up to `depth` levels of subdirectories.
+fn capability_in_tree(dir: &Path, permission: &str, depth: u8) -> bool {
     let Ok(entries) = fs::read_dir(dir) else {
         return false;
     };
     entries.flatten().any(|entry| {
         let path = entry.path();
+        if path.is_dir() {
+            return depth > 0 && capability_in_tree(&path, permission, depth - 1);
+        }
         let is_json = path
             .extension()
             .and_then(|s| s.to_str())
@@ -1507,6 +1600,21 @@ async fn check_runtime(
                     checks.push(Check::ok(
                         "Runtime, artifact, and debug WebSocket commands are available",
                     ));
+                    if let Ok(identity) =
+                        connector_client::discovery::endpoint_identity(PROBE_HOST, ws_port, 1500)
+                            .await
+                    {
+                        let plugin = identity.plugin_version.as_deref();
+                        let mismatch =
+                            version_checks(crate::versions::warnings(&[], plugin, None));
+                        if mismatch.is_empty() {
+                            checks.push(Check::ok(format!(
+                                "Plugin version {} matches the CLI",
+                                connector_client::discovery::plugin_version_label(Some(&identity))
+                            )));
+                        }
+                        checks.extend(mismatch);
+                    }
                 }
                 Err(e) => checks.push(
                     Check::fail(
@@ -2545,6 +2653,54 @@ fn main() {
             vec!["capabilities-dev".to_string(), "perm/dev".to_string()]
         );
         assert!(capability_dirs_from_build_rs("fn main() { tauri_build::build() }").is_empty());
+    }
+
+    #[test]
+    fn computed_capability_patterns_still_name_their_directories() {
+        // 0.17.5 retest: a pattern held in a const or built from
+        // CARGO_MANIFEST_DIR warned "Runtime app.add_capability not detected".
+        let text = r#"
+const DEV_CAPS: &str = "./capabilities-dev/**/*";
+fn main() {
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let pattern = if cfg!(feature = "dev-connector") { DEV_CAPS } else { "./capabilities/**/*" };
+    let abs = format!("{manifest}/src-tauri/perm/dev/*.json"); // unused
+    tauri_build::try_build(tauri_build::Attributes::new().capabilities_path_pattern(pattern)).unwrap();
+}
+"#;
+        assert_eq!(
+            capability_dirs_from_build_rs(text),
+            vec!["capabilities-dev", "capabilities", "perm/dev"]
+        );
+    }
+
+    #[test]
+    fn unresolvable_build_rs_patterns_do_not_warn_about_add_capability() {
+        let root = std::env::temp_dir().join(format!(
+            "tauri-connector-doctor-pattern-var-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let tauri = root.join("src-tauri");
+        std::fs::create_dir_all(tauri.join("capabilities-dev").join("nested")).unwrap();
+        std::fs::create_dir_all(tauri.join("src")).unwrap();
+        std::fs::write(
+            tauri.join("build.rs"),
+            "fn main() { let p = std::env::var(\"CAPS\").unwrap(); tauri_build::try_build(tauri_build::Attributes::new().capabilities_path_pattern(&p)).unwrap() }",
+        )
+        .unwrap();
+        std::fs::write(
+            tauri
+                .join("capabilities-dev")
+                .join("nested")
+                .join("dev-connector.json"),
+            r#"{"identifier":"dev","permissions":["connector:default"]}"#,
+        )
+        .unwrap();
+        std::fs::write(tauri.join("src").join("lib.rs"), "fn run() {}").unwrap();
+        let runtime = check_runtime_add_capability(&root);
+        assert_eq!(runtime.status, Status::Ok, "{}", runtime.label);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
