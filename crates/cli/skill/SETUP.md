@@ -298,4 +298,6 @@ use tauri_plugin_connector::ConnectorBuilder;
             .build()
     );
 }
+
+The same ranges can come from the app's environment (0.17.6+; env wins over the builder): `TAURI_CONNECTOR_PORT_RANGE=9700-9800` (WS), `TAURI_CONNECTOR_MCP_PORT_RANGE=9701-9801` (MCP), `TAURI_CONNECTOR_BRIDGE_PORT_RANGE=9400-9500` (internal bridge), or `TAURI_CONNECTOR_PORT` / `TAURI_CONNECTOR_MCP_PORT` for just a start port (START..=START+100). Set `TAURI_CONNECTOR_PORT_RANGE` for the CLI too so its port scan covers the same range. Invalid values are logged and ignored.
 ```

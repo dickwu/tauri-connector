@@ -180,7 +180,7 @@ Reports separate `execution`, `verification` and `effect`, and include `allowedN
 | Report permits `reconcile` | Recheck supported current-state postconditions without replay. The original test verdict and uncertain-write quarantine remain intact. |
 | Cancellation or application restart | Cancellation stops future dispatch without undoing effects. Restarted runs are historical records; execution is not automatically resumed. |
 
-CLI exit codes are `0` for completed success or capabilities, `1` for failure/cancellation or transport/validation errors, and `2` for pending, paused, interrupted or uncertain runs. Nonzero exit status is not permission to retry a write with a new key.
+`tauri-connector status` exits `0` when it selected an app and `1` when it could not (0.17.6+, like `windows`), printing the full report either way. Workflow CLI exit codes are `0` for completed success or capabilities, `1` for failure/cancellation or transport/validation errors, and `2` for pending, paused, interrupted or uncertain runs. Nonzero exit status is not permission to retry a write with a new key.
 
 #### Contract and limits
 
@@ -830,6 +830,13 @@ use tauri_plugin_connector::ConnectorBuilder;
             .build()
     );
 }
+
+// Port ranges can also be set from the app's environment (0.17.6+), which
+// wins over the builder: TAURI_CONNECTOR_PORT_RANGE=9700-9800 (WS),
+// TAURI_CONNECTOR_MCP_PORT_RANGE=9701-9801 (MCP), TAURI_CONNECTOR_BRIDGE_PORT_RANGE=9400-9500
+// (internal bridge). TAURI_CONNECTOR_PORT / TAURI_CONNECTOR_MCP_PORT set just the
+// start port (range START..=START+100). The CLI and standalone MCP server read
+// TAURI_CONNECTOR_PORT_RANGE too, so their port scan follows the app.
 
 // Or disable the embedded MCP server:
 ConnectorBuilder::new()
