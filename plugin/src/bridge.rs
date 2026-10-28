@@ -211,6 +211,9 @@ pub struct Bridge {
     native_sink: Arc<StdMutex<Option<mpsc::UnboundedSender<String>>>>,
 }
 
+/// Pause between attempts while a gated script reports the page is not ready.
+const NOT_RUN_RETRY: Duration = Duration::from_millis(50);
+
 /// Inclusive port range for the internal bridge listener.
 const BRIDGE_PORT_RANGE: (u16, u16) = (9300, 9400);
 
@@ -418,14 +421,78 @@ impl Bridge {
             deadline: Instant::now() + Duration::from_millis(timeout_ms),
             authorize,
         };
-        match self.execute_js_ws(script, window_id, &request).await {
-            Err(BridgeError::NotDispatched { .. }) => {
-                // The same ID and absolute deadline cover both transports.
-                request.ensure_budget()?;
-                self.execute_js_via_eval(script, window_id, &request).await
+        let script = script.gated();
+        let mut reinjected = false;
+        loop {
+            let reason = if self.provisional_navigation(window_id).await {
+                // The old document is still live; do not send it anything.
+                "page_navigating".to_string()
+            } else {
+                let result = match self.execute_js_ws(&script, window_id, &request).await {
+                    Err(BridgeError::NotDispatched { .. }) => {
+                        // The same ID and absolute deadline cover both transports.
+                        request.ensure_budget()?;
+                        self.execute_js_via_eval(&script, window_id, &request).await
+                    }
+                    result => result,
+                };
+                // The gate threw before the caller's script started, so
+                // trying again is not a replay. Wait for the page to settle.
+                match result.as_ref().err().and_then(not_run_reason) {
+                    Some(reason) => reason.to_string(),
+                    None => return result,
+                }
+            };
+            if reason == "helper_missing" && !reinjected {
+                reinjected = self.reinject_bridge(window_id).await;
             }
-            result => result,
+            if Instant::now() + NOT_RUN_RETRY >= request.deadline {
+                return Err(request.not_dispatched(format!(
+                    "{reason}: the page was {} until the deadline; the script did not run",
+                    match reason.as_str() {
+                        "page_navigating" => "navigating away",
+                        "page_loading" => "still loading",
+                        _ => "missing the connector bridge",
+                    }
+                )));
+            }
+            tokio::time::sleep(NOT_RUN_RETRY).await;
         }
+    }
+
+    async fn provisional_navigation(&self, window_id: &str) -> bool {
+        use tauri::Manager;
+        let Some(app) = self.app_handle.lock().await.clone() else {
+            return false;
+        };
+        let Some(window) = app.get_webview_window(window_id) else {
+            return false;
+        };
+        tokio::task::spawn_blocking(move || crate::webview_url::provisional_navigation(&window))
+            .await
+            .unwrap_or(false)
+    }
+
+    /// Inject the bridge into the current document when its origin is
+    /// allowed; the init script's guard makes this idempotent. Used when a
+    /// document is ready before the load-finished injection.
+    async fn reinject_bridge(&self, window_id: &str) -> bool {
+        use tauri::Manager;
+        let Some(app) = self.app_handle.lock().await.clone() else {
+            return false;
+        };
+        let Some(window) = app.get_webview_window(window_id) else {
+            return false;
+        };
+        let port = self.port;
+        let label = window_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let allowed = crate::webview_url::current(&window)
+                .is_ok_and(|url| crate::identity::origin_allowed(window.app_handle(), &url));
+            allowed && window.eval(bridge_init_script(port, &label)).is_ok()
+        })
+        .await
+        .unwrap_or(false)
     }
 
     async fn execute_js_ws(
@@ -1118,6 +1185,31 @@ impl PageScript {
         }
     }
 
+    /// The same script behind [`page_gate`]; every form refuses to start
+    /// in a document that is navigating, still parsing, or missing a helper.
+    /// Runtime protocol scripts (marked `/*__CONNECTOR_...*/`) are exempt:
+    /// they carry their own page-epoch checks, and probes must answer while
+    /// a page loads.
+    pub fn gated(&self) -> Self {
+        if self.ws.starts_with("/*__CONNECTOR_") {
+            return self.clone();
+        }
+        let needs_bridge = BRIDGE_HELPERS.iter().any(|helper| self.ws.contains(helper));
+        let gate = page_gate(needs_bridge);
+        let wrap = |expression: &str| format!("({gate},(\n{expression}\n))");
+        Self {
+            ws: wrap(&self.ws),
+            candidates: self
+                .candidates
+                .iter()
+                .map(|candidate| InlineCandidate {
+                    expression: wrap(&candidate.expression),
+                    needs_eval: candidate.needs_eval,
+                })
+                .collect(),
+        }
+    }
+
     /// `ws` compiles strings in the page; it is also the first native
     /// candidate when eval is allowed. `inline` are CSP-safe fallbacks.
     pub fn with_inline(ws: String, inline: Vec<String>) -> Self {
@@ -1167,6 +1259,9 @@ const waits = [];
 for (const c of cases) {
   const sandbox = { setTimeout, clearTimeout, Promise, console };
   sandbox.window = sandbox;
+  if (c.document) sandbox.document = c.document;
+  if (c.pageState) sandbox.__CONNECTOR_PAGE_STATE__ = Object.assign({}, c.pageState, c.pageState.unloadingAgoMs !== undefined ? { unloadingAt: Date.now() - c.pageState.unloadingAgoMs } : {});
+  if (c.bridge) sandbox.__CONNECTOR_BRIDGE__ = true;
   sandbox.__CONNECTOR_EFFECTS__ = { mark() { return 0; }, unchangedSince() { return true; } };
   waits.push(new Promise((resolve) => {
     sandbox.__CONNECTOR_RUN__ = function (id, fn, o) {
@@ -1271,6 +1366,58 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Document-start script: page state for the dispatch gate and an early
+/// console buffer the bridge drains (see `js/early.js`).
+pub fn early_init_script() -> String {
+    format!(
+        "({})({});",
+        include_str!("../js/early.js")
+            .trim_end()
+            .trim_end_matches(';'),
+        include_str!("../js/console-format.js")
+            .trim_end()
+            .trim_end_matches(';')
+    )
+}
+
+/// Prefix of the error a gated script reports when it refused to run; the
+/// caller's script did not start, so the command is not dispatched.
+pub const NOT_RUN: &str = "connector_not_run";
+
+/// How long after `beforeunload`/`pagehide` a document counts as unloading.
+/// A navigation that fails before commit leaves the old document live, so
+/// the mark must expire; commands then run against it again.
+pub const UNLOAD_WINDOW_MS: u64 = 15_000;
+
+/// Bridge-defined helpers a script may call; such a script also waits for
+/// the bridge in the current document.
+const BRIDGE_HELPERS: &[&str] = &["__CONNECTOR_SNAPSHOT__", "__CONNECTOR_TAKE_LOGS__"];
+
+/// The page-side check run before a caller's script: a document that is
+/// unloading or still parsing, or one missing a bridge helper the script
+/// calls, throws [`NOT_RUN`] before the script starts.
+fn page_gate(needs_bridge: bool) -> String {
+    let helper = if needs_bridge {
+        "else if(w.__CONNECTOR_BRIDGE__!==true)r='helper_missing';"
+    } else {
+        ""
+    };
+    format!(
+        "(function(){{var w=window,d=w.document,s=w.__CONNECTOR_PAGE_STATE__,r=null;if(s&&s.unloadingAt&&Date.now()-s.unloadingAt<{UNLOAD_WINDOW_MS})r='page_navigating';else if(d&&d.readyState==='loading')r='page_loading';{helper}if(r)throw new Error('{NOT_RUN}: '+r);}})()"
+    )
+}
+
+/// The reason a gated script refused to run, if this error is that refusal.
+pub(crate) fn not_run_reason(error: &BridgeError) -> Option<&str> {
+    match error {
+        BridgeError::ExecutionFailed { error, .. } => error
+            .strip_prefix(NOT_RUN)
+            .and_then(|rest| rest.strip_prefix(": "))
+            .map(str::trim),
+        _ => None,
+    }
+}
+
 /// Generate the JavaScript bridge client code that gets injected into the webview.
 pub fn bridge_init_script(port: u16, window_id: &str) -> String {
     let capture_source = include_str!("capture/page.js");
@@ -1337,6 +1484,32 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
 
   // Expose logs for retrieval
   window.__CONNECTOR_LOGS__ = consoleLogs;
+
+  // Adopt what the document-start script buffered, then stop its capture
+  // (the wrappers above now record every message).
+  let pageState = window.__CONNECTOR_PAGE_STATE__;
+  if (pageState && pageState.logs) {{
+    const early = pageState.logs;
+    pageState.logs = null;
+    if (pageState.dropped) {{
+      consoleLogs.push({{ level: 'warn', message: '[connector] ' + pageState.dropped + ' early console messages were dropped', timestamp: Date.now(), seq: ++consoleSeq }});
+    }}
+    early.forEach(function(entry) {{
+      consoleLogs.push({{ level: entry.level, message: entry.message, timestamp: entry.timestamp, seq: ++consoleSeq }});
+    }});
+    while (consoleLogs.length > MAX_LOGS) consoleLogs.shift();
+  }}
+  if (!pageState) {{
+    // Documents created before the plugin registered its init script.
+    pageState = {{ epoch: Date.now().toString(36), unloadingAt: 0, logs: null, dropped: 0 }};
+    try {{
+      Object.defineProperty(window, '__CONNECTOR_PAGE_STATE__', {{ value: pageState, configurable: true }});
+      const unloading = function() {{ pageState.unloadingAt = Date.now(); }};
+      window.addEventListener('beforeunload', unloading, true);
+      window.addEventListener('pagehide', unloading, true);
+      window.addEventListener('pageshow', function(e) {{ if (e && e.persisted) pageState.unloadingAt = 0; }}, true);
+    }} catch (_) {{}}
+  }}
 
   // === Runtime Capture ===
   window.__CONNECTOR_RUNTIME__ = window.__CONNECTOR_RUNTIME__ || [];
@@ -3884,6 +4057,233 @@ const first = ctx.__CONNECTOR_TAKE_LOGS__();
 ctx.console.log('after cap');
 const second = ctx.__CONNECTOR_TAKE_LOGS__();
 process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].message, second: second.map(e => e.message), third: ctx.__CONNECTOR_TAKE_LOGS__().length }));
+"#;
+    }
+
+    /// git-strata #8: a command that reaches a document which is unloading,
+    /// still parsing, or missing the helper it calls refuses before the
+    /// caller's script starts; a settled document runs it.
+    #[test]
+    fn gated_scripts_refuse_to_start_in_a_navigating_or_unready_document() {
+        let plain = PageScript::trusted("(window.ran = (window.ran || 0) + 1, 7)").gated();
+        let helper = PageScript::trusted("window.__CONNECTOR_SNAPSHOT__({})").gated();
+        let ready = json!({"readyState": "complete"});
+        let loading = json!({"readyState": "loading"});
+        let case = |id: &str,
+                    script: &PageScript,
+                    document: &serde_json::Value,
+                    state: serde_json::Value,
+                    bridge: bool,
+                    event: Option<&str>| {
+            json!({"id": id, "strings": false, "document": document, "pageState": state, "bridge": bridge,
+                "scripts": test_native_scripts(script, id, event)})
+        };
+        let cases = json!([
+            case(
+                "settled",
+                &plain,
+                &ready,
+                json!({"unloadingAt": 0}),
+                false,
+                Some("evt")
+            ),
+            case(
+                "reloading",
+                &plain,
+                &ready,
+                json!({"unloadingAgoMs": 10}),
+                true,
+                None
+            ),
+            case(
+                "expired",
+                &plain,
+                &ready,
+                json!({"unloadingAgoMs": UNLOAD_WINDOW_MS + 1000}),
+                false,
+                Some("evt")
+            ),
+            case(
+                "parsing",
+                &plain,
+                &loading,
+                json!({"unloadingAt": 0}),
+                false,
+                Some("evt")
+            ),
+            case(
+                "no-helper",
+                &helper,
+                &ready,
+                json!({"unloadingAt": 0}),
+                false,
+                Some("evt")
+            ),
+        ]);
+        let Some(out) = run_native_harness(&cases) else {
+            eprintln!("node unavailable; skipping");
+            return;
+        };
+        assert_eq!(out["settled"]["result"], json!(7));
+        assert_eq!(
+            out["expired"]["result"],
+            json!(7),
+            "a failed navigation must not block forever"
+        );
+        for (id, reason) in [
+            ("reloading", "page_navigating"),
+            ("parsing", "page_loading"),
+            ("no-helper", "helper_missing"),
+        ] {
+            assert_eq!(
+                out[id]["error"],
+                json!(format!("{NOT_RUN}: {reason}")),
+                "{id}: {}",
+                out[id]
+            );
+            assert_eq!(out[id]["effect"], json!("none"), "{id}");
+        }
+        let error = BridgeError::ExecutionFailed {
+            request_id: "r".into(),
+            error: format!("{NOT_RUN}: page_navigating"),
+            effect: connector_client::outcome::EffectStatus::None,
+        };
+        assert_eq!(not_run_reason(&error), Some("page_navigating"));
+        // Runtime protocol scripts keep their own epoch checks and are not gated.
+        assert_eq!(
+            PageScript::trusted(crate::runtime::PROBE).gated().ws,
+            crate::runtime::PROBE
+        );
+    }
+
+    /// The host retries a refused command (nothing ran) until the page is
+    /// ready, never retries a script that ran and failed, and reports a
+    /// clear not-dispatched error when the page stays unready.
+    #[tokio::test]
+    async fn refused_commands_wait_for_the_page_and_executed_failures_are_never_replayed() {
+        let (bridge, mut rx) = queued_bridge().await;
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_typed("document.title", 2000, "main")
+                .await
+        });
+        for reply in [
+            json!({"error": format!("{NOT_RUN}: page_navigating"), "effect": "none"}),
+            json!({"error": format!("{NOT_RUN}: page_loading"), "effect": "none"}),
+            json!({"result": "new page"}),
+        ] {
+            let command: serde_json::Value =
+                serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+            assert!(
+                command["script"].as_str().unwrap().contains(NOT_RUN),
+                "every attempt is gated"
+            );
+            let mut message = reply;
+            message["id"] = command["id"].clone();
+            super::test_page_message(&bridge, message).await;
+        }
+        assert_eq!(task.await.unwrap().unwrap(), json!("new page"));
+
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_typed("mutate()", 2000, "main")
+                .await
+        });
+        let command: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        super::test_page_message(
+            &bridge,
+            json!({"id": command["id"], "error": "boom", "effect": "none"}),
+        )
+        .await;
+        assert!(matches!(
+            task.await.unwrap(),
+            Err(BridgeError::ExecutionFailed { .. })
+        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "a script that ran is never sent again"
+        );
+
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_typed("document.title", 300, "main")
+                .await
+        });
+        let replier = bridge.clone();
+        let pump = tokio::spawn(async move {
+            while let Some(raw) = rx.recv().await {
+                let command: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                super::test_page_message(&replier, json!({"id": command["id"], "error": format!("{NOT_RUN}: page_navigating"), "effect": "none"})).await;
+            }
+        });
+        match task.await.unwrap() {
+            Err(BridgeError::NotDispatched { reason, .. }) => {
+                assert!(reason.starts_with("page_navigating"), "{reason}")
+            }
+            other => panic!("expected not dispatched, got {other:?}"),
+        }
+        pump.abort();
+    }
+
+    /// Messages logged at document start, before the bridge exists (e.g.
+    /// "[HMR] connected" after a reload), reach the log buffer exactly once.
+    #[test]
+    fn console_messages_from_document_start_survive_until_the_bridge_loads() {
+        let Ok(probe) = std::process::Command::new("node").arg("--version").output() else {
+            eprintln!("node unavailable; skipping");
+            return;
+        };
+        assert!(probe.status.success());
+        let directory = std::env::temp_dir().join(format!("bridge-early-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let early = directory.join("early.js");
+        let init = directory.join("init.js");
+        let runner = directory.join("probe.cjs");
+        std::fs::write(&early, early_init_script()).unwrap();
+        std::fs::write(&init, bridge_init_script(9555, "main")).unwrap();
+        std::fs::write(&runner, PROBE).unwrap();
+        let output = std::process::Command::new("node")
+            .arg(&runner)
+            .arg(&early)
+            .arg(&init)
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            result,
+            json!({"messages": ["[HMR] connected", "{\"a\":1}", "after bridge"], "levels": ["log", "warn", "log"], "unloading": true, "earlyStopped": true})
+        );
+        const PROBE: &str = r#"const fs = require('fs');
+const early = fs.readFileSync(process.argv[2], 'utf8');
+const src = fs.readFileSync(process.argv[3], 'utf8');
+const any = () => new Proxy(function () {}, { get: (t, k) => k === Symbol.toPrimitive ? () => '' : k === 'then' ? undefined : any(), apply: () => any(), construct: () => any() });
+const listeners = {};
+const ctx = { console: { log() {}, warn() {}, error() {}, info() {}, debug() {} }, setTimeout() { return 0; }, clearTimeout() {}, setInterval() { return 0; }, clearInterval() {},
+  MutationObserver: class { observe() {} }, addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); }, removeEventListener() {},
+  __TAURI_INTERNALS__: { invoke() { return Promise.resolve(); } } };
+ctx.window = ctx; ctx.top = ctx; ctx.self = ctx;
+const scope = new Proxy(ctx, {
+  has: () => true,
+  get: (t, k) => k === Symbol.unscopables ? undefined : k in t ? t[k] : k in globalThis ? globalThis[k] : any(),
+});
+new Function('scope', 'with (scope) {' + early + '}')(scope);
+ctx.console.log('[HMR] connected');
+ctx.console.warn({ a: 1 });
+new Function('scope', 'with (scope) {' + src + '}')(scope);
+ctx.console.log('after bridge');
+const logs = ctx.__CONNECTOR_TAKE_LOGS__();
+(listeners.beforeunload || []).forEach(fn => fn({}));
+const state = ctx.__CONNECTOR_PAGE_STATE__;
+process.stdout.write(JSON.stringify({ messages: logs.map(e => e.message), levels: logs.map(e => e.level), unloading: state.unloadingAt > 0, earlyStopped: state.logs === null }));
 "#;
     }
 

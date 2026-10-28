@@ -13,7 +13,9 @@ pub const NO_URL: &str = "webview has no URL yet (page still loading)";
 /// Turns a raw native URL string into a parsed URL; `None` means the WebView
 /// has not committed a URL yet.
 pub(crate) fn from_native(raw: Option<String>) -> Result<Url, String> {
-    let raw = raw.filter(|raw| !raw.is_empty()).ok_or_else(|| NO_URL.to_owned())?;
+    let raw = raw
+        .filter(|raw| !raw.is_empty())
+        .ok_or_else(|| NO_URL.to_owned())?;
     Url::parse(&raw).map_err(|error| format!("webview URL is not parseable: {error}"))
 }
 
@@ -33,6 +35,35 @@ pub fn current<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<Ur
     from_native(raw)
 }
 
+/// True while a main-frame navigation is requested but has not committed:
+/// the old document is still live and would answer commands meant for the
+/// new one. WKWebView's `isLoading` covers the provisional phase (page JS
+/// sees no event then); after commit the plugin's own loading flag is set
+/// and the page-side gate takes over. Other platforms report `false`.
+#[cfg(target_os = "macos")]
+pub fn provisional_navigation<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> bool {
+    use std::sync::mpsc;
+    let (sender, receiver) = mpsc::channel();
+    if window
+        .with_webview(move |platform| {
+            let _ = sender.send(macos::is_loading(platform.inner()));
+        })
+        .is_err()
+    {
+        return false;
+    }
+    // A busy main thread must not stall every command; assume settled.
+    let loading = receiver
+        .recv_timeout(std::time::Duration::from_millis(250))
+        .unwrap_or(false);
+    loading && !crate::identity::page_loading(window.label())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn provisional_navigation<R: tauri::Runtime>(_window: &tauri::WebviewWindow<R>) -> bool {
+    false
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn current<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<Url, String> {
     window.url().map_err(|error| error.to_string())
@@ -42,6 +73,18 @@ pub fn current<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<Ur
 mod macos {
     use objc2::{msg_send, rc::Retained, runtime::AnyObject};
     use std::ffi::{CStr, c_char, c_void};
+
+    pub(super) fn is_loading(webview: *mut c_void) -> bool {
+        if webview.is_null() {
+            return false;
+        }
+        // SAFETY: as in `read`; `isLoading` is a plain BOOL property.
+        unsafe {
+            let webview = &*(webview as *const AnyObject);
+            let loading: objc2::runtime::Bool = msg_send![webview, isLoading];
+            loading.as_bool()
+        }
+    }
 
     pub(super) fn read(webview: *mut c_void) -> Option<String> {
         if webview.is_null() {
@@ -101,7 +144,13 @@ mod tests {
             }
         }
         let mut hits = Vec::new();
-        walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut hits);
-        assert!(hits.is_empty(), "use webview_url::current instead: {hits:?}");
+        walk(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut hits,
+        );
+        assert!(
+            hits.is_empty(),
+            "use webview_url::current instead: {hits:?}"
+        );
     }
 }

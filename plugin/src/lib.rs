@@ -388,7 +388,7 @@ impl ConnectorBuilder {
         let preview_paths = self.capture_preview_paths;
 
         PluginBuilder::<Wry>::new("connector")
-            .js_init_script(runtime::initialization_script())
+            .js_init_script(format!("{}\n{}", bridge::early_init_script(), runtime::initialization_script()))
             .on_webview_ready(|webview| { identity::window_instance_id(webview.label()); })
             .on_event(|app, event| {
                 if let tauri::RunEvent::Exit = event
