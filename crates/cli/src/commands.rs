@@ -1182,21 +1182,47 @@ fn default_screenshot_output(
         "sizeKb": bytes.len() / 1024,
         "artifact": metadata,
     });
-    for key in [
-        "captureSource",
-        "image",
-        "viewport",
-        "geometry",
-        "redaction",
-        "fallbacks",
-        "consistency",
-        "context",
-        "timings",
-    ] {
-        if let Some(value) = report.get(key) {
-            out[key] = value.clone();
+    out["exportedPath"] = json!(artifact.path);
+    merge_capture_report(&mut out, &report);
+    out
+}
+
+/// One screenshot output shape for every capture source (R2): the legacy
+/// top-level fields (`path`, `sha256`, `width`, `height`, `sizeKb`,
+/// `warnings`) plus every field of the plugin's capture report
+/// (`artifactId`, `captureSource`, `sourceSelection`, `storage`,
+/// `retainedUntil`, `capturedAt`, `image`, `viewport`, `geometry`, ...).
+/// Existing output keys win; image bytes are never copied.
+pub(crate) fn merge_capture_report(out: &mut Value, report: &Value) {
+    let (Some(out), Some(report)) = (out.as_object_mut(), report.as_object()) else {
+        return;
+    };
+    for (key, value) in report {
+        if key != "base64" && !out.contains_key(key) {
+            out.insert(key.clone(), value.clone());
         }
     }
+}
+
+/// `screenshot --source <s>` output in the same shape as the default path.
+/// Without `--output` nothing is written, so `path` and `exportedPath` are
+/// null and `sha256`/`sizeKb` describe the captured image in memory.
+pub(crate) fn source_screenshot_output(
+    report: Value,
+    exported_path: Option<&str>,
+    bytes: Option<&[u8]>,
+) -> Value {
+    let dimension = |key: &str| report.pointer(&format!("/image/{key}")).cloned();
+    let mut out = json!({
+        "path": exported_path,
+        "exportedPath": exported_path,
+        "warnings": report.get("warnings").cloned().unwrap_or(json!([])),
+        "sha256": bytes.map(sha256_hex),
+        "width": dimension("widthPx").unwrap_or(Value::Null),
+        "height": dimension("heightPx").unwrap_or(Value::Null),
+        "sizeKb": bytes.map(|b| b.len() / 1024),
+    });
+    merge_capture_report(&mut out, &report);
     out
 }
 
@@ -2459,6 +2485,74 @@ mod tests {
         assert_eq!(out["sizeKb"], 4);
         assert_eq!(out["captureSource"], "webview_native");
         assert_eq!(out["viewport"]["heightCss"], 800.0);
+    }
+
+    #[test]
+    fn screenshot_output_has_one_shape_for_every_source() {
+        // R2: the default capture and `--source window_native` printed
+        // different fields. Both now carry the same top-level keys.
+        let report = json!({
+            "artifactId": "inst:artifact:1",
+            "captureSource": "window_native",
+            "sourceSelection": {"requested": "window_native"},
+            "storage": "protected_memory",
+            "retainedUntil": 9,
+            "capturedAt": 1,
+            "image": {"widthPx": 1200, "heightPx": 800, "mimeType": "image/png"},
+            "viewport": {"widthCss": 1200.0},
+            "fallbacks": [],
+            "base64": "AAAA",
+        });
+        let artifact = super::ArtifactWrite {
+            path: std::path::PathBuf::from("/tmp/a.png"),
+            requested_path: std::path::PathBuf::from("/tmp/a.png"),
+            resolved_from_collision: false,
+            overwrote: false,
+        };
+        let default = super::default_screenshot_output(
+            report.clone(),
+            &artifact,
+            &json!({"sha256": "abc", "artifactId": "shot_a"}),
+            &[0u8; 2048],
+            1200,
+            800,
+            json!([]),
+        );
+        let explicit =
+            super::source_screenshot_output(report.clone(), Some("/tmp/b.png"), Some(&[0u8; 2048]));
+        let shared = [
+            "path",
+            "exportedPath",
+            "sha256",
+            "width",
+            "height",
+            "sizeKb",
+            "warnings",
+            "artifactId",
+            "captureSource",
+            "sourceSelection",
+            "storage",
+            "retainedUntil",
+            "capturedAt",
+            "image",
+            "viewport",
+            "fallbacks",
+        ];
+        for key in shared {
+            assert!(default.get(key).is_some(), "default lacks {key}");
+            assert!(explicit.get(key).is_some(), "--source lacks {key}");
+        }
+        assert!(default.get("base64").is_none() && explicit.get("base64").is_none());
+        assert_eq!(default["artifactId"], "inst:artifact:1");
+        assert_eq!(default["artifact"]["artifactId"], "shot_a");
+        assert_eq!(default["exportedPath"], "/tmp/a.png");
+        assert_eq!(explicit["path"], "/tmp/b.png");
+        assert_eq!(explicit["width"], 1200);
+        assert_eq!(explicit["sizeKb"], 2);
+        assert_eq!(explicit["sha256"].as_str().unwrap().len(), 64);
+        let unexported = super::source_screenshot_output(report, None, None);
+        assert_eq!(unexported["path"], serde_json::Value::Null);
+        assert_eq!(unexported["height"], 800);
     }
 
     #[test]

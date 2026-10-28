@@ -285,20 +285,24 @@ pub async fn screenshot(
 ) -> Result<(), String> {
     let mut args = args;
     args["includeImage"] = json!(output.is_some());
-    let mut report = client.inspect("webview_screenshot", &args).await?;
-    if let Some(path) = output {
-        let encoded = report
-            .get("base64")
-            .and_then(Value::as_str)
-            .ok_or("captured image unavailable for explicit export")?;
-        let bytes = crate::commands::b64_decode(encoded)?;
-        write_export(path, &bytes, overwrite)?;
-        report["exportedPath"] = json!(path);
-    }
-    if let Some(object) = report.as_object_mut() {
-        object.remove("base64");
-    }
-    print_json(&report);
+    let report = client.inspect("webview_screenshot", &args).await?;
+    let bytes = match output {
+        Some(path) => {
+            let encoded = report
+                .get("base64")
+                .and_then(Value::as_str)
+                .ok_or("captured image unavailable for explicit export")?;
+            let bytes = crate::commands::b64_decode(encoded)?;
+            write_export(path, &bytes, overwrite)?;
+            Some(bytes)
+        }
+        None => None,
+    };
+    print_json(&crate::commands::source_screenshot_output(
+        report,
+        output,
+        bytes.as_deref(),
+    ));
     Ok(())
 }
 

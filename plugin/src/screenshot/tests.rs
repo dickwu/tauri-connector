@@ -382,3 +382,18 @@ fn a_hidden_page_names_the_window_and_the_remedy() {
     assert!(no_frame.starts_with("capture_not_ready: render_frame_timeout"));
     assert!(no_frame.contains("windows focus") && no_frame.contains("--bring-to-front"));
 }
+
+#[test]
+fn capture_reports_why_its_source_was_selected() {
+    use super::{CaptureSource as S, source_selection};
+    let order = [S::WebviewNative, S::WindowNative, S::DomRendering];
+    let auto = source_selection(S::Auto, &order, S::WebviewNative);
+    assert_eq!(auto["requested"], "auto");
+    assert_eq!(auto["selected"], "webview_native");
+    assert_eq!(auto["order"][1], "window_native");
+    assert!(auto["reason"].as_str().unwrap().contains("CSS viewport"));
+    let fell_back = source_selection(S::Auto, &order, S::DomRendering);
+    assert!(fell_back["reason"].as_str().unwrap().contains("fallbacks"));
+    let explicit = source_selection(S::WindowNative, &[S::WindowNative], S::WindowNative);
+    assert!(explicit["reason"].as_str().unwrap().contains("explicitly"));
+}

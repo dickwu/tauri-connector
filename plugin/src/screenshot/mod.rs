@@ -44,6 +44,29 @@ pub enum CaptureSource {
     DomRendering,
 }
 
+/// Why this capture came from `selected`. `auto` tries WebView-native first:
+/// it is the WebView's own snapshot of exactly the CSS viewport at the device
+/// pixel ratio, so it needs no Screen Recording permission, contains no title
+/// bar, shadow or overlapping window, and maps 1:1 onto snapshot geometry.
+/// `window_native` (OS window composite) and `dom_rendering` (snapdom) are
+/// fallbacks for when it is unavailable or fails.
+pub(crate) fn source_selection(
+    requested: CaptureSource,
+    order: &[CaptureSource],
+    selected: CaptureSource,
+) -> Value {
+    let reason = match (requested, selected) {
+        (CaptureSource::Auto, CaptureSource::WebviewNative) => {
+            "auto prefers webview_native: the WebView's own snapshot of exactly the CSS viewport, with no Screen Recording permission, window chrome or overlapping windows, and the same geometry as snapshot refs"
+        }
+        (CaptureSource::Auto, _) => {
+            "auto fell back from webview_native because earlier sources failed; see fallbacks"
+        }
+        _ => "requested explicitly; explicit sources never fall back",
+    };
+    json!({"requested":requested,"order":order,"selected":selected,"reason":reason})
+}
+
 pub struct CaptureRequest {
     pub window_id: String,
     pub context: Value,
@@ -223,7 +246,8 @@ where
                             "maskFingerprint":crate::runtime::manifest::content_hash(serde_json::to_string(&before.sensitive_rects).map_err(|_|"mask_serialization_failed")?.as_bytes()),
                             "uncoveredReasons":[]},
                         "consistency":{"status":"stable_context","atomic":false,"viewportSettled":viewport_settled},
-                        "sideEffects":[],"fallbacks":fallbacks,"timings":timings
+                        "sideEffects":[],"fallbacks":fallbacks,"timings":timings,
+                        "sourceSelection":source_selection(request.source, sources, *source)
                     }) });
                 }
                 Err(error) => {
