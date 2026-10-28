@@ -137,13 +137,13 @@ pub fn stale_record_gate(
             .iter()
             .map(|candidate| {
                 let identity = candidate.identity.as_ref();
-                let name = identity
-                    .and_then(|identity| identity.app_name.as_deref())
-                    .map(|name| format!("{name} "))
-                    .unwrap_or_default();
+                let id = identity.map(|i| i.app_id.as_str()).unwrap_or("?");
+                let app = match identity.and_then(|identity| identity.app_name.as_deref()) {
+                    Some(name) => format!("{name} ({id})"),
+                    None => id.to_string(),
+                };
                 format!(
-                    "{name}({}) pid {} on port {}",
-                    identity.map(|i| i.app_id.as_str()).unwrap_or("?"),
+                    "{app} pid {} on port {}",
                     identity.map(|i| i.pid).unwrap_or(0),
                     candidate.port
                 )
