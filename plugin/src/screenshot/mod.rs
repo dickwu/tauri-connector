@@ -218,14 +218,19 @@ where
         for source in sources {
             validate().await?;
             let capture_started=Instant::now();
-            let frame = capture_source(app, bridge, &request, *source, &before).await;
+            // R2: every source reports how the frame relates to the page
+            // viewport, not only window_native.
+            let frame = capture_source(app, bridge, &request, *source, &before).await.map(|(frame, crop)| {
+                let crop = crop.unwrap_or_else(|| uncropped_viewport(native_width as u32, native_height as u32));
+                (frame, crop)
+            });
             let capture_timing=elapsed_stage(capture_started);
             validate().await?;
             let after = probe(bridge, &request).await?;
             if before != after { return Err("capture_context_changed: viewport, page or mask changed".into()); }
-            let result = match frame {
-                Ok(frame) => process_frame(frame, before.clone(), request.target, request.max_width).await,
-                Err(error) => Err(error),
+            let (result, viewport_crop) = match frame {
+                Ok((frame, crop)) => (process_frame(frame, before.clone(), request.target, request.max_width).await, crop),
+                Err(error) => (Err(error), Value::Null),
             };
             match result {
                 Ok((png, geometry, width, height, mut timings)) => {
@@ -240,7 +245,7 @@ where
                         "artifactId":format!("{instance}:artifact:{}", uuid::Uuid::new_v4()),
                         "captureSource":source, "capturedAt":captured_at, "context":request.context,
                         "image":{"widthPx":width,"heightPx":height,"mimeType":"image/png"},
-                        "viewport":before.viewport, "geometry":geometry,
+                        "viewport":before.viewport, "geometry":geometry, "viewportCrop":viewport_crop,
                         "redaction":{"status":"applied","policyVersion":"1","policy":"required",
                             "maskedRegions":before.sensitive_rects.len(),"coverage":"declared_regions_and_field_heuristics",
                             "maskFingerprint":crate::runtime::manifest::content_hash(serde_json::to_string(&before.sensitive_rects).map_err(|_|"mask_serialization_failed")?.as_bytes()),
@@ -325,13 +330,28 @@ async fn probe(bridge: &Bridge, request: &CaptureRequest) -> Result<Probe, Strin
     Ok(result)
 }
 
+/// `viewportCrop` for a source that captures the page viewport itself
+/// (WebView snapshot, DOM rendering): nothing was cut away.
+fn uncropped_viewport(width: u32, height: u32) -> Value {
+    ViewportCrop {
+        x: 0,
+        y: 0,
+        width,
+        height,
+        basis: "css_viewport",
+    }
+    .report((width, height))
+}
+
+/// The frame, plus the `viewportCrop` report when the source cropped a
+/// larger native image (window_native) down to the page viewport.
 async fn capture_source(
     app: &tauri::AppHandle,
     bridge: &Bridge,
     request: &CaptureRequest,
     source: CaptureSource,
     probe: &Probe,
-) -> Result<RawFrame, String> {
+) -> Result<(RawFrame, Option<Value>), String> {
     match source {
         CaptureSource::WebviewNative => {
             let viewport = &probe.viewport;
@@ -341,6 +361,7 @@ async fn capture_source(
                 (viewport.width_css, viewport.height_css),
             )
             .await
+            .map(|frame| (frame, None))
         }
         CaptureSource::WindowNative => {
             let viewport = &probe.viewport;
@@ -348,7 +369,9 @@ async fn capture_source(
                 (viewport.width_css * viewport.device_pixel_ratio).round() as u32,
                 (viewport.height_css * viewport.device_pixel_ratio).round() as u32,
             );
-            window_native(app, &request.window_id, expected).await
+            window_native(app, &request.window_id, expected)
+                .await
+                .map(|(frame, crop)| (frame, Some(crop)))
         }
         CaptureSource::DomRendering => {
             use base64::Engine;
@@ -372,7 +395,7 @@ async fn capture_source(
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(encoded)
                 .map_err(|_| "capture_failed: malformed DOM data")?;
-            Ok(RawFrame::Encoded(bytes))
+            Ok((RawFrame::Encoded(bytes), None))
         }
         CaptureSource::Auto => Err("invalid_arguments: unexpanded auto source".into()),
     }
@@ -426,7 +449,7 @@ async fn window_native(
     app: &tauri::AppHandle,
     window_id: &str,
     expected: (u32, u32),
-) -> Result<RawFrame, String> {
+) -> Result<(RawFrame, Value), String> {
     #[cfg(feature = "xcap")]
     {
         let window = app
@@ -477,6 +500,8 @@ async fn window_native(
                 .capture_image()
                 .map_err(|_| "capture_failed: xcap window")?;
             check_dimensions(image.width(), image.height())?;
+            let window_px = image.dimensions();
+            let mut origin = (0u32, 0u32);
             // Prove either a client-only frame or an exact outer-window frame.
             // Unsupported xcap decoration/scale semantics are rejected.
             if image.dimensions() == (outer_size.width, outer_size.height) {
@@ -503,6 +528,7 @@ async fn window_native(
                     inner_size.height,
                 )
                 .to_image();
+                origin = (dx as u32, dy as u32);
             } else if image.dimensions() != (inner_size.width, inner_size.height) {
                 return Err(format!(
                     "geometry_unknown: xcap extent {}x{} differs from native window bounds (outer {}x{}, inner {}x{}); use --source webview_native",
@@ -518,8 +544,10 @@ async fn window_native(
                 let width = image.width();
                 image = image::imageops::crop_imm(&image, 0, top, width, expected.1)
                     .to_image();
+                origin.1 += top;
             }
-            Ok(RawFrame::Bitmap {
+            let crop = window_viewport_crop(window_px, origin, image.dimensions(), expected);
+            Ok((RawFrame::Bitmap {
                 width: image.width(),
                 height: image.height(),
                 stride: image.width() as usize * 4,
@@ -527,7 +555,7 @@ async fn window_native(
                 order: PixelOrder::Rgba,
                 premultiplied: false,
                 opaque: false,
-            })
+            }, crop))
         })
         .await
         .map_err(|_| "capture_worker_failed".to_string())?
@@ -537,6 +565,32 @@ async fn window_native(
         let _ = (app, window_id, expected);
         Err("capture_backend_unavailable: window_native needs the plugin's xcap feature (enabled by default; restore default features or use --source webview_native)".into())
     }
+}
+
+/// `viewportCrop` for a native window frame: where the kept rectangle sat in
+/// the raw window image, and whether it matches the page's CSS viewport.
+#[cfg_attr(not(feature = "xcap"), allow(dead_code))]
+fn window_viewport_crop(
+    window_px: (u32, u32),
+    origin: (u32, u32),
+    kept: (u32, u32),
+    expected: (u32, u32),
+) -> Value {
+    let cropped = origin != (0, 0) || kept != window_px;
+    ViewportCrop {
+        x: origin.0,
+        y: origin.1,
+        width: kept.0,
+        height: kept.1,
+        basis: if kept == expected {
+            "css_viewport"
+        } else if cropped {
+            "client_area"
+        } else {
+            "uncropped"
+        },
+    }
+    .report(window_px)
 }
 
 /// Runtime script failures arrive wrapped as `execution_failed: <reason>`;

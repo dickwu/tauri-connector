@@ -925,15 +925,10 @@ pub async fn screenshot(
         if let Some(w) = max_width {
             args["maxWidth"] = json!(w);
         }
-        let mut attempt = client.inspect("webview_screenshot", &args).await;
-        // git-strata #8: a reload landing mid-capture invalidates the bound
-        // page; capture the new page once more instead of falling back to
-        // the legacy renderer (which could return the stale frame).
-        if matches!(&attempt, Err(error) if default_capture_fallback(error).as_deref() == Some("capture_context_changed"))
-        {
-            attempt = client.inspect("webview_screenshot", &args).await;
-        }
-        match attempt {
+        // git-strata #8 / R2: a reload or dialog landing mid-capture is
+        // captured again (bounded) instead of falling back to the legacy
+        // renderer, which could return the stale frame.
+        match capture_screenshot(client, &args, Some(resolved)).await {
             Ok(report) => {
                 return finish_default_screenshot(
                     report, output, format, overwrite, output_dir, name_hint, instance, resolved,
@@ -1043,10 +1038,9 @@ pub async fn screenshot(
     if let Some(note) = screenshot_fallback_note(result.get("fallback")) {
         eprintln!("note: {note}");
     }
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&json!({
+    let mut out = json!({
             "path": artifact.path,
+            "exportedPath": artifact.path,
             "warnings": warnings,
             "requestedPath": artifact.requested_path,
             "resolvedFromCollision": artifact.resolved_from_collision,
@@ -1056,10 +1050,115 @@ pub async fn screenshot(
             "height": height,
             "sizeKb": size_kb,
             "artifact": metadata,
-        }))
-        .unwrap_or_default()
-    );
+    });
+    ensure_viewport_crop(&mut out);
+    println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
     Ok(())
+}
+
+/// Capture attempts for a read-only screenshot whose page changed, reloaded
+/// or dropped the connection under it.
+const SCREENSHOT_ATTEMPTS: u32 = 3;
+
+/// The error code of a CLI-visible error string: a JSON report's `code`
+/// (optionally after `Error: `, or nested under `error`) or the prefix
+/// before the first `:`.
+fn error_code(error: &str) -> String {
+    let parsed = serde_json::from_str::<Value>(error.trim_start_matches("Error: ")).ok();
+    parsed
+        .as_ref()
+        .and_then(|v| {
+            v.get("code")
+                .or_else(|| v.pointer("/error/code"))
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    v.get("error")
+                        .and_then(Value::as_str)
+                        .map(|e| e.split(':').next().unwrap_or(""))
+                })
+        })
+        .map(str::to_string)
+        .unwrap_or_else(|| error.split(':').next().unwrap_or("").trim().to_string())
+}
+
+#[derive(Debug, PartialEq)]
+enum ScreenshotRetry {
+    /// The page changed or is navigating: capture again on this connection.
+    Page,
+    /// The connection dropped mid-capture: reconnect, then capture again.
+    Reconnect,
+}
+
+/// A screenshot has no side effects, so these failures are retried instead
+/// of reported (Inter: `outcome_unknown "Connection closed"` during reload).
+fn screenshot_retry(error: &str) -> Option<ScreenshotRetry> {
+    match error_code(error).as_str() {
+        "capture_context_changed" | "page_navigating" | "page_not_ready" => {
+            Some(ScreenshotRetry::Page)
+        }
+        "outcome_unknown"
+            if error.contains("Connection closed") || error.contains("Disconnected") =>
+        {
+            Some(ScreenshotRetry::Reconnect)
+        }
+        "outcome_unknown" if error.to_ascii_lowercase().contains("channel closed") => {
+            Some(ScreenshotRetry::Page)
+        }
+        _ => None,
+    }
+}
+
+/// The error left after the retries: a navigation-shaped failure is a
+/// retryable `page_navigating`, never `outcome_unknown` (nothing was written).
+fn settle_screenshot_error(error: String, attempts: u32) -> String {
+    match screenshot_retry(&error) {
+        Some(_) if error_code(&error) != "capture_context_changed" => json!({
+            "code": "page_navigating",
+            "message": format!("the page kept reloading or the connection dropped across {attempts} screenshot attempts ({error}); a screenshot has no side effects, so retry once the page settles"),
+            "stage": "screenshot",
+            "retryableBeforeDispatch": true,
+        })
+        .to_string(),
+        _ => error,
+    }
+}
+
+/// `webview_screenshot` with a bounded retry for page changes, reloads and
+/// dropped connections. A reconnect re-verifies the same app instance.
+pub(crate) async fn capture_screenshot(
+    client: &ConnectorClient,
+    args: &Value,
+    resolved: Option<&ResolvedConnection>,
+) -> Result<Value, String> {
+    let mut fresh: Option<ConnectorClient> = None;
+    let mut attempt = 1;
+    loop {
+        let current = fresh.as_ref().unwrap_or(client);
+        let error = match current.inspect("webview_screenshot", args).await {
+            Ok(report) => return Ok(report),
+            Err(error) => error,
+        };
+        let Some(kind) = screenshot_retry(&error).filter(|_| attempt < SCREENSHOT_ATTEMPTS) else {
+            return Err(settle_screenshot_error(error, attempt));
+        };
+        attempt += 1;
+        tokio::time::sleep(std::time::Duration::from_millis(300 * u64::from(attempt))).await;
+        let reconnect_to =
+            resolved.filter(|_| kind == ScreenshotRetry::Reconnect && !current.is_connected());
+        if let Some(resolved) = reconnect_to {
+            let mut replacement = ConnectorClient::new();
+            if let Some(identity) = &resolved.identity {
+                replacement.bind_instance(&identity.app_instance_id)?;
+            }
+            if replacement
+                .connect(&resolved.host, resolved.port)
+                .await
+                .is_ok()
+            {
+                fresh = Some(replacement);
+            }
+        }
+    }
 }
 
 /// Whether a failed protected default capture should fall back to the legacy
@@ -1073,7 +1172,7 @@ fn default_capture_fallback(error: &str) -> Option<String> {
     match code.as_str() {
         // Errors about the current page, not the pipeline: the legacy
         // renderer would not do better and could capture a stale frame.
-        "window_not_visible" | "capture_context_changed" => None,
+        "window_not_visible" | "capture_context_changed" | "page_navigating" => None,
         "" => Some("unknown".into()),
         _ => Some(code),
     }
@@ -1185,7 +1284,38 @@ fn default_screenshot_output(
     });
     out["exportedPath"] = json!(artifact.path);
     merge_capture_report(&mut out, &report);
+    ensure_viewport_crop(&mut out);
     out
+}
+
+/// R2: `viewportCrop` sits at the top level of every screenshot output. A
+/// plugin that predates per-source reports gets one derived from
+/// `geometry.cropPx`, else `{basis:"not_reported"}`.
+pub(crate) fn ensure_viewport_crop(out: &mut Value) {
+    let reported = out
+        .get("viewportCrop")
+        .filter(|v| v.is_object())
+        .or_else(|| {
+            out.pointer("/artifact/viewportCrop")
+                .filter(|v| v.is_object())
+        })
+        .cloned();
+    let crop = reported.unwrap_or_else(|| {
+        match out.pointer("/geometry/cropPx").and_then(Value::as_array) {
+            Some(rect) if rect.len() == 4 => {
+                let n = |i: usize| rect[i].as_f64().unwrap_or(0.0);
+                let width = out["width"].as_f64().unwrap_or(n(2));
+                json!({
+                    "cropped": false,
+                    "basis": "css_viewport",
+                    "rectPx": {"x": n(0), "y": n(1), "width": n(2), "height": n(3)},
+                    "windowPx": {"width": width.max(n(2)), "height": out["height"].as_f64().unwrap_or(n(3)).max(n(3))},
+                })
+            }
+            _ => json!({"basis": "not_reported"}),
+        }
+    });
+    out["viewportCrop"] = crop;
 }
 
 /// One screenshot output shape for every capture source (R2): the legacy
@@ -1212,18 +1342,42 @@ pub(crate) fn source_screenshot_output(
     report: Value,
     exported_path: Option<&str>,
     bytes: Option<&[u8]>,
+    overwrote: bool,
 ) -> Value {
     let dimension = |key: &str| report.pointer(&format!("/image/{key}")).cloned();
+    let sha256 = bytes.map(sha256_hex);
+    // `artifact` mirrors the default path's descriptor of the written file;
+    // null when nothing was written (no --output).
+    let artifact = exported_path.map(|path| {
+        json!({
+            "artifactId": report.get("artifactId").cloned().unwrap_or(Value::Null),
+            "kind": "screenshot",
+            "captureKind": "full",
+            "path": path,
+            "requestedPath": path,
+            "resolvedFromCollision": false,
+            "overwrote": overwrote,
+            "sha256": sha256,
+            "bytes": bytes.map(<[u8]>::len),
+            "captureSource": report.get("captureSource").cloned().unwrap_or(Value::Null),
+            "source": "viewport",
+        })
+    });
     let mut out = json!({
         "path": exported_path,
         "exportedPath": exported_path,
         "warnings": report.get("warnings").cloned().unwrap_or(json!([])),
-        "sha256": bytes.map(sha256_hex),
+        "requestedPath": exported_path,
+        "resolvedFromCollision": false,
+        "overwrote": overwrote,
+        "sha256": sha256,
         "width": dimension("widthPx").unwrap_or(Value::Null),
         "height": dimension("heightPx").unwrap_or(Value::Null),
         "sizeKb": bytes.map(|b| b.len() / 1024),
+        "artifact": artifact,
     });
     merge_capture_report(&mut out, &report);
+    ensure_viewport_crop(&mut out);
     out
 }
 
@@ -2519,11 +2673,20 @@ mod tests {
             800,
             json!([]),
         );
-        let explicit =
-            super::source_screenshot_output(report.clone(), Some("/tmp/b.png"), Some(&[0u8; 2048]));
+        let explicit = super::source_screenshot_output(
+            report.clone(),
+            Some("/tmp/b.png"),
+            Some(&[0u8; 2048]),
+            true,
+        );
         let shared = [
             "path",
             "exportedPath",
+            "requestedPath",
+            "resolvedFromCollision",
+            "overwrote",
+            "artifact",
+            "viewportCrop",
             "sha256",
             "width",
             "height",
@@ -2551,9 +2714,57 @@ mod tests {
         assert_eq!(explicit["width"], 1200);
         assert_eq!(explicit["sizeKb"], 2);
         assert_eq!(explicit["sha256"].as_str().unwrap().len(), 64);
-        let unexported = super::source_screenshot_output(report, None, None);
+        assert_eq!(explicit["overwrote"], true);
+        assert_eq!(explicit["artifact"]["path"], "/tmp/b.png");
+        // An older plugin reports no viewportCrop: it is still present.
+        assert_eq!(default["viewportCrop"]["basis"], "not_reported");
+        let unexported = super::source_screenshot_output(report, None, None, false);
         assert_eq!(unexported["path"], serde_json::Value::Null);
+        assert_eq!(unexported["artifact"], serde_json::Value::Null);
         assert_eq!(unexported["height"], 800);
+        assert!(unexported.get("viewportCrop").is_some());
+    }
+
+    #[test]
+    fn viewport_crop_is_lifted_or_derived_never_missing() {
+        let crop = json!({"cropped":true,"basis":"css_viewport","rectPx":{"x":0,"y":84,"width":10,"height":10},"windowPx":{"width":10,"height":94}});
+        let mut reported = json!({"viewportCrop": crop.clone()});
+        super::ensure_viewport_crop(&mut reported);
+        assert_eq!(reported["viewportCrop"], crop);
+        let mut legacy = json!({"artifact": {"viewportCrop": crop.clone()}});
+        super::ensure_viewport_crop(&mut legacy);
+        assert_eq!(legacy["viewportCrop"], crop);
+        let mut geometry =
+            json!({"geometry":{"cropPx":[0,0,2800,1736]},"width":2800,"height":1736});
+        super::ensure_viewport_crop(&mut geometry);
+        assert_eq!(geometry["viewportCrop"]["rectPx"]["width"], 2800.0);
+    }
+
+    #[test]
+    fn screenshots_retry_page_changes_and_dropped_connections() {
+        use super::{screenshot_retry, settle_screenshot_error, ScreenshotRetry};
+        // R2: capture_context_changed on the first default shot.
+        let changed = r#"{"code":"capture_context_changed","message":"capture_context_changed: viewport, page or mask changed","stage":"screenshot"}"#;
+        assert_eq!(screenshot_retry(changed), Some(ScreenshotRetry::Page));
+        assert_eq!(
+            screenshot_retry(&format!("Error: {changed}")),
+            Some(ScreenshotRetry::Page)
+        );
+        // Inter: a screenshot during reload.
+        let closed =
+            "outcome_unknown: Connection closed (requestId: r1); remote execution may continue";
+        assert_eq!(screenshot_retry(closed), Some(ScreenshotRetry::Reconnect));
+        let settled: serde_json::Value =
+            serde_json::from_str(&settle_screenshot_error(closed.into(), 3)).unwrap();
+        assert_eq!(settled["code"], "page_navigating");
+        assert_eq!(settled["retryableBeforeDispatch"], true);
+        assert_eq!(settle_screenshot_error(changed.into(), 3), changed);
+        let hidden = r#"{"code":"window_not_visible","message":"hidden"}"#;
+        assert_eq!(screenshot_retry(hidden), None);
+        assert_eq!(
+            screenshot_retry("outcome_unknown: Request timeout (requestId: r)"),
+            None
+        );
     }
 
     #[test]

@@ -498,3 +498,29 @@ fn legacy_window_fallback_is_cropped_to_the_webview_viewport_or_says_it_is_not()
     assert_eq!(overlay.basis, "css_viewport");
     assert_eq!(overlay.report((2400, 1600))["cropped"], false);
 }
+
+/// R2: `viewportCrop` is reported for every source, in one shape.
+#[test]
+fn every_source_reports_viewport_crop_in_one_shape() {
+    let keys = |v: &serde_json::Value| {
+        let mut k: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+        k.sort();
+        k
+    };
+    let viewport = super::uncropped_viewport(2800, 1736);
+    assert_eq!(viewport["cropped"], false);
+    assert_eq!(viewport["basis"], "css_viewport");
+    assert_eq!(viewport["rectPx"]["width"], 2800);
+    // Outer frame cropped to the client area, then the title-bar band.
+    let window = super::window_viewport_crop((2800, 1820), (0, 84), (2800, 1736), (2800, 1736));
+    assert_eq!(window["cropped"], true);
+    assert_eq!(window["basis"], "css_viewport");
+    assert_eq!(window["rectPx"]["y"], 84);
+    assert_eq!(window["windowPx"]["height"], 1820);
+    assert_eq!(keys(&viewport), keys(&window));
+    let unverified = super::window_viewport_crop((2800, 1820), (0, 0), (2800, 1820), (2800, 1736));
+    assert_eq!(unverified["basis"], "uncropped");
+    assert_eq!(unverified["cropped"], false);
+    let client = super::window_viewport_crop((2810, 1830), (5, 5), (2800, 1820), (2800, 1736));
+    assert_eq!(client["basis"], "client_area");
+}

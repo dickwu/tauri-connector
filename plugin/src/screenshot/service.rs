@@ -162,17 +162,71 @@ pub async fn handle(
         })
         .transpose()?
         .unwrap_or(10000);
-    tokio::time::timeout(
-        Duration::from_millis(timeout),
-        handle_inner(args, bridge, app, state),
-    )
-    .await
-    .map_err(|_| {
-        error(
-            "capture_timeout",
-            "Capture deadline expired; late native results are discarded",
-        )
-    })?
+    // A capture is read-only, so a page that changed or reloaded under it
+    // is captured again (bounded) rather than reported (R2: a dialog opening
+    // during the first shot; Inter: a reload closing the runtime channel).
+    let last = Mutex::new(None::<Value>);
+    let attempts = async {
+        let mut attempt = 1;
+        loop {
+            match handle_inner(args, bridge, app, state).await {
+                Err(error) if attempt < CAPTURE_ATTEMPTS && transient_capture_error(&error) => {
+                    *last.lock().unwrap() = Some(error);
+                    attempt += 1;
+                    tokio::time::sleep(CAPTURE_RETRY_DELAY).await;
+                }
+                Err(error) => return Err(settle_capture_error(error, attempt)),
+                ok => return ok,
+            }
+        }
+    };
+    match tokio::time::timeout(Duration::from_millis(timeout), attempts).await {
+        Ok(result) => result,
+        Err(_) => Err(match last.lock().unwrap().take() {
+            Some(error) => settle_capture_error(error, CAPTURE_ATTEMPTS),
+            None => error(
+                "capture_timeout",
+                "Capture deadline expired; late native results are discarded",
+            ),
+        }),
+    }
+}
+
+/// Captures per request when the page changes or navigates under one.
+const CAPTURE_ATTEMPTS: u32 = 3;
+const CAPTURE_RETRY_DELAY: Duration = Duration::from_millis(250);
+
+/// Failures caused by the page changing under a read-only capture: the
+/// bound context changed, or a reload dropped the runtime channel mid-call
+/// (`outcome_unknown` is about a write's effect; a capture has none).
+fn transient_capture_error(error: &Value) -> bool {
+    let code = error["code"].as_str().unwrap_or_default();
+    let message = error["message"].as_str().unwrap_or_default();
+    matches!(
+        code,
+        "capture_context_changed" | "page_navigating" | "outcome_unknown"
+    ) || message.contains("page_navigating")
+        || message.to_ascii_lowercase().contains("channel closed")
+        || message.contains("Connection closed")
+        || message.contains("runtime context changed")
+}
+
+/// The final error after retries: a navigation is reported as a retryable
+/// `page_navigating` (nothing was written), never `outcome_unknown`.
+fn settle_capture_error(mut error: Value, attempts: u32) -> Value {
+    if !transient_capture_error(&error) {
+        return error;
+    }
+    if error["code"] != "capture_context_changed" {
+        error["code"] = json!("page_navigating");
+    }
+    error["retryableBeforeDispatch"] = json!(true);
+    error["attempts"] = json!(attempts);
+    let message = error["message"].as_str().unwrap_or_default().to_string();
+    error["message"] = json!(format!(
+        "{message} (the page kept changing or reloading across {attempts} capture attempts; a screenshot has no side effects, so retry once it settles)"
+    ));
+    error
 }
 
 async fn handle_inner(
@@ -307,14 +361,16 @@ async fn handle_inner(
     // Restore durable quarantines when present without requiring a new
     // Windows journal solely for protected in-memory evidence.
     state.workflow.recover_before_inspection().await?;
-    let _lease =
-        state
-            .workflow
-            .resources
-            .try_acquire(crate::workflow::resources::tool_resources(
-                "webview_screenshot",
-                args,
-            ))?;
+    // A concurrent eval or capture holds the window briefly; queue behind
+    // it (bounded by this request's own deadline) instead of failing.
+    let _lease = state
+        .workflow
+        .resources
+        .acquire_within(
+            crate::workflow::resources::tool_resources("webview_screenshot", args),
+            crate::workflow::resources::LEASE_QUEUE_WAIT,
+        )
+        .await?;
     if args.get("bringToFront") == Some(&json!(true)) {
         bring_to_front(app, window)
             .await
@@ -610,6 +666,31 @@ pub fn artifact_handle(operation: &str, args: &Value, state: &PluginState) -> Re
 /// Remedy for a capture that failed because the page is hidden. WebKit and
 /// WebView2 render no frames for a minimized, fully covered, other-Space or
 /// screen-locked window, so waiting for a frame can only time out.
+#[cfg(test)]
+mod retry_tests {
+    use serde_json::json;
+
+    #[test]
+    fn navigation_during_capture_is_retryable_never_outcome_unknown() {
+        // Inter: a screenshot during reload said outcome_unknown.
+        let closed = json!({"code":"outcome_unknown","message":"outcome_unknown: Bridge response channel closed (requestId: r); remote execution may continue","stage":"screenshot"});
+        assert!(super::transient_capture_error(&closed));
+        let settled = super::settle_capture_error(closed, 3);
+        assert_eq!(settled["code"], "page_navigating");
+        assert_eq!(settled["retryableBeforeDispatch"], true);
+        // R2: a dialog opening during the first default shot.
+        let changed = json!({"code":"capture_context_changed","message":"capture_context_changed: viewport, page or mask changed"});
+        assert!(super::transient_capture_error(&changed));
+        assert_eq!(
+            super::settle_capture_error(changed, 3)["code"],
+            "capture_context_changed"
+        );
+        let hidden = json!({"code":"window_not_visible","message":"hidden"});
+        assert!(!super::transient_capture_error(&hidden));
+        assert_eq!(super::settle_capture_error(hidden.clone(), 1), hidden);
+    }
+}
+
 pub(crate) fn hidden_window_error(visibility: Option<&str>) -> Option<String> {
     (visibility == Some("hidden")).then(|| {
         "The window's page is hidden (minimized, on another Space or desktop, fully covered, or the screen is locked or asleep), so the webview renders no frames to capture. Bring it to the front natively with `tauri-connector windows focus` (MCP: manage_window action \"focus\"), or pass --bring-to-front (MCP: bringToFront: true), then retry; a locked or sleeping screen must be unlocked".to_string()

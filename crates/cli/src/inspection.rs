@@ -282,10 +282,12 @@ pub async fn screenshot(
     args: Value,
     output: Option<&str>,
     overwrite: bool,
+    resolved: Option<&connector_client::discovery::ResolvedConnection>,
 ) -> Result<(), String> {
     let mut args = args;
     args["includeImage"] = json!(output.is_some());
-    let report = client.inspect("webview_screenshot", &args).await?;
+    let report = crate::commands::capture_screenshot(client, &args, resolved).await?;
+    let existed = output.is_some_and(|path| std::path::Path::new(path).exists());
     let bytes = match output {
         Some(path) => {
             let encoded = report
@@ -302,6 +304,7 @@ pub async fn screenshot(
         report,
         output,
         bytes.as_deref(),
+        existed && overwrite,
     ));
     Ok(())
 }
