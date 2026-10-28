@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "connector-client"
-version = "0.17.6"
+version = "0.17.7"
 dependencies = [
  "futures-util",
  "serde",
@@ -3439,7 +3439,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-connector"
-version = "0.17.6"
+version = "0.17.7"
 dependencies = [
  "axum",
  "base64 0.23.1",
