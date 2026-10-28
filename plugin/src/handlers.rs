@@ -2459,7 +2459,7 @@ async fn xcap_screenshot(
         "captureSource": "window_native",
         "viewportCrop": crop.report(window_px),
     });
-    if let Some(warning) = crop.warning() {
+    if let Some(warning) = crop.warning(window_px) {
         result["warnings"] = serde_json::json!([warning]);
     }
     Ok(result)

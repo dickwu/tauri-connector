@@ -630,18 +630,27 @@ impl ViewportCrop {
         })
     }
 
-    /// A warning unless the crop was proved against the page viewport.
-    pub(crate) fn warning(&self) -> Option<Value> {
-        let message = match self.basis {
-            "css_viewport" => return None,
-            "client_area" => {
-                "native window capture was cropped to the window's client area, but the page viewport could not be read, so a title bar band may remain"
+    /// A warning unless the crop was proved against the page viewport. A
+    /// page still loading cannot report its viewport, so a window whose
+    /// client area is the whole frame (Inter: a full-size content view
+    /// during load) comes back uncropped and the warning says so plainly.
+    pub(crate) fn warning(&self, image: (u32, u32)) -> Option<Value> {
+        let cropped = (self.x, self.y, self.width, self.height) != (0, 0, image.0, image.1);
+        let message = match (self.basis, cropped) {
+            ("css_viewport", _) => return None,
+            ("client_area", true) => {
+                "native window capture was cropped to the window's client area, but the page viewport could not be read (the page may still be loading), so a title bar band may remain; retake after the page loads for a viewport-cropped image"
             }
             _ => {
-                "native window capture is NOT cropped to the webview viewport; it may include the title bar and window chrome"
+                "native window capture is NOT cropped to the webview viewport (the page viewport could not be read or did not match, e.g. while the page is still loading); it is the whole window and may include the title bar; retake after the page loads for a viewport-cropped image"
             }
         };
-        Some(json!({"code": "viewport_crop_unverified", "message": message, "basis": self.basis}))
+        Some(json!({
+            "code": "viewport_crop_unverified",
+            "message": message,
+            "basis": self.basis,
+            "cropped": cropped,
+        }))
     }
 }
 

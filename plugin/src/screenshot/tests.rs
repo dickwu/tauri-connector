@@ -417,7 +417,7 @@ fn legacy_window_fallback_is_cropped_to_the_webview_viewport_or_says_it_is_not()
             (0, 64, 3840, 2036)
         );
         assert_eq!(inter.basis, "css_viewport");
-        assert!(inter.warning().is_none());
+        assert!(inter.warning((3840, 2100)).is_none());
         assert_eq!(inter.report((3840, 2100))["cropped"], true);
     }
     // An outer frame with a known client offset drops the decorations.
@@ -442,10 +442,27 @@ fn legacy_window_fallback_is_cropped_to_the_webview_viewport_or_says_it_is_not()
     let unread = crop((3840, 2100), (3840, 2100), Some((0, 0)), (3840, 2100), None);
     assert_eq!(unread.basis, "client_area");
     assert_eq!(unread.report((3840, 2100))["cropped"], false);
-    assert_eq!(
-        unread.warning().unwrap()["code"],
-        "viewport_crop_unverified"
+    // Nothing was cut, so the warning must not claim a crop (Inter: protected
+    // capture timed out mid-load and the full window came back).
+    let warning = unread.warning((3840, 2100)).unwrap();
+    assert_eq!(warning["code"], "viewport_crop_unverified");
+    assert_eq!(warning["cropped"], false);
+    assert!(warning["message"].as_str().unwrap().contains("NOT cropped"));
+    assert!(
+        warning["message"]
+            .as_str()
+            .unwrap()
+            .contains("still loading")
     );
+    // A real client-area crop that the page could not confirm says so.
+    let client = crop((1000, 740), (1000, 740), Some((0, 40)), (1000, 700), None);
+    assert_eq!(
+        (client.y, client.height, client.basis),
+        (40, 700, "client_area")
+    );
+    let warning = client.warning((1000, 740)).unwrap();
+    assert_eq!(warning["cropped"], true);
+    assert!(warning["message"].as_str().unwrap().contains("client area"));
     // Unprovable geometry keeps the whole frame and says it is not cropped.
     let unknown = crop(
         (3900, 2200),
@@ -465,7 +482,7 @@ fn legacy_window_fallback_is_cropped_to_the_webview_viewport_or_says_it_is_not()
         (0, 0, 3900, 2200, "uncropped")
     );
     assert!(
-        unknown.warning().unwrap()["message"]
+        unknown.warning((3900, 2200)).unwrap()["message"]
             .as_str()
             .unwrap()
             .contains("NOT cropped")
