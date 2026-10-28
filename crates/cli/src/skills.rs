@@ -90,24 +90,100 @@ fn local_skill_dirs() -> Vec<PathBuf> {
     paths
 }
 
-pub fn stale_local_skill_docs() -> Vec<(PathBuf, String)> {
-    local_skill_dirs()
-        .into_iter()
-        .filter(|dir| dir.exists())
-        .flat_map(|dir| {
-            SKILL_DOCS.iter().filter_map(move |doc| {
-                let path = dir.join(doc.display_path);
-                match std::fs::read_to_string(&path) {
-                    Ok(content) if content != doc.content => {
-                        Some((path, "content differs".to_string()))
-                    }
-                    Ok(_) => None,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                    Err(e) => Some((path, format!("could not read: {e}"))),
-                }
-            })
-        })
-        .collect()
+/// One installed skill directory whose files differ from the bundled docs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleSkillDir {
+    pub dir: PathBuf,
+    /// Bundled files that differ from (or cannot be read in) this copy.
+    pub files: Vec<String>,
+    /// `version:` from the copy's SKILL.md front matter, if any.
+    pub version: Option<String>,
+}
+
+impl StaleSkillDir {
+    /// True when the copy declares a newer version than this CLI bundles,
+    /// so the CLI, not the copy, is out of date.
+    pub fn newer_than_cli(&self) -> bool {
+        self.version
+            .as_deref()
+            .and_then(parse_version)
+            .zip(parse_version(env!("CARGO_PKG_VERSION")))
+            .is_some_and(|(copy, cli)| copy > cli)
+    }
+
+    pub fn describe(&self) -> String {
+        let version = self.version.as_deref().unwrap_or("unknown version");
+        let relation = if self.newer_than_cli() {
+            "newer than this CLI"
+        } else {
+            "differs from this CLI"
+        };
+        format!(
+            "{} (SKILL.md {version}, {relation} {}; {} file(s): {})",
+            self.dir.display(),
+            env!("CARGO_PKG_VERSION"),
+            self.files.len(),
+            self.files.join(", ")
+        )
+    }
+}
+
+pub fn stale_local_skill_docs() -> Vec<StaleSkillDir> {
+    stale_skill_dirs(local_skill_dirs())
+}
+
+fn stale_skill_dirs(dirs: Vec<PathBuf>) -> Vec<StaleSkillDir> {
+    // ~/.codex and ~/.Codex are one directory on a case-insensitive file
+    // system, and a symlinked copy is the same files: report each once.
+    let mut seen = Vec::new();
+    let mut stale = Vec::new();
+    for dir in dirs {
+        let Ok(canonical) = dir.canonicalize() else {
+            continue;
+        };
+        if seen.contains(&canonical) {
+            continue;
+        }
+        seen.push(canonical);
+        let files: Vec<String> = SKILL_DOCS
+            .iter()
+            .filter(
+                |doc| match std::fs::read_to_string(dir.join(doc.display_path)) {
+                    Ok(content) => content != doc.content,
+                    Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+                },
+            )
+            .map(|doc| doc.display_path.to_string())
+            .collect();
+        if files.is_empty() {
+            continue;
+        }
+        let version = std::fs::read_to_string(dir.join("SKILL.md"))
+            .ok()
+            .and_then(|text| front_matter_version(&text));
+        stale.push(StaleSkillDir {
+            dir,
+            files,
+            version,
+        });
+    }
+    stale
+}
+
+fn front_matter_version(text: &str) -> Option<String> {
+    let body = text.strip_prefix("---")?;
+    let front = &body[..body.find("\n---")?];
+    front.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("version:")
+            .map(|v| v.trim().trim_matches('"').to_string())
+    })
+}
+
+fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = text.trim().trim_start_matches('v').split('.');
+    let mut next = || parts.next()?.split(['-', '+']).next()?.parse().ok();
+    Some((next()?, next()?, next()?))
 }
 
 fn materialize_doc(doc: &SkillDoc) -> Result<PathBuf, String> {
@@ -215,5 +291,50 @@ mod tests {
                 doc.display_path
             );
         }
+    }
+
+    #[test]
+    fn stale_skill_dirs_are_reported_once_per_directory_with_their_version() {
+        let root = std::env::temp_dir().join(format!("tc-skill-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let old = root.join("old");
+        let current = root.join("current");
+        let newer = root.join("newer");
+        for dir in [&old, &current, &newer] {
+            for doc in SKILL_DOCS {
+                let path = dir.join(doc.display_path);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, doc.content).unwrap();
+            }
+        }
+        let cli = env!("CARGO_PKG_VERSION");
+        let skill = get("SKILL.md").unwrap().content;
+        std::fs::write(
+            old.join("SKILL.md"),
+            skill.replace(&format!("version: {cli}"), "version: 0.1.0"),
+        )
+        .unwrap();
+        std::fs::write(old.join("references/mcp-tools.md"), "old").unwrap();
+        std::fs::write(
+            newer.join("SKILL.md"),
+            skill.replace(&format!("version: {cli}"), "version: 999.0.0"),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&old, root.join("alias")).unwrap();
+
+        let mut dirs = vec![old.clone(), current, newer.clone(), root.join("missing")];
+        #[cfg(unix)]
+        dirs.push(root.join("alias"));
+        let stale = stale_skill_dirs(dirs);
+        assert_eq!(stale.len(), 2, "{stale:?}");
+        assert_eq!(stale[0].dir, old);
+        assert_eq!(stale[0].version.as_deref(), Some("0.1.0"));
+        assert_eq!(stale[0].files, vec!["SKILL.md", "references/mcp-tools.md"]);
+        assert!(!stale[0].newer_than_cli());
+        assert_eq!(stale[1].dir, newer);
+        assert!(stale[1].newer_than_cli());
+        assert!(stale[1].describe().contains("newer than this CLI"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

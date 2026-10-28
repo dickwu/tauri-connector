@@ -481,7 +481,9 @@ fn check_features_block(root: &Path) -> Check {
 /// `capabilities-dev`) anywhere in the source — the words project keeps the
 /// `include_str!` in a module-level const, so requiring adjacency would miss it.
 fn check_runtime_add_capability(root: &Path) -> Check {
-    let src = read_plugin_source(root);
+    // Setup code often lives in a module next to lib.rs, so scan every
+    // source file for the registration, not only lib.rs/main.rs.
+    let src = read_tauri_sources(root);
     if src.is_empty() {
         return Check::warn(
             "Cannot read lib.rs/main.rs for runtime add_capability check",
@@ -496,6 +498,8 @@ fn check_runtime_add_capability(root: &Path) -> Check {
         Check::ok(format!(
             "Capability loaded by build.rs capabilities_path_pattern (src-tauri/{dir}/)"
         ))
+    } else if build_rs_generates_connector_capability(root) {
+        Check::ok("Capability written by build.rs only when the connector feature is enabled")
     } else if has_runtime_add_capability(&src) {
         Check::ok(
             "Capability loaded at runtime via app.add_capability(include_str!(\"../capabilities-dev/...\"))",
@@ -506,6 +510,10 @@ fn check_runtime_add_capability(root: &Path) -> Check {
         Check::ok(
             "Default capability is loadable because tauri.conf.json build.features enables the connector feature",
         )
+    } else if !any_capability_grants_connector(root) {
+        // The capability check above already fails for this; a second
+        // warning about how to load a file that does not exist is noise.
+        Check::ok("Capability registration not checked: no capability grants connector:default yet (see above)")
     } else {
         Check::warn(
             "Runtime app.add_capability(include_str!(\"../capabilities-dev/...\")) not detected",
@@ -515,6 +523,79 @@ fn check_runtime_add_capability(root: &Path) -> Check {
             ),
         )
     }
+}
+
+/// Some apps keep the capability out of release builds by having build.rs
+/// write `capabilities/<name>.json` only under `cfg!(feature = "...")` (and
+/// delete it otherwise). That loads through tauri-build's default glob.
+fn build_rs_generates_connector_capability(root: &Path) -> bool {
+    fs::read_to_string(root.join("src-tauri").join("build.rs"))
+        .map(|text| build_rs_text_generates_connector_capability(&text))
+        .unwrap_or(false)
+}
+
+fn build_rs_text_generates_connector_capability(text: &str) -> bool {
+    text.contains("connector:default")
+        && (text.contains("cfg!(feature") || text.contains("CARGO_FEATURE_"))
+        && (text.contains("fs::write") || text.contains("File::create"))
+}
+
+/// Any capability JSON under `src-tauri/` (one directory deep) that grants
+/// `connector:default`, or a build.rs that generates one.
+fn any_capability_grants_connector(root: &Path) -> bool {
+    if build_rs_generates_connector_capability(root) {
+        return true;
+    }
+    let Ok(entries) = fs::read_dir(root.join("src-tauri")) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            return false;
+        };
+        path.is_dir()
+            && !matches!(name, "target" | "gen" | "src" | "icons" | "node_modules")
+            && capability_in_dir(root, name, "connector:default")
+    })
+}
+
+/// lib.rs, main.rs and the other `.rs` files under `src-tauri/src`
+/// (bounded, so a huge tree cannot stall doctor).
+fn read_tauri_sources(root: &Path) -> String {
+    let mut combined = read_plugin_source(root);
+    let src_dir = root.join("src-tauri").join("src");
+    let mut stack = vec![src_dir.clone()];
+    let mut files = 0;
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let already_read = path.parent() == Some(src_dir.as_path())
+                && matches!(
+                    path.file_name().and_then(|n| n.to_str()),
+                    Some("lib.rs" | "main.rs")
+                );
+            if path.extension().is_none_or(|e| e != "rs") || already_read {
+                continue;
+            }
+            files += 1;
+            if files > 500 {
+                return combined;
+            }
+            if let Ok(text) = fs::read_to_string(&path) {
+                combined.push_str(&text);
+                combined.push('\n');
+            }
+        }
+    }
+    combined
 }
 
 /// Directories (relative to `src-tauri/`) named by
@@ -991,6 +1072,13 @@ fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
                 {
                     Check::ok(label_text).with_detail(
                         "tauri.conf.json build.features enables the connector feature for this app",
+                    )
+                }
+                (SetupPattern::FeatureGated, "capabilities")
+                    if build_rs_generates_connector_capability(root) =>
+                {
+                    Check::ok(label_text).with_detail(
+                        "src-tauri/build.rs writes this file only when the connector feature is enabled",
                     )
                 }
                 (SetupPattern::FeatureGated, "capabilities") => Check::warn(
@@ -2083,30 +2171,42 @@ fn check_integration(root: &Path) -> Section {
         )),
     }
 
-    let stale_docs = skills::stale_local_skill_docs();
-    if stale_docs.is_empty() {
-        checks.push(Check::ok(
-            "Local tauri-connector skill docs match the bundled CLI skill",
-        ));
-    } else {
-        let details = stale_docs
-            .iter()
-            .map(|(path, reason)| format!("{} ({reason})", path.display()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        checks.push(
-            Check::warn(
-                "Local tauri-connector skill docs are stale",
-                "refresh each stale file from the CLI-bundled docs listed above:\n  $ tauri-connector skills list\n  $ tauri-connector skills get tauri-connector > <skill-dir>/SKILL.md\n  $ tauri-connector skills get mcp-tools > <skill-dir>/references/mcp-tools.md\n  $ tauri-connector skills path mcp-tools",
-            )
-            .with_detail(details),
-        );
-    }
+    checks.push(check_local_skill_copies(&skills::stale_local_skill_docs()));
 
     Section {
         name: "Integration",
         checks,
     }
+}
+
+fn check_local_skill_copies(stale: &[skills::StaleSkillDir]) -> Check {
+    if stale.is_empty() {
+        return Check::ok("Local tauri-connector skill docs match the bundled CLI skill");
+    }
+    let details = stale
+        .iter()
+        .map(|dir| dir.describe())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if stale.iter().all(|dir| dir.newer_than_cli()) {
+        return Check::warn(
+            format!(
+                "This CLI ({}) is older than the local tauri-connector skill docs",
+                env!("CARGO_PKG_VERSION")
+            ),
+            "upgrade the CLI so it matches the skill: `brew upgrade tauri-connector` or `cargo install connector-cli --locked`",
+        )
+        .with_detail(details);
+    }
+    Check::warn(
+        format!(
+            "{} local tauri-connector skill cop{} differ from this CLI's bundled docs",
+            stale.len(),
+            if stale.len() == 1 { "y" } else { "ies" }
+        ),
+        "refresh each directory listed above from the CLI-bundled docs:\n  $ tauri-connector skills list | while IFS=$'\\t' read -r name file; do tauri-connector skills get \"$name\" > \"<skill-dir>/$file\"; done",
+    )
+    .with_detail(details)
 }
 
 fn settings_has_connector_hook(settings: &Value) -> bool {
@@ -2442,6 +2542,94 @@ fn main() {
             assert_eq!(check.status, Status::Warn, "{}", check.label);
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn runtime_capability_check_accepts_build_rs_generators_and_setup_modules() {
+        let root = std::env::temp_dir().join(format!(
+            "tauri-connector-doctor-runtime-cap-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let tauri = root.join("src-tauri");
+        std::fs::create_dir_all(tauri.join("src").join("setup")).unwrap();
+        std::fs::create_dir_all(tauri.join("capabilities")).unwrap();
+        std::fs::write(tauri.join("src").join("lib.rs"), "mod setup; fn run() {}").unwrap();
+        std::fs::write(tauri.join("tauri.conf.json"), r#"{"app":{}}"#).unwrap();
+        let warn_label = "Runtime app.add_capability";
+
+        // No capability anywhere: the capability check already fails, so
+        // this one stays quiet instead of repeating it.
+        let check = check_runtime_add_capability(&root);
+        assert_eq!(check.status, Status::Ok, "{}", check.label);
+        assert!(check.label.contains("not checked"), "{}", check.label);
+
+        // R2's layout: build.rs writes capabilities/connector.json only
+        // when the feature is on, and removes it otherwise.
+        std::fs::write(
+            tauri.join("build.rs"),
+            r#"fn main() { let cap = std::path::Path::new("capabilities/connector.json");
+if cfg!(feature = "connector") { std::fs::write(cap, r\#"{"permissions":["connector:default"]}"\#).unwrap(); }
+else if cap.exists() { std::fs::remove_file(cap).ok(); } tauri_build::build() }"#,
+        )
+        .unwrap();
+        let check = check_runtime_add_capability(&root);
+        assert_eq!(check.status, Status::Ok, "{}", check.label);
+        assert!(check.label.contains("build.rs"), "{}", check.label);
+        std::fs::write(
+            tauri.join("capabilities").join("connector.json"),
+            r#"{"identifier":"connector","permissions":["connector:default"]}"#,
+        )
+        .unwrap();
+        let caps = check_capabilities(&root, SetupPattern::FeatureGated);
+        assert_eq!(caps.status, Status::Ok, "{}", caps.label);
+        std::fs::remove_file(tauri.join("capabilities").join("connector.json")).unwrap();
+
+        // A capabilities-dev file with no loader still warns.
+        std::fs::write(tauri.join("build.rs"), "fn main() { tauri_build::build() }").unwrap();
+        std::fs::create_dir_all(tauri.join("capabilities-dev")).unwrap();
+        std::fs::write(
+            tauri.join("capabilities-dev").join("dev.json"),
+            r#"{"identifier":"dev","permissions":["connector:default"]}"#,
+        )
+        .unwrap();
+        let check = check_runtime_add_capability(&root);
+        assert_eq!(check.status, Status::Warn, "{}", check.label);
+        assert!(check.label.starts_with(warn_label), "{}", check.label);
+
+        // ...until a setup module (not lib.rs/main.rs) registers it.
+        std::fs::write(
+            tauri.join("src").join("setup").join("dev.rs"),
+            r#"const CAP: &str = include_str!("../../capabilities-dev/dev.json");
+pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
+        )
+        .unwrap();
+        let check = check_runtime_add_capability(&root);
+        assert_eq!(check.status, Status::Ok, "{}", check.label);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn local_skill_copies_warn_once_and_name_the_out_of_date_side() {
+        let copy = |dir: &str, version: &str| skills::StaleSkillDir {
+            dir: PathBuf::from(dir),
+            files: vec!["SKILL.md".into()],
+            version: Some(version.into()),
+        };
+        assert_eq!(check_local_skill_copies(&[]).status, Status::Ok);
+        let older = check_local_skill_copies(&[copy("/h/.codex/skills/tauri-connector", "0.1.0")]);
+        assert_eq!(older.status, Status::Warn);
+        assert!(
+            older
+                .label
+                .starts_with("1 local tauri-connector skill copy differ"),
+            "{}",
+            older.label
+        );
+        let newer =
+            check_local_skill_copies(&[copy("/h/.claude/skills/tauri-connector", "999.0.0")]);
+        assert!(newer.label.contains("CLI"), "{}", newer.label);
+        assert!(newer.fix.unwrap_or_default().contains("upgrade"));
     }
 
     #[test]
