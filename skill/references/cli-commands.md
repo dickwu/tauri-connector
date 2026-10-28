@@ -11,7 +11,10 @@ Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-
 | Variable | Default | Description |
 |---|---|---|
 | `TAURI_CONNECTOR_HOST` | `127.0.0.1` | Plugin WebSocket host |
-| `TAURI_CONNECTOR_PORT` | discovered | Plugin WebSocket port |
+| `TAURI_CONNECTOR_PORT` | discovered | Plugin WebSocket port (the `--port` default). In the **app's** environment (0.17.7+) it is the exact WS port the plugin binds, failing startup when busy |
+| `TAURI_CONNECTOR_MCP_PORT` | | App env (0.17.7+): exact MCP HTTP port; `doctor` also uses it for `.mcp.json` fix lines when no `.connector.json` is found |
+| `TAURI_CONNECTOR_BRIDGE_PORT` | | App env (0.17.7+): exact internal bridge port |
+| `TAURI_CONNECTOR_PORT_RANGE` / `_MCP_PORT_RANGE` / `_BRIDGE_PORT_RANGE` | 9555-9655 / 9556-9656 / 9300-9400 | `START-END` scan ranges (app listeners; the CLI's discovery scan for the WS range). An exact port wins over a range |
 | `TAURI_CONNECTOR_PID_FILE` | | Explicit `.connector.json` path |
 | `TAURI_CONNECTOR_APP_ID` | | Filter discovered instances by app identifier |
 | `TAURI_CONNECTOR_PROJECT` | | Select the instance belonging to this project (CLI `--project`; also read by `tauri-connector-mcp`) |
@@ -172,6 +175,8 @@ tauri-connector get <property> [target] [extra]
 | `box` | `@eN` or CSS | | Bounding box `{x, y, width, height}` |
 | `styles` | `@eN` or CSS | | All computed CSS styles |
 | `count` | CSS selector | | Count of matching elements |
+
+`get title`, `get url`, `get count` and plain properties are sent as read-only (0.17.7+): a timeout or lost reply never quarantines the window. With no webview bridge connected and no answering eval channel the command fails with `bridge_not_connected` (`dispatched: false`, `retryableBeforeDispatch: true`) instead of `outcome_unknown`; open or reload the window and retry.
 
 Examples:
 ```bash
@@ -411,7 +416,7 @@ tauri-connector screenshot [output-path] [FLAGS]
 | `--max-width` | `-m` | | Max width in pixels (maintains aspect ratio) |
 | `--selector` | `-s` | | CSS selector or `@eN` ref for element-scoped capture |
 | `--overwrite` | | false | Allow replacing an existing output path |
-| `--output-dir` | | connector artifact dir | Directory for auto-generated names |
+| `--output-dir` | | connector artifact dir | Directory for auto-generated names (0.17.7: also honoured with `--source`/`--target`/`--bring-to-front`; created when missing) |
 | `--name-hint` | | `full` | Slug included in generated filenames |
 | `--bring-to-front` | | false | Unminimize, show and focus the window before a protected capture (otherwise a hidden window fails with `window_not_visible`) |
 | `--annotate` | | false | Overlay numbered labels for `@eN` refs from the latest `ai` snapshot |
@@ -436,6 +441,8 @@ The command prints the final resolved path and `sha256` as JSON. Annotated scree
 **Hidden windows.** A minimized, fully covered, other-Space or screen-locked window renders no frames, so a protected capture fails with `window_not_visible` naming the remedy instead of returning a blank or stale image. Run `tauri-connector windows focus` (MCP `manage_window(action: "focus")`), or pass `--bring-to-front` (MCP `bringToFront: true`; also on `eval` and `wait`) to let the connector unminimize, show and focus it first. A locked or sleeping screen must be unlocked; the first capture right after `--bring-to-front` can occasionally time out while the window comes up, so retry once.
 
 **Right after a reload.** After a reload or hot reload the capture waits (up to 5 s, within the request timeout) for the new page runtime, then for the viewport to stay unchanged across frames and match the window's logical inner size (up to about 400 ms), so it does not return the old frame or a transient size such as a 1920 px innerWidth. `consistency.viewportSettled: false` means the viewport never settled in that budget (for example a webview that does not fill its window); the capture is still consistent with the probed viewport. If the page reloads during a capture, the plugin and the CLI each retake it (up to 3 attempts, the CLI reconnecting if the reload dropped its connection); when the page keeps changing the error is `page_navigating` (or `capture_context_changed`) with `retryableBeforeDispatch: true`, never `outcome_unknown` / `Connection closed`. A screenshot sent while an `eval` or another tool holds the window waits for it (up to 15 s) instead of failing with `resource_busy`. A background window that does not answer fails fast with `window_not_visible` and is not quarantined.
+
+**0.17.7.** A capture whose document is navigating waits the navigation out (within the request timeout) and, if the page is still navigating at the deadline, fails with `page_navigating` (`retryableBeforeDispatch: true`) instead of `not_dispatched: Target document is navigating`. When another command keeps the window busy past the 15 s queue wait, the error is `resource_busy`, never `capture_timeout` followed by a legacy-renderer fallback. With `--source`/`--target`/`--bring-to-front` the CLI writes the image itself: `--output-dir DIR --name-hint X` saves into `DIR`. An explicit output path that already exists (without `--overwrite`) fails before capture with JSON `{"code":"output_exists","message":...,"stage":"export","path":...}` and a non-zero exit; other write failures use the same shape (`export_failed` / `export_refused`).
 
 **One output shape (0.17.5+).** The default capture and `--source <s>` print the same top-level fields: `path` and `exportedPath` (the written file; both `null` for `--source` without an output path), `sha256`, `width`, `height`, `sizeKb`, `warnings`, and every field of the plugin's capture report: `artifactId` (the protected artifact id), `captureSource`, `sourceSelection`, `storage`, `retainedUntil`, `capturedAt`, `image`, `viewport`, `geometry`, `redaction`, `consistency`, `fallbacks`, `context` and `timings`. The default capture keeps its `artifact` object (CLI manifest row, `artifactId: "shot_..."`). Since 0.17.6 every source also prints `artifact` (`null` for `--source` without an output path), `requestedPath`, `resolvedFromCollision`, `overwrote`, and a top-level `viewportCrop` `{cropped, basis, rectPx, windowPx}`: `basis` is `css_viewport` when the image is exactly the CSS viewport (`webview_native`, `dom_rendering`, a matching `window_native` crop), `client_area` when the window capture was cropped to its client area, `uncropped` for a whole-window image, and `not_reported` only for plugins before 0.17.6. `sourceSelection` is `{requested, order, selected, reason}` and says why the image came from that source: `auto` picked `webview_native` for the reasons above, fell back because earlier sources failed (see `fallbacks`), or the source was requested explicitly (no fallback). Plugins before 0.17.5 do not send `sourceSelection`.
 
@@ -552,9 +559,9 @@ tauri-connector eval <script>
 tauri-connector eval --timeout 120000 "await longTask()"
 ```
 
-The script may be an expression, a statement list whose last expression is printed (`eval "const n = document.querySelectorAll('li').length; n * 2"`), or an async function body with `return`/`await`; expressions are tried first, so existing scripts keep their meaning.
+The script may be an expression, a statement list whose last expression is printed (`eval "const n = document.querySelectorAll('li').length; n * 2"`), or an async function body with `return`/`await`; expressions are tried first, so existing scripts keep their meaning. An async body without `return` (0.17.7+) returns its last top-level expression like devtools: `eval 'await load(); document.title'` prints the title (0.17.6 printed `null`). Under a page CSP that blocks `unsafe-eval` that rewrite is unavailable, so add an explicit `return` there.
 
-`--bring-to-front` (0.17.4+) runs `windows focus` on the target window first, for apps that sit in the background.
+`--bring-to-front` (0.17.4+) runs `windows focus` on the target window first, for apps that sit in the background. A minimized, hidden or covered window that fails with `window_not_visible` names this flag (and `windows focus`) in the message.
 
 `--timeout <ms>` sets the page-side deadline (default 30000, max 600000); the CLI waits 5 s longer so the plugin's typed timeout, with its requestId, always arrives. An empty script is rejected before anything is sent. A read-only promise (no IPC or write observed) still pending at the deadline fails with `execution_timeout` and releases the window. A script that may have dispatched IPC or a write, or a page that never answers, leaves the outcome unknown and quarantines the window until its late result settles it or `resources release` -- see `resources`.
 
@@ -782,6 +789,8 @@ What it verifies:
 - `.mcp.json` registers `tauri-connector`; a legacy SSE entry (`"type": "sse"` or an `/sse` URL) warns with the exact `{ "type": "http", "url": "http://127.0.0.1:<port>/mcp" }` replacement
 - the `.mcp.json` port belongs to this project's app (0.17.5+): fails when the MCP server there reports a different app id than `tauri.conf.json` `identifier`, or when the project's live PID file says this app serves MCP on another port; the Fix gives this app's URL or how to find and pin it with `ConnectorBuilder::mcp_port_range(...)`. The owner comes from the plugin's MCP initialize `_meta["dev.tauri-connector/app"]` (`appId`, `appName`, `pid`, `pluginVersion`; omitted when the host sets a workflow token)
 - `.connector.json` PID file + live WS ping + MCP Streamable HTTP initialize POST
+- fix lines use the ports the app actually bound (0.17.7+): `.mcp.json` snippets name the MCP port from `.connector.json` (else `TAURI_CONNECTOR_MCP_PORT`, else 9556), and the "no webview bridge clients" fix names the bridge port from `.connector.json` or this shell's effective `TAURI_CONNECTOR_BRIDGE_PORT` / `_BRIDGE_PORT_RANGE` (default 9300-9400)
+- the global `--pid-file PATH` (0.17.7+) points doctor at a `.connector.json` outside the usual `src-tauri/target` locations
 - PID liveness, runtime metadata/log_dir, JSONL log files, bridge status, runtime/artifact/debug WS commands
 - MCP Streamable HTTP lifecycle: initialize 200, notification 202 empty body, ping 200, GET /mcp 405, DELETE 204
 - `.claude/` auto-detect hook installation (optional; `Fix:` points at `tauri-connector hook install`)

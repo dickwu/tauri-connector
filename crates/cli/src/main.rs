@@ -28,7 +28,8 @@ struct Cli {
     /// Explicit connector host (overrides discovery)
     #[arg(long, global = true)]
     host: Option<String>,
-    /// Explicit connector WebSocket port (overrides discovery)
+    /// Explicit connector WebSocket port (overrides discovery; default
+    /// TAURI_CONNECTOR_PORT, the exact port an app pinned with that variable)
     #[arg(long, global = true)]
     port: Option<u16>,
     /// Select a discovered app by identifier
@@ -840,6 +841,7 @@ async fn run_cli(cli: Cli) {
         let opts = doctor::Options {
             json: *json,
             no_runtime: *no_runtime,
+            pid_file: cli.pid_file.clone(),
         };
         let json = opts.json;
         if let Err(e) = doctor::run(opts).await {
@@ -1275,19 +1277,21 @@ async fn run_cli(cli: Cli) {
                 if let Some(width) = max_width {
                     args["maxWidth"] = serde_json::json!(width);
                 }
-                if let Some(dir) = output_dir {
-                    args["outputDir"] = serde_json::json!(dir);
-                    args["save"] = serde_json::json!(true);
-                }
-                if let Some(name) = name_hint {
-                    args["nameHint"] = serde_json::json!(name);
-                }
-                match inspection.add_args(&mut args) {
-                    Ok(()) => {
+                // The CLI writes the file: the plugin keeps protected
+                // captures in memory only (0.17.6 dropped --output-dir).
+                let export = inspection::screenshot_export_path(
+                    output.as_deref(),
+                    output_dir.as_deref(),
+                    &format,
+                    name_hint.as_deref(),
+                    resolved.instance.as_ref(),
+                );
+                match export.and_then(|path| inspection.add_args(&mut args).map(|()| path)) {
+                    Ok(path) => {
                         inspection::screenshot(
                             &client,
                             args,
-                            output.as_deref(),
+                            path.as_deref(),
                             overwrite,
                             Some(&resolved),
                         )

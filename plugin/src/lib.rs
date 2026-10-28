@@ -71,19 +71,27 @@ const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1";
 const DEFAULT_PORT_RANGE: (u16, u16) = connector_client::ports::DEFAULT_WS_RANGE;
 const DEFAULT_MCP_PORT_RANGE: (u16, u16) = connector_client::ports::DEFAULT_MCP_RANGE;
 
-/// A listener range after environment overrides: `range_var`, then
-/// `start_var`, then the builder's value. An invalid value is logged and
-/// ignored.
-fn env_port_range(range_var: &str, start_var: &str, configured: (u16, u16)) -> (u16, u16) {
-    let (range, invalid) =
-        connector_client::ports::env_range(range_var, Some(start_var), configured);
+/// One listener's port plan after environment overrides (see
+/// [`connector_client::ports`] for the precedence). An invalid range
+/// variable is logged and skipped; an invalid exact variable is an error.
+fn listener_plan(
+    exact_var: &str,
+    range_var: &str,
+    builder_exact: Option<u16>,
+    builder_range: Option<(u16, u16)>,
+    default: (u16, u16),
+) -> Result<connector_client::ports::PortPlan, String> {
+    let (plan, invalid) = connector_client::ports::env_port(
+        exact_var,
+        range_var,
+        builder_exact,
+        builder_range,
+        default,
+    )?;
     if let Some(error) = invalid {
-        eprintln!(
-            "[connector] ignoring {error}; using {}-{}",
-            range.0, range.1
-        );
+        eprintln!("[connector] ignoring {error}; using {}", plan.describe());
     }
-    range
+    Ok(plan)
 }
 
 // ============ Tauri IPC Commands ============
@@ -303,8 +311,11 @@ async fn push_runtime(app: AppHandle, payload: PushRuntimePayload) -> Result<(),
 /// Plugin builder with configuration options.
 pub struct ConnectorBuilder {
     bind_address: String,
-    port_range: (u16, u16),
-    mcp_port_range: (u16, u16),
+    port: Option<u16>,
+    port_range: Option<(u16, u16)>,
+    mcp_port: Option<u16>,
+    mcp_port_range: Option<(u16, u16)>,
+    bridge_port: Option<u16>,
     mcp_enabled: bool,
     workflow_token: Option<String>,
     capture_preview_commands: Vec<String>,
@@ -333,8 +344,11 @@ impl ConnectorBuilder {
     pub fn new() -> Self {
         Self {
             bind_address: DEFAULT_BIND_ADDRESS.to_string(),
-            port_range: DEFAULT_PORT_RANGE,
-            mcp_port_range: DEFAULT_MCP_PORT_RANGE,
+            port: None,
+            port_range: None,
+            mcp_port: None,
+            mcp_port_range: None,
+            bridge_port: None,
             mcp_enabled: true,
             workflow_token: std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN").ok(),
             capture_preview_commands: capture_setting("TAURI_CONNECTOR_CAPTURE_PREVIEW_COMMANDS"),
@@ -353,11 +367,40 @@ impl ConnectorBuilder {
     }
 
     /// Set the inclusive port range for the WebSocket server. Default: 9555-9655.
-    /// `TAURI_CONNECTOR_PORT_RANGE` (`START-END`) or `TAURI_CONNECTOR_PORT`
-    /// (start port) in the app's environment override it.
+    /// `TAURI_CONNECTOR_PORT` (exact) or `TAURI_CONNECTOR_PORT_RANGE`
+    /// (`START-END`) in the app's environment override it.
     pub fn port_range(self, start: u16, end: u16) -> Self {
         Self {
-            port_range: (start, end),
+            port_range: Some((start, end)),
+            ..self
+        }
+    }
+
+    /// Bind the WebSocket server on exactly `port` (0.17.7): if it is busy
+    /// the connector does not start, with no fallback to a range. Wins over
+    /// `TAURI_CONNECTOR_PORT` and every range.
+    pub fn port(self, port: u16) -> Self {
+        Self {
+            port: Some(port),
+            ..self
+        }
+    }
+
+    /// Bind the embedded MCP server on exactly `port` (0.17.7), like
+    /// [`Self::port`]. Wins over `TAURI_CONNECTOR_MCP_PORT`.
+    pub fn mcp_port(self, port: u16) -> Self {
+        Self {
+            mcp_port: Some(port),
+            ..self
+        }
+    }
+
+    /// Bind the internal webview bridge on exactly `port` (0.17.7). Default
+    /// range 9300-9400; also `TAURI_CONNECTOR_BRIDGE_PORT` (exact) and
+    /// `TAURI_CONNECTOR_BRIDGE_PORT_RANGE`.
+    pub fn bridge_port(self, port: u16) -> Self {
+        Self {
+            bridge_port: Some(port),
             ..self
         }
     }
@@ -375,10 +418,10 @@ impl ConnectorBuilder {
     }
 
     /// Set the inclusive port range for the embedded MCP HTTP server. Default: 9556-9656.
-    /// `TAURI_CONNECTOR_MCP_PORT_RANGE` or `TAURI_CONNECTOR_MCP_PORT` override it.
+    /// `TAURI_CONNECTOR_MCP_PORT` (exact) or `TAURI_CONNECTOR_MCP_PORT_RANGE` override it.
     pub fn mcp_port_range(self, start: u16, end: u16) -> Self {
         Self {
-            mcp_port_range: (start, end),
+            mcp_port_range: Some((start, end)),
             ..self
         }
     }
@@ -414,12 +457,33 @@ impl ConnectorBuilder {
     pub fn build(self) -> TauriPlugin<Wry> {
         let bind_address = self.bind_address;
         use connector_client::ports;
-        let port_range = env_port_range(ports::WS_RANGE_VAR, ports::WS_PORT_VAR, self.port_range);
-        let mcp_port_range = env_port_range(
-            ports::MCP_RANGE_VAR,
-            ports::MCP_PORT_VAR,
-            self.mcp_port_range,
-        );
+        // Resolved once at build; an invalid exact port keeps the connector
+        // off rather than binding a guess.
+        let plans = (|| {
+            Ok::<_, String>((
+                listener_plan(
+                    ports::WS_PORT_VAR,
+                    ports::WS_RANGE_VAR,
+                    self.port,
+                    self.port_range,
+                    DEFAULT_PORT_RANGE,
+                )?,
+                listener_plan(
+                    ports::MCP_PORT_VAR,
+                    ports::MCP_RANGE_VAR,
+                    self.mcp_port,
+                    self.mcp_port_range,
+                    DEFAULT_MCP_PORT_RANGE,
+                )?,
+                listener_plan(
+                    ports::BRIDGE_PORT_VAR,
+                    ports::BRIDGE_RANGE_VAR,
+                    self.bridge_port,
+                    None,
+                    ports::DEFAULT_BRIDGE_RANGE,
+                )?,
+            ))
+        })();
         let mcp_enabled = self.mcp_enabled;
         let workflow_token = self.workflow_token;
         let preview_commands = self.capture_preview_commands;
@@ -511,8 +575,15 @@ impl ConnectorBuilder {
                 let late_arbiter = plugin_state.workflow.resources.clone();
 
                 tauri::async_runtime::spawn(async move {
+                    let (port_plan, mcp_port_plan, bridge_port_plan) = match plans {
+                        Ok(plans) => plans,
+                        Err(e) => {
+                            eprintln!("[connector] Not starting: {e}");
+                            return;
+                        }
+                    };
                     // 1. Start internal bridge (JS <-> plugin via WebSocket)
-                    let bridge = match Bridge::start() {
+                    let bridge = match Bridge::start_on(&bridge_port_plan) {
                         Ok(b) => b,
                         Err(e) => {
                             eprintln!("[connector] Failed to start bridge: {e}");
@@ -557,12 +628,27 @@ impl ConnectorBuilder {
                         Some(handle.clone()),
                     ));
 
-                    // 5. Start embedded MCP HTTP server (if enabled)
+                    // 5. Bind the external WebSocket server first, so a busy
+                    // exact port stops startup before anything else listens.
+                    let server = match Server::new(
+                        &bind_address,
+                        &port_plan,
+                        bridge.clone(),
+                        plugin_state.clone(),
+                    ) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("[connector] Failed to create WS server: {e}");
+                            return;
+                        }
+                    };
+
+                    // 5a. Start embedded MCP HTTP server (if enabled)
                     let mut mcp_port_actual: Option<u16> = None;
                     if mcp_enabled {
                         match mcp::start(
                             &bind_address,
-                            mcp_port_range,
+                            &mcp_port_plan,
                             bridge.clone(),
                             plugin_state.clone(),
                             app_handle.clone(),
@@ -579,21 +665,19 @@ impl ConnectorBuilder {
                                     port,
                                 );
                             }
+                            Err(e) if mcp_port_plan.exact.is_some() => {
+                                // An exact port is a contract: stop rather
+                                // than run without the MCP the user pinned.
+                                eprintln!("[connector][mcp] Not starting: {e}");
+                                return;
+                            }
                             Err(e) => {
                                 eprintln!("[connector][mcp] Failed to start MCP server: {e}");
                             }
                         }
                     }
 
-                    // 6. Start external WebSocket server (for CLI)
-                    let server =
-                        match Server::new(&bind_address, port_range, bridge, plugin_state) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                eprintln!("[connector] Failed to create WS server: {e}");
-                                return;
-                            }
-                        };
+                    // 6. External WebSocket server (for CLI): bound before MCP.
 
                     let ws_port = server.port();
                     let config = handle.config();

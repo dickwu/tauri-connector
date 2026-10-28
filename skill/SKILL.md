@@ -1,6 +1,6 @@
 ---
 name: tauri-connector
-version: 0.17.6
+version: 0.17.7
 description: "Deep inspection, interaction, debugging, and code review for Tauri v2 desktop apps. Use this skill whenever: working with a Tauri app's UI (clicking, filling forms, reading DOM, screenshots, dragging elements); debugging console logs, IPC calls, or Tauri events; reviewing component trees, accessibility, or visual regressions; testing user flows or validating IPC contracts; setting up tauri-connector in a new project. Also triggers on: DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, Tauri app testing, visual regression, admin/ front/ or tool/ desktop apps, @eN ref syntax, or any mention of tauri-connector CLI or MCP tools. This is Claude's bridge to any running Tauri v2 desktop app -- if a Tauri app is involved, use this skill."
 allowed-tools:
   - Bash
@@ -576,7 +576,7 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | `tauri build` still compiles the plugin / pulls xcap, aws-sdk-s3 | Plugin is gated on `cfg(debug_assertions)` (legacy). Migrate to `cfg(feature = "dev-connector")` with `optional = true` so the dep is skipped entirely when the feature is off. Doctor's legacy nudge has the full migration checklist. |
 | Connection refused | App not running or plugin not loaded. Check: `lsof -i :9555 \| grep LISTEN` |
 | Stale PID file | Verify its PID and executable are no longer live. Use the new launch's actual PID path/ports; remove only a stale record you own, especially when target directories are shared |
-| Port conflict | Use `ConnectorBuilder::new().port_range(9600, 9700)` (inclusive; the plugin ignores `TAURI_CONNECTOR_PORT`). Then point clients at the new port with `TAURI_CONNECTOR_PORT` or `--port` if discovery does not find it |
+| Port conflict / need a fixed port | 0.17.7: set `TAURI_CONNECTOR_PORT` (WS) / `TAURI_CONNECTOR_MCP_PORT` / `TAURI_CONNECTOR_BRIDGE_PORT` in the app's env, or `ConnectorBuilder::new().port(9600)` / `.mcp_port(..)`, to bind exactly that port; a busy exact port fails the connector's startup with a logged error, never a fallback. Use `*_PORT_RANGE` env vars or `.port_range(9600, 9700)` to scan a range instead. Precedence: builder exact > env exact > env range > builder range > default. The same `TAURI_CONNECTOR_PORT` in the client's env is the CLI's `--port` default |
 | Refs not found | DOM changed since snapshot. Re-run snapshot for fresh refs |
 | Acting on the wrong window | Pass `windowId` (MCP) / `--window-id` (CLI). Default is `main`; each window has independent DOM and refs |
 | Bridge not connected | Eval+event fallback is permitted only before dispatch, within the remaining deadline. Persistent slowness: check `tauri-connector bridge` and `withGlobalTauri: true` |

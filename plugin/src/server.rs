@@ -43,13 +43,13 @@ fn parse_request(text: &str) -> Result<Request, Box<Response>> {
 impl Server {
     pub fn new(
         bind_address: &str,
-        port_range: (u16, u16),
+        port_plan: &connector_client::ports::PortPlan,
         bridge: Bridge,
         state: PluginState,
     ) -> Result<Self, String> {
         // Bind now and hold the socket until `run`, so the advertised port
         // cannot be taken by another process in between.
-        let (listener, port) = crate::net::bind_in_range(bind_address, port_range.0, port_range.1)?;
+        let (listener, port) = crate::net::bind_plan(bind_address, port_plan)?;
 
         Ok(Self {
             port,
@@ -266,7 +266,8 @@ async fn handle_command_unleased(
             script,
             window_id,
             timeout_ms,
-        } => handlers::execute_js(&id, &script, &window_id, timeout_ms, bridge).await,
+            read_only,
+        } => handlers::execute_js(&id, &script, &window_id, timeout_ms, read_only, bridge).await,
         Command::Resources {
             action,
             request_id,

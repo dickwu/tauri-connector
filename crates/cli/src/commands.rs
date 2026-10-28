@@ -31,6 +31,23 @@ fn execute_js_command(script: &str, page_timeout_ms: u64) -> Value {
     command
 }
 
+/// `exec_js` for a connector-built script that only reads (`get ...`): an
+/// unknown outcome (no bridge yet, page reloading) quarantines nothing.
+async fn exec_read_js(
+    client: &ConnectorClient,
+    script: &str,
+    page_timeout_ms: u64,
+) -> Result<Value, String> {
+    let mut command = execute_js_command(script, page_timeout_ms);
+    command["read_only"] = json!(true);
+    client
+        .send_with_timeout(
+            command,
+            connector_client::eval_client_timeout_ms(Some(page_timeout_ms)),
+        )
+        .await
+}
+
 /// Execute JS in the webview via the connector. `page_timeout_ms` is the
 /// plugin's deadline; the client waits a little longer so the plugin's typed
 /// timeout (with its requestId) arrives instead of a bare client timeout.
@@ -588,12 +605,12 @@ pub async fn get_prop(
 ) -> Result<(), String> {
     match prop {
         "title" => {
-            let result = exec_js(client, "document.title", 30_000).await?;
+            let result = exec_read_js(client, "document.title", 30_000).await?;
             println!("{}", result.as_str().unwrap_or(&result.to_string()));
             return Ok(());
         }
         "url" => {
-            let result = exec_js(client, "location.href", 30_000).await?;
+            let result = exec_read_js(client, "location.href", 30_000).await?;
             println!("{}", result.as_str().unwrap_or(&result.to_string()));
             return Ok(());
         }
@@ -602,7 +619,7 @@ pub async fn get_prop(
                 return Err("Usage: get count <selector>".to_string());
             };
             let selector = js_string(t);
-            let result = exec_js(
+            let result = exec_read_js(
                 client,
                 &format!("document.querySelectorAll({selector}).length"),
                 30_000,
@@ -634,7 +651,7 @@ pub async fn get_prop(
     };
 
     let script = build_resolve_and_act_script(t, refs, &action_js);
-    let result = exec_js(client, &script, 30_000).await?;
+    let result = exec_read_js(client, &script, 30_000).await?;
 
     match &result {
         Value::String(s) => println!("{s}"),
@@ -1096,6 +1113,8 @@ fn screenshot_retry(error: &str) -> Option<ScreenshotRetry> {
         "capture_context_changed" | "page_navigating" | "page_not_ready" => {
             Some(ScreenshotRetry::Page)
         }
+        // A 0.17.6 plugin refuses a navigating document at once.
+        "not_dispatched" if error.contains("document is navigating") => Some(ScreenshotRetry::Page),
         "outcome_unknown"
             if error.contains("Connection closed") || error.contains("Disconnected") =>
         {
@@ -1185,8 +1204,10 @@ fn default_capture_fallback(error: &str) -> Option<String> {
     }
 }
 
-const NO_LEGACY_FALLBACK: [&str; 8] = [
+const NO_LEGACY_FALLBACK: [&str; 10] = [
     "window_not_visible",
+    "bridge_not_connected",
+    "document is navigating",
     "capture_context_changed",
     "page_navigating",
     "page_not_ready",
@@ -1451,7 +1472,7 @@ struct ArtifactWrite {
     overwrote: bool,
 }
 
-fn resolve_screenshot_path(
+pub(crate) fn resolve_screenshot_path(
     output: Option<&str>,
     output_dir: Option<&Path>,
     format: &str,
@@ -2627,6 +2648,16 @@ mod tests {
             ),
             (r#"{"code":"resource_busy","message":"held"}"#, None),
             ("outcome_unknown: deadline", None),
+            // 0.17.7: no bridge client, or a 0.17.6 plugin refusing a
+            // navigating document, must not run the legacy page script.
+            (
+                r#"{"code":"bridge_not_connected","message":"no bridge"}"#,
+                None,
+            ),
+            (
+                r#"{"code":"not_dispatched","message":"not_dispatched: Target document is navigating"}"#,
+                None,
+            ),
         ] {
             assert_eq!(
                 super::default_capture_fallback(error).as_deref(),
@@ -2791,6 +2822,10 @@ mod tests {
         assert_eq!(settle_screenshot_error(changed.into(), 3), changed);
         let hidden = r#"{"code":"window_not_visible","message":"hidden"}"#;
         assert_eq!(screenshot_retry(hidden), None);
+        let navigating = r#"{"code":"not_dispatched","message":"not_dispatched: Target document is navigating"}"#;
+        assert_eq!(screenshot_retry(navigating), Some(ScreenshotRetry::Page));
+        assert!(settle_screenshot_error(navigating.into(), 3)
+            .contains("\"retryableBeforeDispatch\":true"));
         assert_eq!(
             screenshot_retry("outcome_unknown: Request timeout (requestId: r)"),
             None

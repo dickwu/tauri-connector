@@ -162,20 +162,46 @@ pub async fn handle(
         })
         .transpose()?
         .unwrap_or(10000);
+    let window = args
+        .get("windowId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("main")
+        .to_string();
+    // Restore durable quarantines when present without requiring a new
+    // Windows journal solely for protected in-memory evidence.
+    state.workflow.recover_before_inspection().await?;
+    // A concurrent eval or capture holds the window; queue behind it before
+    // the capture deadline starts, so a long eval ends as `resource_busy`
+    // (retry later) rather than a capture timeout and a legacy fallback.
+    let _lease = state
+        .workflow
+        .resources
+        .acquire_within(
+            crate::workflow::resources::tool_resources("webview_screenshot", args),
+            crate::workflow::resources::LEASE_QUEUE_WAIT,
+        )
+        .await?;
     // A capture is read-only, so a page that changed or reloaded under it
-    // is captured again (bounded) rather than reported (R2: a dialog opening
-    // during the first shot; Inter: a reload closing the runtime channel).
-    let last = Mutex::new(None::<Value>);
+    // is captured again rather than reported (R2: a dialog opening during
+    // the first shot; Inter: a reload closing the runtime channel). A page
+    // that is navigating is waited out until the deadline.
+    let last = Mutex::new(None::<(Value, u32)>);
     let attempts = async {
         let mut attempt = 1;
         loop {
             match handle_inner(args, bridge, app, state).await {
-                Err(error) if attempt < CAPTURE_ATTEMPTS && transient_capture_error(&error) => {
-                    *last.lock().unwrap() = Some(error);
-                    attempt += 1;
-                    tokio::time::sleep(CAPTURE_RETRY_DELAY).await;
-                }
-                Err(error) => return Err(settle_capture_error(error, attempt)),
+                Err(error) => match retry_after(&error, attempt) {
+                    Some(retry) => {
+                        *last.lock().unwrap() = Some((error, attempt));
+                        attempt += 1;
+                        if retry == Retry::Navigation {
+                            wait_navigation_settled(&window).await;
+                        }
+                        tokio::time::sleep(CAPTURE_RETRY_DELAY).await;
+                    }
+                    None => return Err(settle_capture_error(error, attempt)),
+                },
                 ok => return ok,
             }
         }
@@ -183,13 +209,49 @@ pub async fn handle(
     match tokio::time::timeout(Duration::from_millis(timeout), attempts).await {
         Ok(result) => result,
         Err(_) => Err(match last.lock().unwrap().take() {
-            Some(error) => settle_capture_error(error, CAPTURE_ATTEMPTS),
+            Some((error, attempts)) => settle_capture_error(error, attempts),
             None => error(
                 "capture_timeout",
                 "Capture deadline expired; late native results are discarded",
             ),
         }),
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Retry {
+    /// The page changed under the capture: retry a bounded number of times.
+    Changed,
+    /// The page is navigating: wait for it and retry until the deadline.
+    Navigation,
+}
+
+fn retry_after(error: &Value, attempt: u32) -> Option<Retry> {
+    if navigating_capture_error(error) {
+        Some(Retry::Navigation)
+    } else if attempt < CAPTURE_ATTEMPTS && transient_capture_error(error) {
+        Some(Retry::Changed)
+    } else {
+        None
+    }
+}
+
+/// Polls the window's load state (bounded) after a navigation refusal.
+async fn wait_navigation_settled(window: &str) {
+    let until = Instant::now() + Duration::from_secs(2);
+    while crate::identity::page_loading(window) && Instant::now() < until {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// The capture was refused because the target document is navigating
+/// (nothing ran), whatever stage reported it.
+fn navigating_capture_error(error: &Value) -> bool {
+    let code = error["code"].as_str().unwrap_or_default();
+    let message = error["message"].as_str().unwrap_or_default();
+    code == "page_navigating"
+        || message.contains("page_navigating")
+        || message.contains("document is navigating")
 }
 
 /// Captures per request when the page changes or navigates under one.
@@ -202,10 +264,8 @@ const CAPTURE_RETRY_DELAY: Duration = Duration::from_millis(250);
 fn transient_capture_error(error: &Value) -> bool {
     let code = error["code"].as_str().unwrap_or_default();
     let message = error["message"].as_str().unwrap_or_default();
-    matches!(
-        code,
-        "capture_context_changed" | "page_navigating" | "outcome_unknown"
-    ) || message.contains("page_navigating")
+    navigating_capture_error(error)
+        || matches!(code, "capture_context_changed" | "outcome_unknown")
         || message.to_ascii_lowercase().contains("channel closed")
         || message.contains("Connection closed")
         || message.contains("runtime context changed")
@@ -358,19 +418,7 @@ async fn handle_inner(
             "Native application handle is unavailable",
         )
     })?;
-    // Restore durable quarantines when present without requiring a new
-    // Windows journal solely for protected in-memory evidence.
-    state.workflow.recover_before_inspection().await?;
-    // A concurrent eval or capture holds the window briefly; queue behind
-    // it (bounded by this request's own deadline) instead of failing.
-    let _lease = state
-        .workflow
-        .resources
-        .acquire_within(
-            crate::workflow::resources::tool_resources("webview_screenshot", args),
-            crate::workflow::resources::LEASE_QUEUE_WAIT,
-        )
-        .await?;
+    // The caller (`handle`) already holds the window lease.
     if args.get("bringToFront") == Some(&json!(true)) {
         bring_to_front(app, window)
             .await
@@ -671,6 +719,25 @@ mod retry_tests {
     use serde_json::json;
 
     #[test]
+    fn a_navigating_document_is_waited_out_then_page_navigating() {
+        // 0.17.6: webview_native failed at once with not_dispatched
+        // "Target document is navigating".
+        let refused = json!({"code":"not_dispatched","message":"not_dispatched: Target document is navigating (requestId: r)","stage":"screenshot"});
+        // Retried past the changed-page cap: only the deadline stops it.
+        assert_eq!(
+            super::retry_after(&refused, super::CAPTURE_ATTEMPTS + 5),
+            Some(super::Retry::Navigation)
+        );
+        let settled = super::settle_capture_error(refused, 9);
+        assert_eq!(settled["code"], "page_navigating");
+        assert_eq!(settled["retryableBeforeDispatch"], true);
+        assert_eq!(settled["attempts"], 9);
+        let changed = json!({"code":"capture_context_changed","message":"changed"});
+        assert_eq!(super::retry_after(&changed, 1), Some(super::Retry::Changed));
+        assert_eq!(super::retry_after(&changed, super::CAPTURE_ATTEMPTS), None);
+    }
+
+    #[test]
     fn navigation_during_capture_is_retryable_never_outcome_unknown() {
         // Inter: a screenshot during reload said outcome_unknown.
         let closed = json!({"code":"outcome_unknown","message":"outcome_unknown: Bridge response channel closed (requestId: r); remote execution may continue","stage":"screenshot"});
@@ -686,6 +753,7 @@ mod retry_tests {
             "capture_context_changed"
         );
         let hidden = json!({"code":"window_not_visible","message":"hidden"});
+        assert_eq!(super::retry_after(&hidden, 1), None);
         assert!(!super::transient_capture_error(&hidden));
         assert_eq!(super::settle_capture_error(hidden.clone(), 1), hidden);
     }

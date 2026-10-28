@@ -78,7 +78,8 @@ pub fn tool_definitions() -> serde_json::Value {
                 json!({ "type": "object", "properties": {
                     "script": { "type": "string", "minLength": 1 },
                     "windowId": { "type": "string" },
-                    "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 600000, "default": 30000, "description": "Page-side deadline in milliseconds" }
+                    "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 600000, "default": 30000, "description": "Page-side deadline in milliseconds" },
+                    "readOnly": { "type": "boolean", "default": false, "description": "Assert the script only reads (no writes, IPC or mutating requests): a timeout or lost reply then quarantines nothing" }
                 }, "required": ["script"] })
             ),
             tool_def("resources",

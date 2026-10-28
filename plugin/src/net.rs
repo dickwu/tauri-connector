@@ -34,9 +34,44 @@ pub(crate) fn bind_in_range(
     })
 }
 
+/// Bind a listener's [`PortPlan`]: the first free port of a range, or
+/// exactly the configured port (a busy exact port is an error, never a
+/// fallback).
+pub(crate) fn bind_plan(
+    addr: &str,
+    plan: &connector_client::ports::PortPlan,
+) -> Result<(TcpListener, u16), String> {
+    bind_in_range(addr, plan.start, plan.end).map_err(|error| plan.bind_error(&error))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::bind_in_range;
+    use super::{bind_in_range, bind_plan};
+
+    #[test]
+    fn a_busy_exact_port_fails_without_falling_back() {
+        use connector_client::ports::{self, WS_PORT_VAR};
+        let (held, port) = bind_in_range("127.0.0.1", 0, 0).unwrap();
+        let text = port.to_string();
+        let (plan, _) = ports::resolve_port(
+            |name| (name == WS_PORT_VAR).then(|| text.clone()),
+            WS_PORT_VAR,
+            ports::WS_RANGE_VAR,
+            None,
+            None,
+            ports::DEFAULT_WS_RANGE,
+        )
+        .unwrap();
+        let error = bind_plan("127.0.0.1", &plan).unwrap_err();
+        assert!(
+            error.contains(WS_PORT_VAR) && error.contains("never falls back"),
+            "{error}"
+        );
+        drop(held);
+        // Once free, exactly that port is bound.
+        let (_listener, bound) = bind_plan("127.0.0.1", &plan).unwrap();
+        assert_eq!(bound, port);
+    }
 
     #[test]
     fn range_end_is_inclusive_and_listener_is_held() {

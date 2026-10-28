@@ -341,6 +341,9 @@ async fn handle_execute_js(client: &ConnectorClient, args: &Value) -> Result<Val
     if let Some(timeout_ms) = timeout_ms {
         command["timeout_ms"] = json!(timeout_ms);
     }
+    if args.get("readOnly").and_then(Value::as_bool) == Some(true) {
+        command["read_only"] = json!(true);
+    }
     client
         .send_with_timeout(
             command,

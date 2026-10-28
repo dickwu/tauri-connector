@@ -10,7 +10,8 @@ const LATE_HISTORY: usize = 32;
 /// How long a request waits for a conflicting, unquarantined lease to be
 /// released before it reports `resource_busy` (Inter: a screenshot and an
 /// eval sent together). A quarantine is never waited on.
-pub const LEASE_QUEUE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+pub const LEASE_QUEUE_WAIT: std::time::Duration =
+    std::time::Duration::from_millis(connector_client::LEASE_QUEUE_WAIT_MS);
 
 #[derive(Clone, Default)]
 pub struct ResourceArbiter {

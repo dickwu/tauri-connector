@@ -211,6 +211,8 @@ pub struct Bridge {
     native_sink: Arc<StdMutex<Option<mpsc::UnboundedSender<String>>>>,
     /// Test seam: overrides the native "window is in the background" check.
     background_override: Arc<StdMutex<Option<bool>>>,
+    /// Test seam: overrides whether the eval fallback channel answers a probe.
+    eval_probe_override: Arc<StdMutex<Option<bool>>>,
     /// When a script that starts a navigation (reload, `location` change,
     /// form submit) was last sent to each window.
     nav_requested: Arc<StdMutex<HashMap<String, Instant>>>,
@@ -230,19 +232,22 @@ impl Bridge {
     /// The listener is bound before returning, so a bind failure is reported
     /// to the caller instead of leaving a handle to a bridge nobody serves.
     /// Must be called from within a Tokio runtime.
+    #[cfg(test)]
     pub fn start() -> Result<Self, String> {
-        // Inclusive port range for the internal bridge listener; default
-        // 9300-9400, `TAURI_CONNECTOR_BRIDGE_PORT_RANGE` overrides it.
-        use connector_client::ports;
-        let (range, invalid) =
-            ports::env_range(ports::BRIDGE_RANGE_VAR, None, ports::DEFAULT_BRIDGE_RANGE);
-        if let Some(error) = invalid {
-            eprintln!(
-                "[connector] ignoring {error}; using {}-{}",
-                range.0, range.1
-            );
-        }
-        let (std_listener, port) = crate::net::bind_in_range("127.0.0.1", range.0, range.1)?;
+        let (plan, _) = connector_client::ports::env_port(
+            connector_client::ports::BRIDGE_PORT_VAR,
+            connector_client::ports::BRIDGE_RANGE_VAR,
+            None,
+            None,
+            connector_client::ports::DEFAULT_BRIDGE_RANGE,
+        )?;
+        Self::start_on(&plan)
+    }
+
+    /// [`Self::start`] on a resolved port plan (default 9300-9400;
+    /// `TAURI_CONNECTOR_BRIDGE_PORT` exact, `..._BRIDGE_PORT_RANGE` range).
+    pub fn start_on(plan: &connector_client::ports::PortPlan) -> Result<Self, String> {
+        let (std_listener, port) = crate::net::bind_plan("127.0.0.1", plan)?;
         let listener = TokioTcpListener::from_std(std_listener)
             .map_err(|e| format!("Failed to register bridge listener: {e}"))?;
 
@@ -259,6 +264,7 @@ impl Bridge {
             late_hook: Arc::new(StdMutex::new(None)),
             native_sink: Arc::new(StdMutex::new(None)),
             background_override: Arc::new(StdMutex::new(None)),
+            eval_probe_override: Arc::new(StdMutex::new(None)),
             nav_requested: Arc::new(StdMutex::new(HashMap::new())),
         };
 
@@ -354,6 +360,19 @@ impl Bridge {
         timeout_ms: u64,
         window_id: &str,
     ) -> Result<serde_json::Value, String> {
+        self.execute_js_for_legacy_window(script, timeout_ms, window_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// [`Self::execute_js_for_window`] keeping the typed error, so a legacy
+    /// read can report a refusal before dispatch as such.
+    pub async fn execute_js_for_legacy_window(
+        &self,
+        script: &str,
+        timeout_ms: u64,
+        window_id: &str,
+    ) -> Result<serde_json::Value, BridgeError> {
         // Preserve the historical single-window default only at this legacy
         // boundary. Typed workflow calls always require the requested label.
         let legacy_window = {
@@ -370,7 +389,6 @@ impl Bridge {
             legacy_window.as_deref().unwrap_or(window_id),
         )
         .await
-        .map_err(|error| error.to_string())
     }
 
     pub async fn execute_js_for_window_typed(
@@ -455,7 +473,7 @@ impl Bridge {
             return Err(request.not_dispatched(if navigating {
                 "page_navigating: the page did not answer a liveness probe right after a navigation started (reload, location change or form submit), so the script was not sent; retry once the new page has loaded"
             } else {
-                "window_not_visible: the page did not answer a liveness probe while its window is in the background, so the script was not sent. Run `tauri-connector windows focus` (MCP manage_window action=focus) and retry; if the window is visible, the page's main thread may be blocked"
+                "window_not_visible: the page did not answer a liveness probe while its window is in the background (minimized, hidden or covered by another window), so the script was not sent. Rerun with --bring-to-front (eval, wait, screenshot) or run `tauri-connector windows focus` (MCP manage_window action=focus) first, then retry; if the window is visible, the page's main thread may be blocked"
             }));
         }
         if starts_navigation {
@@ -475,6 +493,7 @@ impl Bridge {
                 match reason {
                     "page_navigating" => "navigating away",
                     "page_loading" => "still loading",
+                    "bridge_not_connected" => "not connected to the connector bridge (no bridge client, and the eval fallback did not answer a probe; the dev server may still be compiling or the page reloading)",
                     _ => "missing the connector bridge",
                 }
             ))
@@ -493,7 +512,20 @@ impl Bridge {
                     Err(BridgeError::NotDispatched { .. }) => {
                         // The same ID and absolute deadline cover both transports.
                         request.ensure_budget()?;
-                        self.execute_js_via_eval(&script, window_id, &request).await
+                        // R2 (0.17.7): with no bridge client (first compile,
+                        // mid-reload) the eval fallback could swallow the
+                        // script and leave an unknown outcome that
+                        // quarantined backend and UI. Prove the fallback
+                        // channel answers before sending the real script.
+                        if self.eval_channel_answers(window_id, &request).await {
+                            self.execute_js_via_eval(&script, window_id, &request).await
+                        } else {
+                            Err(BridgeError::ExecutionFailed {
+                                request_id: request.id.to_string(),
+                                error: format!("{NOT_RUN}: bridge_not_connected"),
+                                effect: connector_client::outcome::EffectStatus::None,
+                            })
+                        }
                     }
                     result => result,
                 };
@@ -608,6 +640,39 @@ impl Bridge {
             .unwrap()
             .get(window_id)
             .is_some_and(|at| at.elapsed() < Duration::from_millis(NAV_REQUEST_WINDOW_MS))
+    }
+
+    /// Whether the eval fallback channel answers a side-effect-free probe.
+    /// With no app handle the fallback refuses before dispatch on its own,
+    /// so that case counts as answering.
+    async fn eval_channel_answers(&self, window_id: &str, request: &DispatchRequest<'_>) -> bool {
+        if let Some(forced) = *self.eval_probe_override.lock().unwrap() {
+            return forced;
+        }
+        // Never wait on the app handle: a holder may be spending this
+        // request's deadline, which the real attempt then reports.
+        if !self.app_handle.try_lock().is_ok_and(|app| app.is_some()) {
+            return true;
+        }
+        let id = format!("{}:eval-liveness", request.id);
+        let probe = DispatchRequest {
+            id: &id,
+            deadline: std::cmp::min(request.deadline, Instant::now() + BACKGROUND_PROBE),
+            authorize: None,
+        };
+        let script = PageScript::trusted("/*__CONNECTOR_LIVENESS__*/1");
+        match self.execute_js_via_eval(&script, window_id, &probe).await {
+            Ok(_) | Err(BridgeError::ExecutionFailed { .. }) => true,
+            // Refused before injection (no window, no handle): let the real
+            // attempt report its own refusal.
+            Err(BridgeError::NotDispatched { .. }) => true,
+            Err(BridgeError::DispatchedOutcomeUnknown { .. }) => false,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn force_eval_probe(&self, answers: Option<bool>) {
+        *self.eval_probe_override.lock().unwrap() = answers;
     }
 
     #[cfg(test)]
@@ -2963,6 +3028,7 @@ pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<Str
         late_hook: Arc::new(StdMutex::new(None)),
         native_sink: Arc::new(StdMutex::new(None)),
         background_override: Arc::new(StdMutex::new(None)),
+        eval_probe_override: Arc::new(StdMutex::new(None)),
         nav_requested: Arc::new(StdMutex::new(HashMap::new())),
     };
     bridge.clients.lock().await.insert(
@@ -4548,7 +4614,10 @@ process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].m
         let _probe = rx.recv().await.unwrap();
         match task.await.unwrap() {
             Err(BridgeError::NotDispatched { reason, .. }) => {
-                assert!(reason.starts_with("window_not_visible"), "{reason}")
+                assert!(
+                    reason.starts_with("window_not_visible") && reason.contains("--bring-to-front"),
+                    "{reason}"
+                )
             }
             other => panic!("expected window_not_visible, got {other:?}"),
         }
@@ -4773,6 +4842,31 @@ process.stdout.write(JSON.stringify({ messages: logs.map(e => e.message), levels
         assert!(rx.try_recv().is_err(), "no string command over the socket");
         super::test_page_message(&bridge, json!({"id": "native-id", "result": 2})).await;
         assert_eq!(task.await.unwrap().unwrap(), json!(2));
+    }
+
+    #[tokio::test]
+    async fn no_bridge_client_and_a_silent_eval_channel_is_not_dispatched() {
+        // R2 0.17.7: `get url` with 0 bridge clients used to end
+        // outcome_unknown and quarantine backend + UI.
+        let (bridge, _rx) = queued_bridge().await;
+        bridge.clients.lock().await.clear();
+        bridge.force_eval_probe(Some(false));
+        let started = Instant::now();
+        let error = bridge
+            .execute_js_for_window_with_request_id("location.href", 400, "main", "no-client")
+            .await
+            .unwrap_err();
+        assert!(
+            started.elapsed() >= Duration::from_millis(300),
+            "waits for a client"
+        );
+        match &error {
+            BridgeError::NotDispatched { reason, .. } => {
+                assert!(reason.starts_with("bridge_not_connected"), "{reason}")
+            }
+            other => panic!("expected not_dispatched, got {other:?}"),
+        }
+        assert!(!error.is_dispatched());
     }
 
     #[tokio::test]

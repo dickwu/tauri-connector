@@ -36,6 +36,14 @@ pub enum Command {
         /// Page-side deadline; defaults to 30 s.
         #[serde(default, alias = "timeoutMs", skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u64>,
+        /// The caller asserts the script only reads (CLI `get title/url/...`):
+        /// an unknown outcome then has no effect and quarantines nothing.
+        #[serde(
+            default,
+            alias = "readOnly",
+            skip_serializing_if = "std::ops::Not::not"
+        )]
+        read_only: bool,
     },
     BridgeStatus,
 

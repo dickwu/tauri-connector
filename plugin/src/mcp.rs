@@ -60,12 +60,12 @@ pub struct McpState {
 /// Returns the port it's listening on.
 pub async fn start(
     bind_address: &str,
-    port_range: (u16, u16),
+    port_plan: &connector_client::ports::PortPlan,
     bridge: Bridge,
     plugin_state: PluginState,
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 ) -> Result<u16, String> {
-    let (std_listener, port) = crate::net::bind_in_range(bind_address, port_range.0, port_range.1)
+    let (std_listener, port) = crate::net::bind_plan(bind_address, port_plan)
         .map_err(|e| format!("MCP bind failed: {e}"))?;
 
     let state = McpState {

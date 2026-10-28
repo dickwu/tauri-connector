@@ -299,5 +299,9 @@ use tauri_plugin_connector::ConnectorBuilder;
     );
 }
 
-The same ranges can come from the app's environment (0.17.6+; env wins over the builder): `TAURI_CONNECTOR_PORT_RANGE=9700-9800` (WS), `TAURI_CONNECTOR_MCP_PORT_RANGE=9701-9801` (MCP), `TAURI_CONNECTOR_BRIDGE_PORT_RANGE=9400-9500` (internal bridge), or `TAURI_CONNECTOR_PORT` / `TAURI_CONNECTOR_MCP_PORT` for just a start port (START..=START+100). Set `TAURI_CONNECTOR_PORT_RANGE` for the CLI too so its port scan covers the same range. Invalid values are logged and ignored.
+**Exact ports (0.17.7).** `TAURI_CONNECTOR_PORT` (WS), `TAURI_CONNECTOR_MCP_PORT` (MCP) and `TAURI_CONNECTOR_BRIDGE_PORT` (internal bridge) in the app's environment, or `ConnectorBuilder::port(..)` / `.mcp_port(..)` / `.bridge_port(..)`, bind exactly that port. A busy exact port is not skipped: the connector logs `port N set by TAURI_CONNECTOR_PORT is unavailable (...); an exact port never falls back to a range` and does not start (the app itself keeps running). An invalid exact value also keeps the connector off. (0.17.6 read these two variables as a start port, START..=START+100.)
+
+**Ranges.** `TAURI_CONNECTOR_PORT_RANGE=9700-9800` (WS), `TAURI_CONNECTOR_MCP_PORT_RANGE=9701-9801` (MCP) and `TAURI_CONNECTOR_BRIDGE_PORT_RANGE=9400-9500` (bridge) take the first free port; an invalid range is logged and ignored.
+
+Precedence per listener: builder exact > env exact > env range > builder `port_range` / `mcp_port_range` > default. `.connector.json` always records the ports actually bound. On the client side the same `TAURI_CONNECTOR_PORT` is the CLI's / standalone MCP server's target port (the `--port` default), and `TAURI_CONNECTOR_PORT_RANGE` its discovery scan range, so one env block serves both the app and its clients.
 ```

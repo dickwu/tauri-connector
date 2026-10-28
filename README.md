@@ -509,7 +509,7 @@ Sections reported:
 Example output for the feature-gated pattern (all green):
 
 ```
-tauri-connector doctor v0.17.6
+tauri-connector doctor v0.17.7
 
 Plugin Setup
   ✓ Cargo dependency: tauri-plugin-connector = "0.17" (optional, feature-gated)
@@ -720,7 +720,7 @@ A Rust CLI with ref-based element addressing is also available:
 brew install dickwu/tap/tauri-connector
 
 # Or install the version-matched CLI from crates.io
-cargo install connector-cli --version 0.17.6 --locked
+cargo install connector-cli --version 0.17.7 --locked
 
 # Or build from source
 cargo build -p connector-cli --release
@@ -831,12 +831,21 @@ use tauri_plugin_connector::ConnectorBuilder;
     );
 }
 
-// Port ranges can also be set from the app's environment (0.17.6+), which
-// wins over the builder: TAURI_CONNECTOR_PORT_RANGE=9700-9800 (WS),
-// TAURI_CONNECTOR_MCP_PORT_RANGE=9701-9801 (MCP), TAURI_CONNECTOR_BRIDGE_PORT_RANGE=9400-9500
-// (internal bridge). TAURI_CONNECTOR_PORT / TAURI_CONNECTOR_MCP_PORT set just the
-// start port (range START..=START+100). The CLI and standalone MCP server read
-// TAURI_CONNECTOR_PORT_RANGE too, so their port scan follows the app.
+// Exact ports (0.17.7): bind exactly this port, and fail to start (logged,
+// no fallback) when it is busy. Builder .port()/.mcp_port()/.bridge_port(),
+// or the app's environment: TAURI_CONNECTOR_PORT (WS),
+// TAURI_CONNECTOR_MCP_PORT (MCP), TAURI_CONNECTOR_BRIDGE_PORT (internal bridge).
+// Ranges from the environment (0.17.6+) still work and win over the builder
+// range: TAURI_CONNECTOR_PORT_RANGE=9700-9800 (WS),
+// TAURI_CONNECTOR_MCP_PORT_RANGE=9701-9801 (MCP), TAURI_CONNECTOR_BRIDGE_PORT_RANGE=9400-9500.
+// Precedence per listener: builder exact > env exact > env range > builder range > default.
+// .connector.json always records the ports actually bound. The CLI and the
+// standalone MCP server read TAURI_CONNECTOR_PORT as their target and
+// TAURI_CONNECTOR_PORT_RANGE as their scan range, so the same env follows the app.
+ConnectorBuilder::new()
+    .port(9555)      // exact WS port (0.17.7)
+    .mcp_port(9556)  // exact MCP port (0.17.7)
+    .build()
 
 // Or disable the embedded MCP server:
 ConnectorBuilder::new()

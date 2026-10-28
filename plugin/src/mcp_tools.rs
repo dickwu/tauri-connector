@@ -85,7 +85,8 @@ pub(crate) async fn dispatch_raw(
             let script = str_arg(args, "script").unwrap_or_default();
             let wid = window_id(args);
             let timeout_ms = num_arg(args, "timeoutMs").map(|n| n as u64);
-            handlers::execute_js(id, &script, &wid, timeout_ms, bridge).await
+            let read_only = args.get("readOnly").and_then(Value::as_bool) == Some(true);
+            handlers::execute_js(id, &script, &wid, timeout_ms, read_only, bridge).await
         }
 
         "resources" => handlers::resources(

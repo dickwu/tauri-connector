@@ -250,31 +250,107 @@ impl ScreenshotOptions {
         Ok(())
     }
 }
+/// A CLI export failure in the same JSON shape as plugin errors, so
+/// `Error: {...}` parses the same way for every screenshot failure.
+fn export_failure(code: &str, path: &str, message: String) -> String {
+    json!({
+        "code": code,
+        "message": message,
+        "stage": "export",
+        "path": path,
+    })
+    .to_string()
+}
+
 fn write_export(path: &str, bytes: &[u8], overwrite: bool) -> Result<(), String> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true);
     if overwrite {
         if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
-            return Err("refusing screenshot export through symlink".into());
+            return Err(export_failure(
+                "export_refused",
+                path,
+                format!("refusing screenshot export through symlink {path}"),
+            ));
         }
         options.create(true).truncate(true);
     } else {
         options.create_new(true);
     }
+    if let Some(parent) = std::path::Path::new(path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            export_failure(
+                "export_failed",
+                path,
+                format!("cannot create {}: {e}", parent.display()),
+            )
+        })?;
+    }
     // Default umask permissions: a screenshot is a debug artifact the user
     // opens in other tools, not a secret (redaction already ran).
     let mut file = options.open(path).map_err(|e| export_error(path, &e))?;
     use std::io::Write;
-    file.write_all(bytes)
-        .map_err(|e| format!("capture succeeded but explicit export failed: {e}"))
+    file.write_all(bytes).map_err(|e| {
+        export_failure(
+            "export_failed",
+            path,
+            format!("capture succeeded but explicit export failed: {e}"),
+        )
+    })
 }
 
 fn export_error(path: &str, error: &std::io::Error) -> String {
     if error.kind() == std::io::ErrorKind::AlreadyExists {
-        format!("capture succeeded but explicit export failed: {path} already exists; pass --overwrite to replace it")
+        output_exists(path)
     } else {
-        format!("capture succeeded but explicit export failed: {error}")
+        export_failure(
+            "export_failed",
+            path,
+            format!("capture succeeded but explicit export failed: {error}"),
+        )
     }
+}
+
+fn output_exists(path: &str) -> String {
+    export_failure(
+        "output_exists",
+        path,
+        format!("{path} already exists; pass --overwrite to replace it"),
+    )
+}
+
+/// Where a source/target screenshot is written: `--output`, else a fresh
+/// name in `--output-dir`, else nowhere (metadata only).
+pub(crate) fn screenshot_export_path(
+    output: Option<&str>,
+    output_dir: Option<&std::path::Path>,
+    format: &str,
+    name_hint: Option<&str>,
+    instance: Option<&connector_client::discovery::ConnectorInstance>,
+) -> Result<Option<String>, String> {
+    let path = match (output, output_dir) {
+        (Some(output), _) => crate::commands::resolve_screenshot_path(
+            Some(output),
+            None,
+            format,
+            name_hint,
+            None,
+            instance,
+        )?,
+        (None, Some(dir)) => crate::commands::resolve_screenshot_path(
+            None,
+            Some(dir),
+            format,
+            name_hint,
+            None,
+            instance,
+        )?,
+        (None, None) => return Ok(None),
+    };
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 pub async fn screenshot(
@@ -284,6 +360,10 @@ pub async fn screenshot(
     overwrite: bool,
     resolved: Option<&connector_client::discovery::ResolvedConnection>,
 ) -> Result<(), String> {
+    // Refuse before capturing: nothing to retake when the file exists.
+    if let Some(path) = output.filter(|path| !overwrite && std::path::Path::new(path).exists()) {
+        return Err(output_exists(path));
+    }
     let mut args = args;
     args["includeImage"] = json!(output.is_some());
     let report = crate::commands::capture_screenshot(client, &args, resolved).await?;
@@ -321,11 +401,47 @@ mod cursor_contract_tests {
     }
 
     #[test]
+    fn an_output_dir_without_a_path_still_names_a_file_there() {
+        // 0.17.6: `screenshot --source ... --output-dir DIR --name-hint X`
+        // with no path saved nothing.
+        let path = screenshot_export_path(
+            None,
+            Some(std::path::Path::new("/tmp/shots")),
+            "png",
+            Some("login"),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(path.starts_with("/tmp/shots/"), "{path}");
+        assert!(path.contains("-login-") && path.ends_with(".png"), "{path}");
+        assert_eq!(
+            screenshot_export_path(
+                Some("/tmp/a.png"),
+                Some(std::path::Path::new("/x")),
+                "png",
+                None,
+                None
+            )
+            .unwrap(),
+            Some("/tmp/a.png".into())
+        );
+        assert_eq!(
+            screenshot_export_path(None, None, "png", None, None).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn an_existing_export_path_names_the_overwrite_flag() {
         let exists = std::io::Error::from(std::io::ErrorKind::AlreadyExists);
         let message = export_error("/tmp/shot.png", &exists);
         assert!(message.contains("/tmp/shot.png already exists"));
         assert!(message.contains("pass --overwrite"));
+        // 0.17.6: a plain-text error, unlike every other screenshot failure.
+        let parsed: Value = serde_json::from_str(&message).unwrap();
+        assert_eq!(parsed["code"], "output_exists");
+        assert_eq!(parsed["stage"], "export");
         let other = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
         assert!(!export_error("/tmp/shot.png", &other).contains("--overwrite"));
     }
@@ -344,6 +460,10 @@ mod cursor_contract_tests {
         assert_ne!(mode, 0o600, "exports follow the umask, not owner-only");
         let refused = write_export(&path, b"png", false).unwrap_err();
         assert!(refused.contains("pass --overwrite"));
+        assert_eq!(
+            serde_json::from_str::<Value>(&refused).unwrap()["code"],
+            "output_exists"
+        );
         write_export(&path, b"png2", true).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"png2");
         let _ = std::fs::remove_dir_all(dir);

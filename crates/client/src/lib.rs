@@ -32,6 +32,18 @@ pub const MAX_EVAL_TIMEOUT_MS: u64 = 600_000;
 /// Margin so the plugin's typed timeout reply arrives before the client gives up.
 pub const EVAL_CLIENT_MARGIN_MS: u64 = 5_000;
 
+/// How long the plugin queues a request behind a conflicting lease before it
+/// replies `resource_busy` (shared so client waits cover the queue).
+pub const LEASE_QUEUE_WAIT_MS: u64 = 15_000;
+
+/// Client wait for a protected `webview_screenshot` with the given capture
+/// deadline: the lease queue, then the capture, then a reply margin, so a
+/// long eval holding the window ends as the plugin's `resource_busy`
+/// instead of a client-side timeout.
+pub fn screenshot_client_timeout_ms(capture_timeout_ms: Option<u64>) -> u64 {
+    LEASE_QUEUE_WAIT_MS + capture_timeout_ms.unwrap_or(10_000).min(30_000) + EVAL_CLIENT_MARGIN_MS
+}
+
 /// Client wait for an `execute_js` with the given page deadline.
 pub fn eval_client_timeout_ms(page_timeout_ms: Option<u64>) -> u64 {
     page_timeout_ms
@@ -249,11 +261,7 @@ impl ConnectorClient {
             .unwrap_or(10000)
             .min(10000);
         let transport_timeout = if operation == "webview_screenshot" {
-            args.get("timeoutMs")
-                .and_then(Value::as_u64)
-                .unwrap_or(10000)
-                .min(30000)
-                + 5000
+            screenshot_client_timeout_ms(args.get("timeoutMs").and_then(Value::as_u64))
         } else {
             wait_ms + 15000
         };
@@ -359,6 +367,11 @@ impl Default for ConnectorClient {
 mod transport_tests {
     #[test]
     fn eval_client_deadline_outlives_the_page_deadline() {
+        // 0.17.6: a screenshot queued behind a 22 s eval timed out on the
+        // client at 15 s (10 s capture + 5 s) before the 15 s lease wait.
+        assert_eq!(super::screenshot_client_timeout_ms(None), 30_000);
+        assert_eq!(super::screenshot_client_timeout_ms(Some(99_000)), 50_000);
+        assert!(super::screenshot_client_timeout_ms(Some(1)) > super::LEASE_QUEUE_WAIT_MS);
         assert_eq!(super::eval_client_timeout_ms(None), 35_000);
         assert_eq!(super::eval_client_timeout_ms(Some(120_000)), 125_000);
         assert_eq!(super::eval_client_timeout_ms(Some(0)), 5_001);

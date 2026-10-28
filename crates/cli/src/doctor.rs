@@ -60,11 +60,46 @@ const SNIPPET_WITH_GLOBAL_TAURI: &str = r#""app": {
   "withGlobalTauri": true
 }"#;
 
-const SNIPPET_MCP_JSON: &str = r#"{
-  "mcpServers": {
-    "tauri-connector": { "url": "http://127.0.0.1:9556/mcp" }
-  }
-}"#;
+/// The `.mcp.json` fix snippet for the MCP port the app actually uses.
+fn mcp_json_snippet(mcp_port: u16) -> String {
+    format!(
+        r#"{{
+  "mcpServers": {{
+    "tauri-connector": {{ "url": "http://127.0.0.1:{mcp_port}/mcp" }}
+  }}
+}}"#
+    )
+}
+
+/// WS/MCP ports to assume when no PID file says otherwise: an exact
+/// `TAURI_CONNECTOR_PORT` / `TAURI_CONNECTOR_MCP_PORT` in this shell, else
+/// the first port of the default range.
+fn fallback_ports() -> (u16, u16) {
+    use connector_client::ports;
+    (
+        ports::env_exact_port(ports::WS_PORT_VAR).unwrap_or(DEFAULT_WS_PORT),
+        ports::env_exact_port(ports::MCP_PORT_VAR).unwrap_or(DEFAULT_MCP_PORT),
+    )
+}
+
+/// The bridge port range in effect for an app started from this shell
+/// (exact `TAURI_CONNECTOR_BRIDGE_PORT`, `..._BRIDGE_PORT_RANGE`, or the
+/// 9300-9400 default), for fix text.
+fn effective_bridge_ports() -> String {
+    use connector_client::ports;
+    ports::env_port(
+        ports::BRIDGE_PORT_VAR,
+        ports::BRIDGE_RANGE_VAR,
+        None,
+        None,
+        ports::DEFAULT_BRIDGE_RANGE,
+    )
+    .map(|(plan, _)| match plan.exact {
+        Some(_) => format!("bridge port {}", plan.describe()),
+        None => format!("{} bridge port range", plan.describe()),
+    })
+    .unwrap_or_else(|error| format!("bridge port ({error})"))
+}
 
 const SNIPPET_DEV_SCRIPT: &str = r#""scripts": {
   "tauri:dev": "tauri dev --features dev-connector"
@@ -159,6 +194,9 @@ pub struct Options {
     pub json: bool,
     /// Skip live WebSocket/MCP probes (offline/CI mode).
     pub no_runtime: bool,
+    /// Global `--pid-file`: read this `.connector.json` instead of searching
+    /// the project's target directories.
+    pub pid_file: Option<PathBuf>,
 }
 
 /// Run the doctor. Returns `Err` when one or more FAIL checks were reported so
@@ -176,15 +214,22 @@ pub async fn run(opts: Options) -> Result<(), String> {
         .map(|r| classify_setup(r))
         .unwrap_or(SetupPattern::None);
 
+    let pid_info = opts
+        .pid_file
+        .clone()
+        .or_else(|| project_root.as_ref().and_then(|r| find_pid_file(r)))
+        .and_then(|p| read_pid_file(&p).map(|info| (p, info)));
+    // Fix text names the MCP port the app actually bound, not 9556.
+    let mcp_port = pid_info
+        .as_ref()
+        .and_then(|(_, info)| info.mcp_port)
+        .unwrap_or_else(|| fallback_ports().1);
+
     if let Some(root) = project_root.as_ref() {
-        sections.push(check_plugin_setup(root, pattern));
+        sections.push(check_plugin_setup(root, pattern, mcp_port));
     }
 
     if !opts.no_runtime {
-        let pid_info = project_root
-            .as_ref()
-            .and_then(|r| find_pid_file(r))
-            .and_then(|p| read_pid_file(&p).map(|info| (p, info)));
         let mcp_json_port = project_root
             .as_ref()
             .and_then(|r| mcp_json_url(r))
@@ -426,14 +471,14 @@ fn classify_setup(root: &Path) -> SetupPattern {
 
 // ----- section: plugin setup -----------------------------------------------
 
-fn check_plugin_setup(root: &Path, pattern: SetupPattern) -> Section {
+fn check_plugin_setup(root: &Path, pattern: SetupPattern, mcp_port: u16) -> Section {
     let mut checks = vec![
         check_cargo_dependency(root),
         check_plugin_registration(root),
         check_capabilities(root, pattern),
         check_with_global_tauri(root),
         check_snapdom(root),
-        check_mcp_json(root),
+        check_mcp_json(root, mcp_port),
     ];
 
     // Feature-gated pattern requires two extra signals beyond the existing
@@ -1350,7 +1395,7 @@ fn package_has_dep(value: &Value, name: &str) -> bool {
 }
 
 /// `.mcp.json` at the project root should register `tauri-connector`.
-fn check_mcp_json(root: &Path) -> Check {
+fn check_mcp_json(root: &Path, mcp_port: u16) -> Check {
     let path = root.join(".mcp.json");
     let display = rel(root, &path);
     let text = match fs::read_to_string(&path) {
@@ -1360,7 +1405,7 @@ fn check_mcp_json(root: &Path) -> Check {
                 ".mcp.json missing (optional: only needed for MCP clients)",
                 format!(
                     "create {display} at the project root:\n{}",
-                    indent_snippet(SNIPPET_MCP_JSON)
+                    indent_snippet(&mcp_json_snippet(mcp_port))
                 ),
             );
         }
@@ -1373,10 +1418,14 @@ fn check_mcp_json(root: &Path) -> Check {
         );
     };
 
-    check_mcp_entry(value.pointer("/mcpServers/tauri-connector"), &display)
+    check_mcp_entry(
+        value.pointer("/mcpServers/tauri-connector"),
+        &display,
+        mcp_port,
+    )
 }
 
-fn check_mcp_entry(entry: Option<&Value>, display: &str) -> Check {
+fn check_mcp_entry(entry: Option<&Value>, display: &str, mcp_port: u16) -> Check {
     match entry {
         Some(Value::Object(obj)) => {
             let url = obj.get("url").and_then(|v| v.as_str()).unwrap_or("");
@@ -1385,17 +1434,17 @@ fn check_mcp_entry(entry: Option<&Value>, display: &str) -> Check {
                 .or_else(|| obj.get("transport"))
                 .and_then(|v| v.as_str());
             if declared.is_some_and(|t| t.eq_ignore_ascii_case("sse")) || url.ends_with("/sse") {
-                return legacy_sse_check(display, url);
+                return legacy_sse_check(display, url, mcp_port);
             }
             if !url.is_empty() {
-                return check_mcp_url(display, url);
+                return check_mcp_url(display, url, mcp_port);
             }
             if obj.get("command").and_then(|v| v.as_str()).is_some() {
                 return Check::warn(
                     ".mcp.json uses standalone command transport",
                     format!(
                         "the embedded plugin now exposes Streamable HTTP directly; prefer this url in {display}:\n{}",
-                        indent_snippet(SNIPPET_MCP_JSON)
+                        indent_snippet(&mcp_json_snippet(mcp_port))
                     ),
                 );
             }
@@ -1403,14 +1452,14 @@ fn check_mcp_entry(entry: Option<&Value>, display: &str) -> Check {
                 ".mcp.json `tauri-connector` entry has no `url` or `command`",
                 format!(
                     "set the embedded MCP Streamable HTTP url in {display}:\n{}",
-                    indent_snippet(SNIPPET_MCP_JSON)
+                    indent_snippet(&mcp_json_snippet(mcp_port))
                 ),
             )
         }
         _ => Check::warn(
             ".mcp.json has no `tauri-connector` entry (optional: only needed for MCP clients)",
             format!(
-                "add a `tauri-connector` entry under `mcpServers` in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/mcp\" }}"
+                "add a `tauri-connector` entry under `mcpServers` in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:{mcp_port}/mcp\" }}"
             ),
         ),
     }
@@ -1418,15 +1467,15 @@ fn check_mcp_entry(entry: Option<&Value>, display: &str) -> Check {
 
 /// `.mcp.json` declares the deprecated HTTP+SSE transport (MCP 2024-11-05),
 /// either with `"type": "sse"` or an `/sse` URL.
-fn legacy_sse_check(display: &str, url: &str) -> Check {
+fn legacy_sse_check(display: &str, url: &str, mcp_port: u16) -> Check {
     let base = url
         .trim_end_matches('/')
         .trim_end_matches("/sse")
         .trim_end_matches("/mcp");
     let base = if base.is_empty() {
-        "http://127.0.0.1:9556"
+        format!("http://127.0.0.1:{mcp_port}")
     } else {
-        base
+        base.to_string()
     };
     Check::warn(
         ".mcp.json uses the legacy SSE transport",
@@ -1436,22 +1485,22 @@ fn legacy_sse_check(display: &str, url: &str) -> Check {
     )
 }
 
-fn check_mcp_url(display: &str, url: &str) -> Check {
+fn check_mcp_url(display: &str, url: &str, mcp_port: u16) -> Check {
     if url.ends_with("/sse") {
-        return legacy_sse_check(display, url);
+        return legacy_sse_check(display, url, mcp_port);
     }
     if !url.ends_with("/mcp") {
         return Check::fail(
             ".mcp.json URL does not target /mcp",
             format!(
-                "set the embedded MCP Streamable HTTP endpoint in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:9556/mcp\" }}"
+                "set the embedded MCP Streamable HTTP endpoint in {display}:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:{mcp_port}/mcp\" }}"
             ),
         );
     }
     if !(url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:")) {
         return Check::warn(
             ".mcp.json URL is not loopback",
-            "use a loopback URL so MCP does not expose local app control outside this machine:\n  \"tauri-connector\": { \"url\": \"http://127.0.0.1:9556/mcp\" }",
+            format!("use a loopback URL so MCP does not expose local app control outside this machine:\n  \"tauri-connector\": {{ \"url\": \"http://127.0.0.1:{mcp_port}/mcp\" }}"),
         );
     }
     Check::ok(format!(".mcp.json registers tauri-connector ({url})")).with_detail(display)
@@ -1567,7 +1616,7 @@ async fn check_runtime(
                 "PID file (.connector.json) not found",
                 "start the Tauri app in dev mode — the plugin writes the PID file at startup:\n  $ bun run tauri dev\n  $ # or: cargo tauri dev",
             ));
-            (DEFAULT_WS_PORT, DEFAULT_MCP_PORT)
+            fallback_ports()
         }
     };
 
@@ -1592,9 +1641,14 @@ async fn check_runtime(
                         )),
                     );
                     if features.bridge_clients == 0 {
+                        let bridge = pid
+                            .as_ref()
+                            .and_then(|(_, info)| info.bridge_port)
+                            .map(|port| format!("bridge port {port}"))
+                            .unwrap_or_else(effective_bridge_ports);
                         checks.push(Check::warn(
                             "No webview bridge clients connected",
-                            "open the Tauri window and confirm the connector plugin is registered before the app is built; if this persists, verify app.withGlobalTauri=true and the 9300-9400 bridge port range is not blocked",
+                            format!("open the Tauri window and confirm the connector plugin is registered before the app is built; if this persists, verify app.withGlobalTauri=true and the {bridge} is not blocked"),
                         ));
                     }
                     checks.push(Check::ok(
@@ -2614,16 +2668,44 @@ tauri-plugin-connector = "0.8"
 
     #[test]
     fn mcp_url_must_target_streamable_mcp() {
-        let bad_path = check_mcp_url(".mcp.json", "http://127.0.0.1:9556/message");
+        let bad_path = check_mcp_url(".mcp.json", "http://127.0.0.1:9556/message", 9556);
         assert_eq!(bad_path.status, Status::Fail);
         assert!(bad_path.fix.unwrap().contains("/mcp"));
 
-        let legacy = check_mcp_url(".mcp.json", "http://127.0.0.1:9556/sse");
+        let legacy = check_mcp_url(".mcp.json", "http://127.0.0.1:9556/sse", 9556);
         assert_eq!(legacy.status, Status::Warn);
         assert!(legacy.fix.unwrap().contains("9556/mcp"));
 
-        let ok = check_mcp_url(".mcp.json", "http://127.0.0.1:9556/mcp");
+        let ok = check_mcp_url(".mcp.json", "http://127.0.0.1:9556/mcp", 9556);
         assert_eq!(ok.status, Status::Ok);
+    }
+
+    #[test]
+    fn mcp_fix_lines_name_the_port_the_app_bound() {
+        let entry = check_mcp_entry(None, ".mcp.json", 9557);
+        let fix = entry.fix.unwrap();
+        assert!(
+            fix.contains("127.0.0.1:9557/mcp") && !fix.contains("9556"),
+            "{fix}"
+        );
+        let no_url = check_mcp_entry(Some(&json!({})), ".mcp.json", 9557);
+        assert!(no_url.fix.unwrap().contains("127.0.0.1:9557/mcp"));
+        let bad = check_mcp_url(".mcp.json", "http://127.0.0.1:9557/message", 9557);
+        assert!(bad.fix.unwrap().contains("9557/mcp"));
+        let legacy = legacy_sse_check(".mcp.json", "", 9557);
+        assert!(legacy.fix.unwrap().contains("127.0.0.1:9557/mcp"));
+        assert!(mcp_json_snippet(9557).contains("127.0.0.1:9557/mcp"));
+    }
+
+    #[test]
+    fn bridge_fix_text_uses_the_effective_range() {
+        // Default env: the 9300-9400 range (exact/range vars change it).
+        let text = effective_bridge_ports();
+        if std::env::var_os(connector_client::ports::BRIDGE_PORT_VAR).is_none()
+            && std::env::var_os(connector_client::ports::BRIDGE_RANGE_VAR).is_none()
+        {
+            assert!(text.contains("9300-9400"), "{text}");
+        }
     }
 
     #[test]
@@ -2632,7 +2714,7 @@ tauri-plugin-connector = "0.8"
             r#"{ "command": "tauri-connector-mcp", "args": ["--port", "9555"] }"#,
         )
         .unwrap();
-        let check = check_mcp_entry(Some(&value), ".mcp.json");
+        let check = check_mcp_entry(Some(&value), ".mcp.json", 9556);
         assert_eq!(check.status, Status::Warn);
         assert!(check.fix.unwrap().contains("127.0.0.1:9556/mcp"));
     }
@@ -2734,7 +2816,7 @@ fn main() {
         for check in [
             check_with_global_tauri(&root),
             check_snapdom(&root),
-            check_mcp_json(&root),
+            check_mcp_json(&root, 9556),
         ] {
             assert_eq!(check.status, Status::Warn, "{}", check.label);
         }
@@ -2834,6 +2916,7 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
         let by_type = check_mcp_entry(
             Some(&json!({"type":"sse","url":"http://127.0.0.1:9556/mcp"})),
             ".mcp.json",
+            9556,
         );
         assert_eq!(by_type.status, Status::Warn, "{}", by_type.label);
         assert!(by_type.label.contains("legacy SSE"), "{}", by_type.label);
@@ -2846,6 +2929,7 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
         let by_url = check_mcp_entry(
             Some(&json!({"url":"http://127.0.0.1:9600/sse"})),
             ".mcp.json",
+            9556,
         );
         assert_eq!(by_url.status, Status::Warn);
         assert!(by_url
@@ -2853,7 +2937,7 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
             .unwrap_or_default()
             .contains("http://127.0.0.1:9600/mcp"));
 
-        let by_transport = check_mcp_entry(Some(&json!({"transport":"SSE"})), ".mcp.json");
+        let by_transport = check_mcp_entry(Some(&json!({"transport":"SSE"})), ".mcp.json", 9556);
         assert_eq!(by_transport.status, Status::Warn);
         assert!(by_transport
             .fix
@@ -2863,6 +2947,7 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
         let ok = check_mcp_entry(
             Some(&json!({"type":"http","url":"http://127.0.0.1:9556/mcp"})),
             ".mcp.json",
+            9556,
         );
         assert_eq!(ok.status, Status::Ok);
     }

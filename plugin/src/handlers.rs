@@ -332,6 +332,19 @@ fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
     outcome
 }
 
+/// Failure of a connector-built read (snapshot, find, styles): a refusal
+/// before dispatch keeps its typed code and `retryableBeforeDispatch:true`
+/// (Inter 0.17.6: a hidden-window snapshot said outcome_unknown), and a read
+/// that ran or timed out has no effect to quarantine.
+fn read_only_error_response(id: &str, what: &str, error: BridgeError) -> Response {
+    let mut outcome = bridge_error_outcome(error);
+    outcome.effect = connector_client::outcome::EffectStatus::None;
+    if let Some(error) = outcome.error.as_mut() {
+        error.message = format!("{what} failed: {}", error.message);
+    }
+    Response::outcome_error(id.to_string(), outcome)
+}
+
 /// Machine code for a refusal before dispatch, from the bridge's reason
 /// prefix (git-strata: a deadline refusal said `execution_failed`).
 fn not_dispatched_code(reason: &str) -> &'static str {
@@ -340,6 +353,7 @@ fn not_dispatched_code(reason: &str) -> &'static str {
         "page_navigating" => "page_navigating",
         "page_loading" | "helper_missing" => "page_not_ready",
         "window_not_visible" => "window_not_visible",
+        "bridge_not_connected" => "bridge_not_connected",
         _ => "execution_failed",
     }
 }
@@ -356,6 +370,7 @@ pub async fn execute_js(
     script: &str,
     window_id: &str,
     timeout_ms: Option<u64>,
+    read_only: bool,
     bridge: &Bridge,
 ) -> Response {
     if script.trim().is_empty() {
@@ -383,9 +398,25 @@ pub async fn execute_js(
         Ok(result) => Response::success(id.to_string(), result),
         Err(e) => {
             let mut outcome = eval_error_outcome(e, timeout_ms);
+            if read_only {
+                read_only_outcome(&mut outcome);
+            }
             csp_eval_hint(&mut outcome, bridge.eval_blocked(window_id).await);
             Response::outcome_error(id.to_string(), outcome)
         }
+    }
+}
+
+/// A read the caller declared side-effect free: whatever happened, nothing
+/// was written, so the outcome never quarantines a resource.
+fn read_only_outcome(outcome: &mut ExecutionOutcome) {
+    use connector_client::outcome::{EffectStatus, ExecutionStatus};
+    outcome.effect = EffectStatus::None;
+    if outcome.execution == ExecutionStatus::OutcomeUnknown {
+        outcome.execution = ExecutionStatus::Failed;
+        outcome
+            .warnings
+            .push("read-only command: nothing was quarantined; retry once the page settles".into());
     }
 }
 
@@ -567,11 +598,11 @@ pub async fn dom_snapshot(
     );
 
     let result = match bridge
-        .execute_js_for_window(&script, 15_000, window_id)
+        .execute_js_for_legacy_window(&script, 15_000, window_id)
         .await
     {
         Ok(r) => r,
-        Err(e) => return Response::error(id.to_string(), format!("DOM snapshot failed: {e}")),
+        Err(e) => return read_only_error_response(id, "DOM snapshot", e),
     };
 
     let refs: RefMap = result
@@ -967,11 +998,11 @@ pub async fn find_element(
     };
 
     match bridge
-        .execute_js_for_window(&script, 10_000, window_id)
+        .execute_js_for_legacy_window(&script, 10_000, window_id)
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), format!("Find element failed: {e}")),
+        Err(e) => read_only_error_response(id, "Find element", e),
     }
 }
 
@@ -1011,11 +1042,11 @@ pub async fn get_styles(
     );
 
     match bridge
-        .execute_js_for_window(&script, 5_000, window_id)
+        .execute_js_for_legacy_window(&script, 5_000, window_id)
         .await
     {
         Ok(result) => Response::success(id.to_string(), result),
-        Err(e) => Response::error(id.to_string(), format!("Get styles failed: {e}")),
+        Err(e) => read_only_error_response(id, "Get styles", e),
     }
 }
 
@@ -4692,6 +4723,53 @@ mod tests {
     }
 
     #[test]
+    fn read_only_failures_never_quarantine_and_keep_dispatch_facts() {
+        use crate::bridge::BridgeError;
+        use connector_client::outcome::{EffectStatus, ExecutionStatus};
+        // R2 0.17.7: `get url` with no bridge client quarantined backend + UI.
+        let mut unknown = super::eval_error_outcome(
+            BridgeError::DispatchedOutcomeUnknown {
+                request_id: "r".into(),
+                reason: "Script execution timeout (eval path)".into(),
+            },
+            1000,
+        );
+        assert!(
+            crate::protocol::Response::outcome_error("id".into(), unknown.clone())
+                .requires_quarantine()
+        );
+        super::read_only_outcome(&mut unknown);
+        assert_eq!(unknown.effect, EffectStatus::None);
+        assert_eq!(unknown.execution, ExecutionStatus::Failed);
+        assert!(
+            !crate::protocol::Response::outcome_error("id".into(), unknown).requires_quarantine()
+        );
+
+        // Inter 0.17.6: a hidden-window snapshot said outcome_unknown and
+        // retryableBeforeDispatch:false; it must match eval.
+        let response = super::read_only_error_response(
+            "id",
+            "DOM snapshot",
+            BridgeError::NotDispatched {
+                request_id: "r".into(),
+                reason: "window_not_visible: the page did not answer a liveness probe".into(),
+            },
+        );
+        assert!(!response.requires_quarantine());
+        let outcome = response.outcome.clone().unwrap();
+        assert_eq!(outcome.execution, ExecutionStatus::NotDispatched);
+        assert_eq!(outcome.dispatch["dispatched"], serde_json::json!(false));
+        let error = outcome.error.unwrap();
+        assert_eq!(error.code, "window_not_visible");
+        assert!(error.retryable_before_dispatch);
+        assert!(
+            error
+                .message
+                .starts_with("DOM snapshot failed: window_not_visible")
+        );
+    }
+
+    #[test]
     fn user_eval_runs_under_a_csp_that_blocks_eval() {
         use serde_json::json;
         let scripts = |source: &str, id: &str, event: Option<&str>| {
@@ -4712,6 +4790,23 @@ mod tests {
         }
         // With eval allowed the devtools-like completion value still works.
         cases.push(json!({"id": "allowed", "strings": true, "scripts": scripts("const a = 1; a + 1", "z", Some("evt"))}));
+        // Async scripts return their last expression too (R2 0.17.6:
+        // `await …; "x"` returned null).
+        for (key, source) in [
+            ("async-last", "await Promise.resolve(1); \"x\""),
+            ("async-newline", "const a = await Promise.resolve(2)\na * 3"),
+            ("async-block", "for (const x of [1]) { await x; }\n'done'"),
+            ("async-string", "const s = 'a;b'; await null; s // c"),
+            (
+                "async-continued",
+                "const a = await Promise.resolve(1);\nconst b = a\n  + 1\nb",
+            ),
+            ("async-return", "await null; return 5"),
+        ] {
+            cases.push(
+                json!({"id": key, "strings": true, "scripts": scripts(source, key, Some("evt"))}),
+            );
+        }
         let Some(out) = crate::bridge::run_native_harness(&json!(cases)) else {
             eprintln!("node unavailable; skipping");
             return;
@@ -4735,6 +4830,16 @@ mod tests {
             assert_eq!(get("bad")["effect"], json!("none"));
         }
         assert_eq!(out["allowed"]["result"], json!(2), "{}", out["allowed"]);
+        for (key, expected) in [
+            ("async-last", json!("x")),
+            ("async-newline", json!(6)),
+            ("async-block", json!("done")),
+            ("async-string", json!("a;b")),
+            ("async-continued", json!(2)),
+            ("async-return", json!(5)),
+        ] {
+            assert_eq!(out[key]["result"], expected, "{key}: {}", out[key]);
+        }
     }
 
     #[test]
@@ -5126,6 +5231,10 @@ mod tests {
                 "window_not_visible",
             ),
             (
+                "bridge_not_connected: the page was not connected to the connector bridge until the deadline",
+                "bridge_not_connected",
+            ),
+            (
                 "Bridge client for window 'main' is not connected",
                 "execution_failed",
             ),
@@ -5289,7 +5398,8 @@ mod tests {
             outcome.data["waitOutcome"]["error"]["code"],
             "condition_timeout"
         );
-        let query = super::execute_js("query", "readStoredValue()", "main", None, &bridge).await;
+        let query =
+            super::execute_js("query", "readStoredValue()", "main", None, false, &bridge).await;
         assert!(
             matches!(query.payload, ResponsePayload::Success { .. }),
             "business error fields are not tool errors"
