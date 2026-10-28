@@ -185,7 +185,20 @@ pub async fn run(opts: Options) -> Result<(), String> {
             .as_ref()
             .and_then(|r| find_pid_file(r))
             .and_then(|p| read_pid_file(&p).map(|info| (p, info)));
-        sections.push(check_runtime(project_root.as_ref(), pid_info).await);
+        let mcp_json_port = project_root
+            .as_ref()
+            .and_then(|r| mcp_json_url(r))
+            .and_then(|url| loopback_url_port(&url));
+        let expected_app_id = project_root.as_ref().and_then(|r| tauri_conf_identifier(r));
+        sections.push(
+            check_runtime(
+                project_root.as_ref(),
+                pid_info,
+                mcp_json_port,
+                expected_app_id.as_deref(),
+            )
+            .await,
+        );
     }
 
     if let Some(root) = project_root.as_ref() {
@@ -1186,6 +1199,13 @@ fn check_mcp_entry(entry: Option<&Value>, display: &str) -> Check {
     match entry {
         Some(Value::Object(obj)) => {
             let url = obj.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let declared = obj
+                .get("type")
+                .or_else(|| obj.get("transport"))
+                .and_then(|v| v.as_str());
+            if declared.is_some_and(|t| t.eq_ignore_ascii_case("sse")) || url.ends_with("/sse") {
+                return legacy_sse_check(display, url);
+            }
             if !url.is_empty() {
                 return check_mcp_url(display, url);
             }
@@ -1215,15 +1235,29 @@ fn check_mcp_entry(entry: Option<&Value>, display: &str) -> Check {
     }
 }
 
+/// `.mcp.json` declares the deprecated HTTP+SSE transport (MCP 2024-11-05),
+/// either with `"type": "sse"` or an `/sse` URL.
+fn legacy_sse_check(display: &str, url: &str) -> Check {
+    let base = url
+        .trim_end_matches('/')
+        .trim_end_matches("/sse")
+        .trim_end_matches("/mcp");
+    let base = if base.is_empty() {
+        "http://127.0.0.1:9556"
+    } else {
+        base
+    };
+    Check::warn(
+        ".mcp.json uses the legacy SSE transport",
+        format!(
+            "SSE is the deprecated MCP 2024-11-05 transport; the plugin serves Streamable HTTP on /mcp. Replace the entry in {display} with:\n  \"tauri-connector\": {{ \"type\": \"http\", \"url\": \"{base}/mcp\" }}\nthen restart the MCP client"
+        ),
+    )
+}
+
 fn check_mcp_url(display: &str, url: &str) -> Check {
     if url.ends_with("/sse") {
-        return Check::warn(
-            ".mcp.json uses legacy /sse transport",
-            format!(
-                "prefer the Streamable HTTP endpoint in {display}:\n  \"tauri-connector\": {{ \"url\": \"{}\" }}",
-                url.trim_end_matches("/sse").to_string() + "/mcp"
-            ),
-        );
+        return legacy_sse_check(display, url);
     }
     if !url.ends_with("/mcp") {
         return Check::fail(
@@ -1308,7 +1342,12 @@ fn read_pid_file(path: &Path) -> Option<PidInfo> {
     })
 }
 
-async fn check_runtime(project: Option<&PathBuf>, pid: Option<(PathBuf, PidInfo)>) -> Section {
+async fn check_runtime(
+    project: Option<&PathBuf>,
+    pid: Option<(PathBuf, PidInfo)>,
+    mcp_json_port: Option<u16>,
+    expected_app_id: Option<&str>,
+) -> Section {
     let mut checks = Vec::new();
 
     // PID file presence
@@ -1400,7 +1439,9 @@ async fn check_runtime(project: Option<&PathBuf>, pid: Option<(PathBuf, PidInfo)
     }
 
     // MCP Streamable HTTP reachable and protocol-correct.
-    match probe_mcp_streamable(PROBE_HOST, mcp_port).await {
+    let probe = probe_mcp_streamable(PROBE_HOST, mcp_port).await;
+    let own_served = probe.as_ref().ok().map(|p| p.app.clone());
+    match probe {
         Ok(probe) => checks.push(
             Check::ok(format!(
                 "MCP Streamable HTTP http://{PROBE_HOST}:{mcp_port}/mcp protocol OK"
@@ -1419,6 +1460,44 @@ async fn check_runtime(project: Option<&PathBuf>, pid: Option<(PathBuf, PidInfo)
             )
             .with_detail(e),
         ),
+    }
+
+    // Does the port in .mcp.json belong to this project's app?
+    if let Some(json_port) = mcp_json_port {
+        let owner = if json_port == mcp_port && own_served.is_some() {
+            match own_served.flatten() {
+                Some(app) => McpPortOwner::App(app),
+                None => McpPortOwner::Unidentified,
+            }
+        } else {
+            match probe_mcp_streamable(PROBE_HOST, json_port).await {
+                Ok(probe) => match probe.app {
+                    Some(app) => McpPortOwner::App(app),
+                    None => McpPortOwner::Unidentified,
+                },
+                Err(_) => McpPortOwner::Unreachable,
+            }
+        };
+        let own = pid
+            .as_ref()
+            .filter(|(_, info)| info.pid.is_some_and(process_alive))
+            .map(|(_, info)| OwnMcp {
+                app_label: match (&info.app_name, &info.app_id) {
+                    (Some(name), Some(id)) => format!("{name} ({id})"),
+                    (Some(name), None) => name.clone(),
+                    (None, Some(id)) => id.clone(),
+                    (None, None) => "this app".to_string(),
+                },
+                mcp_port: info.mcp_port,
+            });
+        let expected = expected_app_id.or_else(|| {
+            own.as_ref()
+                .and(pid.as_ref())
+                .and_then(|(_, info)| info.app_id.as_deref())
+        });
+        if let Some(check) = check_mcp_json_owner(json_port, expected, own.as_ref(), &owner) {
+            checks.push(check);
+        }
     }
 
     Section {
@@ -1595,6 +1674,131 @@ async fn probe_ws_features(host: &str, port: u16) -> Result<WsFeatureProbe, Stri
 struct McpProbe {
     protocol_version: String,
     session_id: String,
+    app: Option<ServedApp>,
+}
+
+/// The app an MCP endpoint reports in its initialize `_meta` (plugin 0.17.5+,
+/// omitted when the host set a workflow token).
+#[derive(Debug, Clone, PartialEq)]
+struct ServedApp {
+    app_id: String,
+    app_name: Option<String>,
+    pid: Option<u64>,
+}
+
+const APP_META_KEY: &str = "dev.tauri-connector/app";
+
+fn served_app(initialize: &Value) -> Option<ServedApp> {
+    let meta = initialize.get("result")?.get("_meta")?.get(APP_META_KEY)?;
+    Some(ServedApp {
+        app_id: meta.get("appId")?.as_str()?.to_string(),
+        app_name: meta
+            .get("appName")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        pid: meta.get("pid").and_then(|v| v.as_u64()),
+    })
+}
+
+/// What answered on the `.mcp.json` port.
+#[derive(Debug, Clone, PartialEq)]
+enum McpPortOwner {
+    /// Nothing speaks MCP there.
+    Unreachable,
+    /// An MCP server answered without naming its app (older plugin or token set).
+    Unidentified,
+    App(ServedApp),
+}
+
+/// The project's own running app, from its live PID file.
+struct OwnMcp {
+    app_label: String,
+    mcp_port: Option<u16>,
+}
+
+fn mcp_json_url(root: &Path) -> Option<String> {
+    let text = fs::read_to_string(root.join(".mcp.json")).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    value
+        .pointer("/mcpServers/tauri-connector/url")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
+/// Port of a loopback `http://host:port/...` URL.
+fn loopback_url_port(url: &str) -> Option<u16> {
+    let rest = url
+        .strip_prefix("http://127.0.0.1:")
+        .or_else(|| url.strip_prefix("http://localhost:"))?;
+    rest.split(['/', '?']).next()?.parse().ok()
+}
+
+fn tauri_conf_identifier(root: &Path) -> Option<String> {
+    let text = fs::read_to_string(root.join("src-tauri").join("tauri.conf.json")).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("identifier")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
+fn describe_served(app: &ServedApp) -> String {
+    let mut out = match &app.app_name {
+        Some(name) => format!("{name} ({})", app.app_id),
+        None => app.app_id.clone(),
+    };
+    if let Some(pid) = app.pid {
+        out.push_str(&format!(", pid {pid}"));
+    }
+    out
+}
+
+/// Does the `.mcp.json` port belong to this project's app?
+fn check_mcp_json_owner(
+    json_port: u16,
+    expected_app_id: Option<&str>,
+    own: Option<&OwnMcp>,
+    owner: &McpPortOwner,
+) -> Option<Check> {
+    let own_port = own.and_then(|o| o.mcp_port).filter(|p| *p != json_port);
+    let fix = match own_port {
+        Some(port) => format!(
+            "point .mcp.json at this app's MCP endpoint, then restart the MCP client:\n  \"tauri-connector\": {{ \"type\": \"http\", \"url\": \"http://127.0.0.1:{port}/mcp\" }}\nPin the port with ConnectorBuilder::mcp_port_range(...) so it stays stable when several apps run"
+        ),
+        None => "start this project's app, read its MCP port from `tauri-connector status` (or src-tauri/target/.connector.json `mcp_port`), and set that port in .mcp.json; give each app its own range with ConnectorBuilder::mcp_port_range(...)".to_string(),
+    };
+    if let McpPortOwner::App(app) = owner {
+        let expected = expected_app_id?;
+        if app.app_id != expected {
+            return Some(
+                Check::fail(
+                    format!(
+                        ".mcp.json port {json_port} belongs to a different app: {}",
+                        describe_served(app)
+                    ),
+                    fix,
+                )
+                .with_detail(format!("this project's app identifier is {expected}")),
+            );
+        }
+        return Some(Check::ok(format!(
+            ".mcp.json port {json_port} is served by this app ({})",
+            describe_served(app)
+        )));
+    }
+    let own = own?;
+    let own_port = own_port?;
+    let answered = match owner {
+        McpPortOwner::Unidentified => "another MCP server answers there",
+        _ => "nothing answers there",
+    };
+    Some(Check::fail(
+        format!(
+            ".mcp.json points at MCP port {json_port}, but {} serves MCP on {own_port}; {answered}",
+            own.app_label
+        ),
+        fix,
+    ))
 }
 
 async fn probe_mcp_streamable(host: &str, port: u16) -> Result<McpProbe, String> {
@@ -1744,6 +1948,7 @@ async fn probe_mcp_streamable(host: &str, port: u16) -> Result<McpProbe, String>
     Ok(McpProbe {
         protocol_version: protocol.to_string(),
         session_id,
+        app: served_app(&response),
     })
 }
 
@@ -2237,6 +2442,117 @@ fn main() {
             assert_eq!(check.status, Status::Warn, "{}", check.label);
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mcp_json_flags_the_legacy_sse_transport() {
+        let by_type = check_mcp_entry(
+            Some(&json!({"type":"sse","url":"http://127.0.0.1:9556/mcp"})),
+            ".mcp.json",
+        );
+        assert_eq!(by_type.status, Status::Warn, "{}", by_type.label);
+        assert!(by_type.label.contains("legacy SSE"), "{}", by_type.label);
+        let fix = by_type.fix.clone().unwrap_or_default();
+        assert!(
+            fix.contains(r#""type": "http", "url": "http://127.0.0.1:9556/mcp""#),
+            "{fix}"
+        );
+
+        let by_url = check_mcp_entry(
+            Some(&json!({"url":"http://127.0.0.1:9600/sse"})),
+            ".mcp.json",
+        );
+        assert_eq!(by_url.status, Status::Warn);
+        assert!(by_url
+            .fix
+            .unwrap_or_default()
+            .contains("http://127.0.0.1:9600/mcp"));
+
+        let by_transport = check_mcp_entry(Some(&json!({"transport":"SSE"})), ".mcp.json");
+        assert_eq!(by_transport.status, Status::Warn);
+        assert!(by_transport
+            .fix
+            .unwrap_or_default()
+            .contains("http://127.0.0.1:9556/mcp"));
+
+        let ok = check_mcp_entry(
+            Some(&json!({"type":"http","url":"http://127.0.0.1:9556/mcp"})),
+            ".mcp.json",
+        );
+        assert_eq!(ok.status, Status::Ok);
+    }
+
+    #[test]
+    fn mcp_json_port_owned_by_another_app_fails_with_the_right_url() {
+        let gfit = McpPortOwner::App(ServedApp {
+            app_id: "com.gfit.workout".into(),
+            app_name: Some("GFIT Workout".into()),
+            pid: Some(42),
+        });
+        let own = OwnMcp {
+            app_label: "R2 (com.r2.app)".into(),
+            mcp_port: Some(9601),
+        };
+        let check =
+            check_mcp_json_owner(9556, Some("com.r2.app"), Some(&own), &gfit).expect("check");
+        assert_eq!(check.status, Status::Fail);
+        assert!(
+            check.label.contains("GFIT Workout (com.gfit.workout)"),
+            "{}",
+            check.label
+        );
+        assert!(check
+            .fix
+            .unwrap_or_default()
+            .contains("http://127.0.0.1:9601/mcp"));
+
+        // Not running: still names the other app, and explains how to find the port.
+        let check = check_mcp_json_owner(9556, Some("com.r2.app"), None, &gfit).expect("check");
+        assert_eq!(check.status, Status::Fail);
+        assert!(check.fix.unwrap_or_default().contains("mcp_port_range"));
+
+        // The right app owns the port.
+        let r2 = McpPortOwner::App(ServedApp {
+            app_id: "com.r2.app".into(),
+            app_name: Some("R2".into()),
+            pid: None,
+        });
+        let check = check_mcp_json_owner(9601, Some("com.r2.app"), Some(&own), &r2).unwrap();
+        assert_eq!(check.status, Status::Ok);
+
+        // Older plugin answers without identity, but the live PID file disagrees.
+        let check = check_mcp_json_owner(
+            9556,
+            Some("com.r2.app"),
+            Some(&own),
+            &McpPortOwner::Unidentified,
+        )
+        .expect("check");
+        assert_eq!(check.status, Status::Fail);
+        assert!(
+            check.label.contains("serves MCP on 9601"),
+            "{}",
+            check.label
+        );
+
+        // Nothing to compare: no finding.
+        assert!(
+            check_mcp_json_owner(9556, Some("com.r2.app"), None, &McpPortOwner::Unidentified)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn served_app_reads_initialize_meta_and_url_ports() {
+        let app = served_app(&json!({"result":{"_meta":{"dev.tauri-connector/app":
+            {"appId":"com.x","appName":"X","pid":3}}}}))
+        .unwrap();
+        assert_eq!(app.app_id, "com.x");
+        assert_eq!(app.pid, Some(3));
+        assert!(served_app(&json!({"result":{}})).is_none());
+        assert_eq!(loopback_url_port("http://127.0.0.1:9556/mcp"), Some(9556));
+        assert_eq!(loopback_url_port("http://localhost:9600"), Some(9600));
+        assert_eq!(loopback_url_port("https://example.com/mcp"), None);
     }
 
     #[test]

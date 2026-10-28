@@ -383,7 +383,7 @@ async fn handle_streamable_initialize(
         sessions.insert(session_id.clone(), session);
     }
 
-    let result = initialize_result(&negotiated);
+    let result = with_app_meta(initialize_result(&negotiated), &state).await;
     let mut response = jsonrpc_response(StatusCode::OK, jsonrpc_success(id, result));
     insert_header(&mut response, HEADER_MCP_SESSION_ID, &session_id);
     insert_header(&mut response, HEADER_MCP_PROTOCOL_VERSION, &negotiated);
@@ -429,7 +429,10 @@ async fn dispatch_jsonrpc_request(
             }),
         ),
 
-        "initialize" => jsonrpc_success(id, initialize_result(PROTOCOL_LATEST)),
+        "initialize" => jsonrpc_success(
+            id,
+            with_app_meta(initialize_result(PROTOCOL_LATEST), &state).await,
+        ),
 
         "tools/list" => jsonrpc_success(id, mcp_tools::tool_definitions()),
 
@@ -689,6 +692,37 @@ fn negotiate_protocol(params: &Value) -> Result<String, String> {
     }
 }
 
+/// `_meta` key naming the app that owns this MCP endpoint, so `doctor` can
+/// tell when `.mcp.json` points at another app's port (0.17.5+).
+pub(crate) const APP_META_KEY: &str = "dev.tauri-connector/app";
+
+/// Add the owning app to an initialize result. Omitted when the host set a
+/// workflow token, because identity is then an authenticated read.
+async fn with_app_meta(mut result: Value, state: &McpState) -> Value {
+    if state.plugin_state.workflow.token_configured() {
+        return result;
+    }
+    let identity = state
+        .app_handle
+        .lock()
+        .await
+        .as_ref()
+        .map(crate::identity::app_identity);
+    if let Some(meta) = identity.as_ref().map(app_meta) {
+        result["_meta"] = json!({ APP_META_KEY: meta });
+    }
+    result
+}
+
+fn app_meta(identity: &Value) -> Value {
+    json!({
+        "appId": identity["appId"],
+        "appName": identity["appName"],
+        "pid": identity["pid"],
+        "pluginVersion": identity["pluginVersion"],
+    })
+}
+
 fn initialize_result(protocol_version: &str) -> Value {
     json!({
         "protocolVersion": protocol_version,
@@ -887,6 +921,11 @@ mod tests {
         let body = body_json(response).await;
         assert_eq!(body["result"]["protocolVersion"], "2025-11-25");
         assert_eq!(body["result"]["serverInfo"]["title"], "Tauri Connector");
+        let meta = app_meta(&json!({"appId":"com.example","appName":"Example","pid":7,
+            "pluginVersion":"0.17.5","workspacePath":"/private"}));
+        assert_eq!(meta["appId"], "com.example");
+        assert_eq!(meta["appName"], "Example");
+        assert!(meta.get("workspacePath").is_none());
     }
 
     #[tokio::test]
