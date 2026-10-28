@@ -1,6 +1,6 @@
 # CLI Command Reference
 
-Complete reference for the `tauri-connector` CLI binary. Commands resolve the connection as `--host/--port` > `TAURI_CONNECTOR_*` env > nearby `.connector.json` > port scan. Every command (not only `status`) accepts a live `.connector.json` found under the working directory or its ancestors (including `src-tauri/target`) once the endpoint proves it is that process, even when the app runs from another directory; from an unrelated directory it selects the single verified running app and reports `ambiguous_app` when there are several. `--app-id`, `--app-instance-id` and `--pid-file` never fall back.
+Complete reference for the `tauri-connector` CLI binary. Commands resolve the connection as `--host/--port` > `TAURI_CONNECTOR_*` env > nearby `.connector.json` > port scan. Every command (not only `status`) accepts a live `.connector.json` found under the working directory or its ancestors (including `src-tauri/target`) once the endpoint proves it is that process, even when the app runs from another directory; from an unrelated directory it selects the single verified running app and reports `ambiguous_app` when there are several. `--app-id`, `--app-instance-id` and `--pid-file` never fall back. A nearby `.connector.json` whose process is dead, or whose port now answers as another process, blocks the single-app fallback (0.17.5+): the command fails with `stale_pid_file`, naming the record and any app the port scan found instead, rather than attaching to an unrelated app. It still attaches to a scanned app with the record's app id. Restart the app (it rewrites the record), delete the stale file, pass `--app-id`/`--port`, or opt in with `--any-app` (`TAURI_CONNECTOR_ANY_APP=1`, also honoured by the standalone MCP server).
 
 Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-cli --release`
 
@@ -12,6 +12,7 @@ Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-
 | `TAURI_CONNECTOR_PORT` | discovered | Plugin WebSocket port |
 | `TAURI_CONNECTOR_PID_FILE` | | Explicit `.connector.json` path |
 | `TAURI_CONNECTOR_APP_ID` | | Filter discovered instances by app identifier |
+| `TAURI_CONNECTOR_ANY_APP` | | `1` lets discovery attach to an unrelated port-scanned app when a nearby `.connector.json` is stale (CLI `--any-app`) |
 | `TAURI_CONNECTOR_WORKFLOW_TOKEN` | | Host token (>= 32 bytes) for workflows; rich inspection/picker/capture APIs need it only when the host configured one |
 
 ---
@@ -27,7 +28,7 @@ tauri-connector --pid-file src-tauri/target/.connector.json snapshot -i
 tauri-connector bridge
 ```
 
-`status` lists live and stale candidates. `bridge` shows connected webviews, pending evals, whether eval fallback is available (`fallbackAvailable`), and `workflowProtocolVersion` (`1` on plugins >= 0.15; the CLI checks it before sending any `workflow` request). `--window-id` is global and scopes snapshots, refs, interactions, screenshots, logs, and window operations to a specific Tauri window label.
+`status` lists live and stale candidates with `plugin=<version>` per row (`<0.17.5 (unreported)` for older plugins), the connected app's name, id and plugin version, and the discovery error when nothing connects (`resolveError` in `--json`). `identity` returns `appId`, `appName`, `appVersion`, `pluginVersion`, the instance id and protocol versions; for a plugin older than 0.17.5 it prints `pluginVersion: null` with a `pluginVersionNote`. `bridge` shows connected webviews, pending evals, whether eval fallback is available (`fallbackAvailable`), and `workflowProtocolVersion` (`1` on plugins >= 0.15; the CLI checks it before sending any `workflow` request). `--window-id` is global and scopes snapshots, refs, interactions, screenshots, logs, and window operations to a specific Tauri window label.
 
 ---
 
@@ -432,6 +433,8 @@ The command prints the final resolved path and `sha256` as JSON. Annotated scree
 
 **Right after a reload.** After a reload or hot reload the capture waits (up to 5 s, within the request timeout) for the new page runtime, then for the viewport to stay unchanged across frames and match the window's logical inner size (up to about 400 ms), so it does not return the old frame or a transient size such as a 1920 px innerWidth. `consistency.viewportSettled: false` means the viewport never settled in that budget (for example a webview that does not fill its window); the capture is still consistent with the probed viewport. If the page reloads during a capture the CLI captures the new page once more; a second change is reported as `capture_context_changed`.
 
+**One output shape (0.17.5+).** The default capture and `--source <s>` print the same top-level fields: `path` and `exportedPath` (the written file; both `null` for `--source` without an output path), `sha256`, `width`, `height`, `sizeKb`, `warnings`, and every field of the plugin's capture report: `artifactId` (the protected artifact id), `captureSource`, `sourceSelection`, `storage`, `retainedUntil`, `capturedAt`, `image`, `viewport`, `geometry`, `redaction`, `consistency`, `fallbacks`, `context` and `timings`. The default capture keeps its `artifact` object (CLI manifest row, `artifactId: "shot_..."`). `sourceSelection` is `{requested, order, selected, reason}` and says why the image came from that source: `auto` picked `webview_native` for the reasons above, fell back because earlier sources failed (see `fallbacks`), or the source was requested explicitly (no fallback). Plugins before 0.17.5 do not send `sourceSelection`.
+
 `--source window_native` crops the macOS title bar band when the window reports no separate client area. `--source dom_rendering` needs the app to expose snapdom as a global (`import { snapdom } from '@zumer/snapdom'; window.snapdom = snapdom;`); without it the error is `capture_backend_unavailable` naming that remedy.
 
 ### artifacts
@@ -772,7 +775,8 @@ What it verifies:
 - `"connector:default"` permission in any file under `src-tauri/capabilities/`
 - `app.withGlobalTauri: true` in `src-tauri/tauri.conf.json`
 - `@zumer/snapdom` in root `package.json` (any dependency bucket)
-- `.mcp.json` registers `tauri-connector`
+- `.mcp.json` registers `tauri-connector`; a legacy SSE entry (`"type": "sse"` or an `/sse` URL) warns with the exact `{ "type": "http", "url": "http://127.0.0.1:<port>/mcp" }` replacement
+- the `.mcp.json` port belongs to this project's app (0.17.5+): fails when the MCP server there reports a different app id than `tauri.conf.json` `identifier`, or when the project's live PID file says this app serves MCP on another port; the Fix gives this app's URL or how to find and pin it with `ConnectorBuilder::mcp_port_range(...)`. The owner comes from the plugin's MCP initialize `_meta["dev.tauri-connector/app"]` (`appId`, `appName`, `pid`, `pluginVersion`; omitted when the host sets a workflow token)
 - `.connector.json` PID file + live WS ping + MCP Streamable HTTP initialize POST
 - PID liveness, runtime metadata/log_dir, JSONL log files, bridge status, runtime/artifact/debug WS commands
 - MCP Streamable HTTP lifecycle: initialize 200, notification 202 empty body, ping 200, GET /mcp 405, DELETE 204
