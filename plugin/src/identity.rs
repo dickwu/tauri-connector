@@ -128,8 +128,27 @@ pub fn app_identity(app: &tauri::AppHandle) -> Value {
     let workspace = std::env::current_dir()
         .ok()
         .and_then(|path| path.canonicalize().ok());
+    let package = app.package_info();
+    identity_payload(
+        &app.config().identifier,
+        &package.name,
+        &package.version.to_string(),
+        workspace,
+    )
+}
+
+/// The `app_identity` response. `pluginVersion`, `appName`, and `appVersion`
+/// were added in 0.17.5; clients treat them as optional for older plugins.
+fn identity_payload(
+    app_id: &str,
+    app_name: &str,
+    app_version: &str,
+    workspace: Option<std::path::PathBuf>,
+) -> Value {
     json!({
-        "appId": app.config().identifier, "appInstanceId": app_instance_id(),
+        "appId": app_id, "appInstanceId": app_instance_id(),
+        "appName": app_name, "appVersion": app_version,
+        "pluginVersion": env!("CARGO_PKG_VERSION"),
         "pid": std::process::id(), "startedAt": started_at(),
         "workspacePath": workspace.as_ref().map(|path|path.to_string_lossy().into_owned()),
         "workspaceId": workspace.map(|path| super::runtime::manifest::content_hash(path.to_string_lossy().as_bytes())),
@@ -159,6 +178,15 @@ pub fn origin_allowed(app: &tauri::AppHandle, current: &tauri::Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn identity_reports_plugin_version_and_app_name() {
+        let value = identity_payload("com.example.app", "Example", "1.2.3", None);
+        assert_eq!(value["pluginVersion"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(value["appName"], "Example");
+        assert_eq!(value["appVersion"], "1.2.3");
+        assert_eq!(value["appId"], "com.example.app");
+        assert_eq!(value["inspectionProtocolVersion"], 1);
+    }
     #[test]
     fn label_reuse_changes_host_identity() {
         let label = uuid::Uuid::new_v4().to_string();

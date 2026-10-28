@@ -403,6 +403,9 @@ mod tests {
             workspace_path: None,
             inspection_protocol_version: 1,
             workflow_protocol_version: Some(1),
+            plugin_version: None,
+            app_name: None,
+            app_version: None,
         });
         let mut second = first.clone();
         second.host = "127-0-0-1".into();

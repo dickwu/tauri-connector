@@ -49,6 +49,9 @@ pub struct ConnectionOptions {
     pub app_id: Option<String>,
     pub app_instance_id: Option<String>,
     pub pid_file: Option<PathBuf>,
+    /// Allow attaching to a port-scanned app that does not match the app a
+    /// stale `.connector.json` names (`--any-app`, `TAURI_CONNECTOR_ANY_APP=1`).
+    pub allow_unrelated_app: bool,
 }
 
 impl ConnectionOptions {
@@ -60,8 +63,112 @@ impl ConnectionOptions {
             app_id: None,
             app_instance_id: None,
             pid_file: None,
+            allow_unrelated_app: false,
         }
     }
+}
+
+/// Environment opt-in for attaching to an unrelated app (see
+/// [`ConnectionOptions::allow_unrelated_app`]).
+pub const ANY_APP_ENV: &str = "TAURI_CONNECTOR_ANY_APP";
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes"))
+}
+
+/// A `.connector.json` near the working directory whose app is gone or no
+/// longer answers as the process it recorded.
+#[derive(Debug, Clone)]
+pub struct StaleRecord {
+    pub instance: ConnectorInstance,
+    pub reason: String,
+}
+
+fn describe_record(instance: &ConnectorInstance) -> String {
+    let name = instance.app_name.as_deref().unwrap_or("unnamed app");
+    match instance.app_id.as_deref() {
+        Some(id) => format!("{name} ({id})"),
+        None => name.to_string(),
+    }
+}
+
+/// Decide what a stale record allows when nothing in this workspace matched:
+/// only an app with the record's identity, or anything with the opt-in.
+/// `Ok(None)` means "no stale record applies; continue as before".
+pub fn stale_record_gate(
+    stale: &[StaleRecord],
+    others: &[ResolvedConnection],
+    allow_unrelated_app: bool,
+) -> Result<Option<Vec<ResolvedConnection>>, String> {
+    if stale.is_empty() || allow_unrelated_app {
+        return Ok(None);
+    }
+    let expected: Vec<&str> = stale
+        .iter()
+        .filter_map(|record| record.instance.app_id.as_deref())
+        .collect();
+    let (same_app, unrelated): (Vec<_>, Vec<_>) = others.iter().cloned().partition(|candidate| {
+        candidate
+            .identity
+            .as_ref()
+            .is_some_and(|identity| expected.contains(&identity.app_id.as_str()))
+    });
+    if !same_app.is_empty() {
+        return Ok(Some(same_app));
+    }
+    let records = stale
+        .iter()
+        .map(|record| {
+            format!(
+                "{} records {} pid {} on port {}, but {}",
+                record.instance.pid_file.display(),
+                describe_record(&record.instance),
+                record.instance.pid,
+                record.instance.ws_port,
+                record.reason
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let found = if unrelated.is_empty() {
+        "no running app with that identity was found".to_string()
+    } else {
+        let apps = unrelated
+            .iter()
+            .map(|candidate| {
+                let identity = candidate.identity.as_ref();
+                let name = identity
+                    .and_then(|identity| identity.app_name.as_deref())
+                    .map(|name| format!("{name} "))
+                    .unwrap_or_default();
+                format!(
+                    "{name}({}) pid {} on port {}",
+                    identity.map(|i| i.app_id.as_str()).unwrap_or("?"),
+                    identity.map(|i| i.pid).unwrap_or(0),
+                    candidate.port
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("a port scan found a different app instead and did not attach to it: {apps}")
+    };
+    let choose = unrelated
+        .first()
+        .map(|candidate| {
+            format!(
+                "; to use the other app pass --app-id {} or --port {}",
+                candidate
+                    .identity
+                    .as_ref()
+                    .map(|i| i.app_id.as_str())
+                    .unwrap_or("?"),
+                candidate.port
+            )
+        })
+        .unwrap_or_default();
+    Err(format!(
+        "stale_pid_file: {records}; {found}. Start the app again (it rewrites the record) or delete the stale file{choose}, or set {ANY_APP_ENV}=1 (CLI: --any-app) to attach to any single running app"
+    ))
 }
 
 /// How the active connection was resolved.
@@ -101,6 +208,18 @@ pub struct InstanceStatus {
     pub legacy_plugin: bool,
     pub stale: bool,
     pub error: Option<String>,
+    /// What the endpoint reported about itself, when it answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<AppIdentity>,
+}
+
+/// `plugin=` label for status output; older plugins do not report a version.
+pub fn plugin_version_label(identity: Option<&AppIdentity>) -> String {
+    match identity.and_then(|identity| identity.plugin_version.as_deref()) {
+        Some(version) => version.to_string(),
+        None if identity.is_some() => "<0.17.5 (unreported)".to_string(),
+        None => "?".to_string(),
+    }
 }
 
 impl InstanceStatus {
@@ -136,7 +255,7 @@ pub fn port_scan_status(
             ws_port: resolved.port,
             mcp_port: None,
             bridge_port: None,
-            app_name: None,
+            app_name: identity.app_name.clone(),
             app_id: Some(identity.app_id.clone()),
             app_instance_id: Some(identity.app_instance_id.clone()),
             log_dir: None,
@@ -150,6 +269,7 @@ pub fn port_scan_status(
         legacy_plugin: false,
         stale: false,
         error: None,
+        identity: Some(identity.clone()),
     })
 }
 
@@ -290,9 +410,18 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
     let mut others = Vec::new();
     let mut unauthorized_ports = Vec::new();
     let mut legacy_ports = Vec::new();
+    // PID files near the working directory whose app is dead or replaced.
+    let mut stale = Vec::new();
     let mut endpoints = HashSet::new();
     for hint in hints {
-        if !pid_is_alive(hint.pid) || !endpoints.insert((host.clone(), hint.ws_port)) {
+        if !pid_is_alive(hint.pid) {
+            stale.push(StaleRecord {
+                reason: format!("process {} is not running", hint.pid),
+                instance: hint,
+            });
+            continue;
+        }
+        if !endpoints.insert((host.clone(), hint.ws_port)) {
             continue;
         }
         let identity = endpoint_identity(&host, hint.ws_port, 1500).await;
@@ -301,17 +430,30 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
                 unauthorized_ports.push(hint.ws_port);
             } else if is_legacy_plugin(&host, hint.ws_port, 1500).await {
                 legacy_ports.push(hint.ws_port);
+            } else {
+                stale.push(StaleRecord {
+                    reason: format!("its endpoint does not answer ({error})"),
+                    instance: hint.clone(),
+                });
             }
         }
         if let Ok(identity) = identity {
-            if validate_identity(
+            if let Err(error) = validate_identity(
                 &identity,
                 app_id.as_deref(),
                 expected_instance.as_deref(),
                 Some(&hint),
-            )
-            .is_ok()
-            {
+            ) {
+                if error.contains("stale PID file") {
+                    stale.push(StaleRecord {
+                        reason: format!(
+                            "port {} now answers as {} pid {}",
+                            hint.ws_port, identity.app_id, identity.pid
+                        ),
+                        instance: hint,
+                    });
+                }
+            } else {
                 let in_workspace = identity
                     .workspace_path
                     .as_deref()
@@ -375,6 +517,18 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
     }
     if candidates.is_empty() {
         candidates = nearby;
+    }
+    // R2: a dead or replaced app named by a PID file must not silently hand
+    // the session to whatever other app a port scan finds.
+    let allow_unrelated_app = opts.allow_unrelated_app || env_flag(ANY_APP_ENV);
+    if candidates.is_empty()
+        && unauthorized_ports.is_empty()
+        && legacy_ports.is_empty()
+        && !constrained
+    {
+        if let Some(same_app) = stale_record_gate(&stale, &others, allow_unrelated_app)? {
+            return select_unique(same_app);
+        }
     }
     if candidates.is_empty() && others.len() == 1 && !constrained {
         // Exactly one verified app is running and nothing ties the working
@@ -477,12 +631,17 @@ pub async fn instance_statuses(
     for instance in instances {
         let pid_alive = pid_is_alive(instance.pid);
         let mut legacy_plugin = false;
+        let mut reported = None;
         let (ws_reachable, unauthorized, error) = if pid_alive {
             match endpoint_identity(host, instance.ws_port, 1_000).await {
-                Ok(identity) => match validate_identity(&identity, app_id, None, Some(&instance)) {
-                    Ok(()) => (true, false, None),
-                    Err(e) => (false, false, Some(e)),
-                },
+                Ok(identity) => {
+                    let checked = validate_identity(&identity, app_id, None, Some(&instance));
+                    reported = Some(identity);
+                    match checked {
+                        Ok(()) => (true, false, None),
+                        Err(e) => (false, false, Some(e)),
+                    }
+                }
                 Err(e) if is_unauthorized_error(&e) => (
                     true,
                     true,
@@ -505,6 +664,7 @@ pub async fn instance_statuses(
             legacy_plugin,
             stale: !pid_alive || !ws_reachable,
             error,
+            identity: reported,
         });
     }
     statuses.sort_by_key(|s| std::cmp::Reverse(s.instance.started_at.unwrap_or(0)));
@@ -655,6 +815,9 @@ mod tests {
             workspace_path: None,
             inspection_protocol_version: 1,
             workflow_protocol_version: None,
+            plugin_version: None,
+            app_name: None,
+            app_version: None,
         };
         let resolved = ResolvedConnection {
             host: "127.0.0.1".into(),
@@ -736,6 +899,7 @@ mod tests {
             legacy_plugin: false,
             stale: false,
             error: None,
+            identity: None,
         };
         assert_eq!(status.state(), "unauthorized");
         let old_plugin = InstanceStatus {

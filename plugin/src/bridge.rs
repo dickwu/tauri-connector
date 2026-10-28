@@ -855,6 +855,7 @@ impl Bridge {
         };
         serde_json::json!({
             "bridge_port": self.port,
+            "pluginVersion": env!("CARGO_PKG_VERSION"),
             "workflowProtocolVersion": 1,
             "inspectionProtocolVersion": 1,
             "inspection": crate::capabilities::inspection(),

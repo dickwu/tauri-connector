@@ -177,6 +177,27 @@ pub async fn call(client: &ConnectorClient, operation: &str, args: &Value) -> Re
     print_json(&report);
     Ok(())
 }
+/// `identity`: the plugin's `app_identity`, with an explicit note when the
+/// plugin predates `pluginVersion`/`appName` (0.17.5).
+pub async fn identity(client: &ConnectorClient) -> Result<(), String> {
+    let report = client.inspect("app_identity", &json!({})).await?;
+    print_json(&annotate_identity(report));
+    Ok(())
+}
+
+pub fn annotate_identity(mut report: Value) -> Value {
+    if let Some(object) = report.as_object_mut() {
+        if !object.contains_key("pluginVersion") {
+            object.insert("pluginVersion".into(), Value::Null);
+            object.insert(
+                "pluginVersionNote".into(),
+                json!("this tauri-plugin-connector predates 0.17.5 and does not report its version, app name, or app version; upgrade the plugin to see them"),
+            );
+        }
+    }
+    report
+}
+
 fn print_json(value: &Value) {
     println!(
         "{}",
@@ -333,5 +354,23 @@ mod cursor_contract_tests {
         ])
         .unwrap();
         assert_eq!(json!(parsed.query.cursor), response["nextCursor"]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_notes_an_older_plugin_without_a_version() {
+        let old = annotate_identity(json!({"appId":"com.example","pid":1}));
+        assert_eq!(old["pluginVersion"], Value::Null);
+        assert!(old["pluginVersionNote"]
+            .as_str()
+            .unwrap()
+            .contains("predates 0.17.5"));
+        let current = annotate_identity(json!({"appId":"com.example","pluginVersion":"0.17.5"}));
+        assert_eq!(current["pluginVersion"], "0.17.5");
+        assert!(current.get("pluginVersionNote").is_none());
     }
 }

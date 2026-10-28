@@ -36,6 +36,10 @@ struct Cli {
     /// Lock the exact application process instance (also TAURI_CONNECTOR_APP_INSTANCE_ID)
     #[arg(long, global = true)]
     app_instance_id: Option<String>,
+    /// When a nearby .connector.json names an app that is no longer running,
+    /// still attach to an unrelated app found by port scan (also TAURI_CONNECTOR_ANY_APP=1)
+    #[arg(long, global = true)]
+    any_app: bool,
     /// Explicit path to .connector.json
     #[arg(long, global = true)]
     pid_file: Option<PathBuf>,
@@ -810,6 +814,7 @@ async fn run_cli(cli: Cli) {
                 _ => None,
             }),
         pid_file: cli.pid_file.clone(),
+        allow_unrelated_app: cli.any_app,
     };
 
     if matches!(cli.command, Commands::Examples) {
@@ -903,9 +908,9 @@ async fn run_cli(cli: Cli) {
             Some(&host),
         )
         .await;
-        let resolved = discovery::resolve_connection(connection_options.clone())
-            .await
-            .ok();
+        let resolution = discovery::resolve_connection(connection_options.clone()).await;
+        let resolve_error = resolution.as_ref().err().cloned();
+        let resolved = resolution.ok();
         if let Some(row) = resolved
             .as_ref()
             .and_then(|r| discovery::port_scan_status(r, &statuses))
@@ -917,13 +922,29 @@ async fn run_cli(cli: Cli) {
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
                     "resolved": resolved,
+                    "resolveError": resolve_error,
                     "instances": statuses,
                 }))
                 .unwrap_or_default()
             );
         } else {
             if let Some(r) = resolved {
-                println!("connected: {}:{} ({:?})", r.host, r.port, r.source);
+                let mut line = format!("connected: {}:{} ({:?})", r.host, r.port, r.source);
+                if let Some(identity) = &r.identity {
+                    line.push_str(&format!(
+                        " app={} id={} plugin={}",
+                        identity
+                            .app_name
+                            .as_deref()
+                            .or_else(|| r.instance.as_ref().and_then(|i| i.app_name.as_deref()))
+                            .unwrap_or("?"),
+                        identity.app_id,
+                        discovery::plugin_version_label(Some(identity)),
+                    ));
+                }
+                println!("{line}");
+            } else if let Some(error) = &resolve_error {
+                println!("connected: none\n  {error}");
             } else {
                 println!("connected: none");
             }
@@ -933,9 +954,10 @@ async fn run_cli(cli: Cli) {
                 println!("instances:");
                 for s in statuses {
                     let state = s.state();
+                    let plugin = discovery::plugin_version_label(s.identity.as_ref());
                     let i = s.instance;
                     println!(
-                        "  {state} {}:{} pid={} app={} id={} file={}",
+                        "  {state} {}:{} pid={} app={} id={} plugin={plugin} file={}",
                         host,
                         i.ws_port,
                         i.pid,
@@ -1015,9 +1037,7 @@ async fn run_cli(cli: Cli) {
         Commands::SelectElement(start) => {
             inspection::picker(&client, start.args(&cli.window_id, true)).await
         }
-        Commands::Identity => {
-            inspection::call(&client, "app_identity", &serde_json::json!({})).await
-        }
+        Commands::Identity => inspection::identity(&client).await,
         Commands::RuntimeHealth { depth, timeout_ms } => {
             inspection::call(
                 &client,

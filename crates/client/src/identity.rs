@@ -17,6 +17,15 @@ pub struct AppIdentity {
     pub inspection_protocol_version: u64,
     #[serde(default)]
     pub workflow_protocol_version: Option<u64>,
+    /// `tauri-plugin-connector` crate version (plugins 0.17.5+; `None` = older).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_version: Option<String>,
+    /// Product name from the app's package info (plugins 0.17.5+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+    /// App version from the app's package info (plugins 0.17.5+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
 }
 
 impl AppIdentity {
