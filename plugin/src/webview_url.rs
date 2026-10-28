@@ -8,10 +8,12 @@
 //! UI thread and reports "no URL yet" instead.
 use tauri::Url;
 
+#[cfg(any(target_os = "macos", test))]
 pub const NO_URL: &str = "webview has no URL yet (page still loading)";
 
 /// Turns a raw native URL string into a parsed URL; `None` means the WebView
 /// has not committed a URL yet.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn from_native(raw: Option<String>) -> Result<Url, String> {
     let raw = raw
         .filter(|raw| !raw.is_empty())
