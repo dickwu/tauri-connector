@@ -423,7 +423,26 @@ impl Bridge {
         };
         let script = script.gated();
         let mut reinjected = false;
+        // The page's last refusal: once the deadline passes after one, report
+        // it rather than a bare "deadline expired" (coarse sleeps on Windows
+        // can overshoot the deadline between attempts).
+        let mut refused: Option<String> = None;
+        let unready = |reason: &str| {
+            request.not_dispatched(format!(
+                "{reason}: the page was {} until the deadline; the script did not run",
+                match reason {
+                    "page_navigating" => "navigating away",
+                    "page_loading" => "still loading",
+                    _ => "missing the connector bridge",
+                }
+            ))
+        };
         loop {
+            if let Some(reason) = refused.as_deref()
+                && Instant::now() >= request.deadline
+            {
+                return Err(unready(reason));
+            }
             let reason = if self.provisional_navigation(window_id).await {
                 // The old document is still live; do not send it anything.
                 "page_navigating".to_string()
@@ -440,22 +459,24 @@ impl Bridge {
                 // trying again is not a replay. Wait for the page to settle.
                 match result.as_ref().err().and_then(not_run_reason) {
                     Some(reason) => reason.to_string(),
-                    None => return result,
+                    None => {
+                        if let (Some(reason), Err(BridgeError::NotDispatched { .. })) =
+                            (refused.as_deref(), &result)
+                            && Instant::now() >= request.deadline
+                        {
+                            return Err(unready(reason));
+                        }
+                        return result;
+                    }
                 }
             };
             if reason == "helper_missing" && !reinjected {
                 reinjected = self.reinject_bridge(window_id).await;
             }
             if Instant::now() + NOT_RUN_RETRY >= request.deadline {
-                return Err(request.not_dispatched(format!(
-                    "{reason}: the page was {} until the deadline; the script did not run",
-                    match reason.as_str() {
-                        "page_navigating" => "navigating away",
-                        "page_loading" => "still loading",
-                        _ => "missing the connector bridge",
-                    }
-                )));
+                return Err(unready(&reason));
             }
+            refused = Some(reason);
             tokio::time::sleep(NOT_RUN_RETRY).await;
         }
     }
