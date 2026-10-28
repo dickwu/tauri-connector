@@ -9,7 +9,7 @@ Use this guide when a user asks to install or upgrade the connector in an existi
 3. Change the existing `tauri-plugin-connector` requirement to the selected compatible release. Preserve the existing optional feature name and dependency pins. For the 0.17 release, the focused update is:
 
    ```bash
-   cargo update --manifest-path src-tauri/Cargo.toml -p tauri-plugin-connector --precise 0.17.5
+   cargo update --manifest-path src-tauri/Cargo.toml -p tauri-plugin-connector --precise 0.17.6
    cargo tree --manifest-path src-tauri/Cargo.toml --locked --features connector -i tauri-plugin-connector
    ```
 
