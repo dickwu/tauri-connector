@@ -119,7 +119,7 @@ impl Backend for AppBackend {
                         "Target window is unavailable",
                     )
                 })?;
-                let current = webview.url().map_err(|_| {
+                let current = crate::webview_url::current(&webview).map_err(|_| {
                     WorkflowError::new(
                         "unauthorized",
                         "preparing",

@@ -1755,7 +1755,7 @@ pub async fn window_list(id: &str, app: Option<&tauri::AppHandle>) -> Response {
                 "title": window.title().unwrap_or_default(),
                 "visible": window.is_visible().unwrap_or(false),
                 "focused": window.is_focused().unwrap_or(false),
-                "url": window.url().map(|u| u.to_string()).unwrap_or_default(),
+                "url": crate::webview_url::current(window).map(|u| u.to_string()).unwrap_or_default(),
             })
         })
         .collect();

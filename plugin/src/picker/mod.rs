@@ -613,7 +613,7 @@ fn validate_window(app: &tauri::AppHandle, window: &str) -> Result<(), Value> {
     let window = app
         .get_webview_window(window)
         .ok_or_else(|| error("target_changed"))?;
-    let url = window.url().map_err(|_| error("unauthorized"))?;
+    let url = crate::webview_url::current(&window).map_err(|_| error("unauthorized"))?;
     if !crate::identity::origin_allowed(app, &url) {
         return Err(error("unauthorized"));
     }

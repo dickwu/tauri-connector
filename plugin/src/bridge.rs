@@ -675,8 +675,7 @@ impl Bridge {
         if crate::identity::page_loading(window_id) {
             return Err(failure("Target document is navigating"));
         }
-        let url = window
-            .url()
+        let url = crate::webview_url::current(&window)
             .map_err(|_| failure("Cannot validate current origin"))?;
         if !crate::identity::origin_allowed(&app, &url) {
             return Err(failure("Current origin is outside host configuration"));

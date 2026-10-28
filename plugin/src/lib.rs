@@ -46,6 +46,7 @@ mod runtime;
 pub(crate) mod screenshot;
 mod server;
 mod state;
+mod webview_url;
 mod workflow;
 
 use bridge::Bridge;
@@ -492,7 +493,7 @@ impl ConnectorBuilder {
 
                     // 2. Inject bridge JS into all current webviews
                     for (label, window) in handle.webview_windows() {
-                        if !window.url().is_ok_and(|url|identity::origin_allowed(&handle, &url)) { continue; }
+                        if !webview_url::current(&window).is_ok_and(|url|identity::origin_allowed(&handle, &url)) { continue; }
                         let init_script = bridge::bridge_init_script(bridge.port(), &label);
                         if let Err(e) = window.eval(&init_script) {
                             eprintln!("[connector] Failed to inject bridge script: {e}");
@@ -504,7 +505,7 @@ impl ConnectorBuilder {
                     let handle_for_event = handle.clone();
                     handle.listen("tauri://webview-created", move |_event| {
                         for (label, window) in handle_for_event.webview_windows() {
-                            if !window.url().is_ok_and(|url|identity::origin_allowed(&handle_for_event, &url)) { continue; }
+                            if !webview_url::current(&window).is_ok_and(|url|identity::origin_allowed(&handle_for_event, &url)) { continue; }
                             let script = bridge::bridge_init_script(bridge_port, &label);
                             let _ = window.eval(&script);
                         }
