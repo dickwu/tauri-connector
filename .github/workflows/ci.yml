@@ -14,7 +14,7 @@ jobs:
   core-contracts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -33,7 +33,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         features: ['', xcap, native-screenshot, 'xcap,native-screenshot']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -48,8 +48,8 @@ jobs:
   page-runtime:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -68,9 +68,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         connector: ['on', 'off']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -88,7 +88,7 @@ jobs:
       - name: Build connector disabled fixture
         if: matrix.connector == 'off'
         run: cargo build --locked --manifest-path examples/workflow-fixture/Cargo.toml --no-default-features --target-dir target
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fixture-${{ matrix.os }}-${{ matrix.connector }}
           path: |
@@ -105,8 +105,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -118,7 +118,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build real CLI and stdio entry points for the native contract test
         run: cargo build -p connector-cli -p connector-mcp-server --locked
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: fixture-${{ matrix.os }}-off
           path: target/debug
@@ -135,7 +135,7 @@ jobs:
         run: dbus-run-session -- xvfb-run -a node examples/workflow-fixture/scripts/feature-off-test.mjs
         env:
           CONNECTOR_FIXTURE_OUTPUT: evidence/feature-off
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: fixture-${{ matrix.os }}-on
           path: target/debug
@@ -178,7 +178,7 @@ jobs:
           CONNECTOR_FIXTURE_OUTPUT: evidence/workflow
       # Windows workflow journal deliberately remains fail-closed. The upgrade
       # harness must assert that boundary and test inspection independently.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: native-evidence-${{ matrix.os }}
@@ -193,9 +193,9 @@ jobs:
   docs-and-skills:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -231,7 +231,7 @@ jobs:
             suffix: ".exe"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -265,7 +265,7 @@ jobs:
              "dist/tauri-connector-mcp-${{ matrix.target }}${{ matrix.suffix }}"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ matrix.target }}
           path: dist/*
@@ -276,8 +276,8 @@ jobs:
     needs: [core-contracts, plugin-check, page-runtime, fixture-build, native-smoke, docs-and-skills, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: node scripts/ci-aggregate.mjs
