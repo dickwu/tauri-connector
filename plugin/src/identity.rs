@@ -129,12 +129,21 @@ pub fn app_identity(app: &tauri::AppHandle) -> Value {
         .ok()
         .and_then(|path| path.canonicalize().ok());
     let package = app.package_info();
-    identity_payload(
+    let mut payload = identity_payload(
         &app.config().identifier,
         &package.name,
         &package.version.to_string(),
         workspace,
-    )
+    );
+    with_project(&mut payload, crate::project::current(app));
+    payload
+}
+
+/// Add `projectName`, `projectRoot`, `cargoPackage` and `projectNameSource`.
+pub(crate) fn with_project(payload: &mut Value, project: &crate::project::Project) {
+    if let (Some(payload), Value::Object(fields)) = (payload.as_object_mut(), project.to_json()) {
+        payload.extend(fields);
+    }
 }
 
 /// The `app_identity` response. `pluginVersion`, `appName`, and `appVersion`
@@ -186,6 +195,21 @@ mod tests {
         assert_eq!(value["appVersion"], "1.2.3");
         assert_eq!(value["appId"], "com.example.app");
         assert_eq!(value["inspectionProtocolVersion"], 1);
+    }
+    #[test]
+    fn identity_names_the_project() {
+        let mut value = identity_payload("com.example.app", "Example", "1.2.3", None);
+        let project = crate::project::detect(
+            Some("Example dev"),
+            Some("Example"),
+            "com.example.app",
+            None,
+        );
+        with_project(&mut value, &project);
+        assert_eq!(value["projectName"], "Example dev");
+        assert_eq!(value["projectNameSource"], "builder");
+        assert!(value["projectRoot"].is_null());
+        assert_eq!(value["appId"], "com.example.app");
     }
     #[test]
     fn label_reuse_changes_host_identity() {

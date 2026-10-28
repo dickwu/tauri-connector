@@ -1583,7 +1583,10 @@ async fn check_runtime(
                 .and(pid.as_ref())
                 .and_then(|(_, info)| info.app_id.as_deref())
         });
-        if let Some(check) = check_mcp_json_owner(json_port, expected, own.as_ref(), &owner) {
+        let root = project.map(|root| root.canonicalize().unwrap_or_else(|_| root.clone()));
+        if let Some(check) =
+            check_mcp_json_owner(json_port, expected, root.as_deref(), own.as_ref(), &owner)
+        {
             checks.push(check);
         }
     }
@@ -1772,6 +1775,9 @@ struct ServedApp {
     app_id: String,
     app_name: Option<String>,
     pid: Option<u64>,
+    /// Project name and root (plugin 0.17.5+).
+    project_name: Option<String>,
+    project_root: Option<PathBuf>,
 }
 
 const APP_META_KEY: &str = "dev.tauri-connector/app";
@@ -1785,6 +1791,14 @@ fn served_app(initialize: &Value) -> Option<ServedApp> {
             .and_then(|v| v.as_str())
             .map(str::to_string),
         pid: meta.get("pid").and_then(|v| v.as_u64()),
+        project_name: meta
+            .get("projectName")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        project_root: meta
+            .get("projectRoot")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from),
     })
 }
 
@@ -1838,6 +1852,13 @@ fn describe_served(app: &ServedApp) -> String {
     if let Some(pid) = app.pid {
         out.push_str(&format!(", pid {pid}"));
     }
+    match (&app.project_name, &app.project_root) {
+        (Some(name), Some(root)) => {
+            out.push_str(&format!(", project {name} at {}", root.display()))
+        }
+        (Some(name), None) => out.push_str(&format!(", project {name}")),
+        _ => {}
+    }
     out
 }
 
@@ -1845,6 +1866,7 @@ fn describe_served(app: &ServedApp) -> String {
 fn check_mcp_json_owner(
     json_port: u16,
     expected_app_id: Option<&str>,
+    project_root: Option<&Path>,
     own: Option<&OwnMcp>,
     owner: &McpPortOwner,
 ) -> Option<Check> {
@@ -1867,6 +1889,25 @@ fn check_mcp_json_owner(
                     fix,
                 )
                 .with_detail(format!("this project's app identifier is {expected}")),
+            );
+        }
+        // Same identifier, different checkout (a worktree or a copy).
+        if connector_client::project::is_other_project(project_root, app.project_root.as_deref()) {
+            return Some(
+                Check::fail(
+                    format!(
+                        ".mcp.json port {json_port} belongs to another project: {}",
+                        describe_served(app)
+                    ),
+                    fix,
+                )
+                .with_detail(format!(
+                    "this project is at {}",
+                    project_root
+                        .map(Path::display)
+                        .map(|d| d.to_string())
+                        .unwrap_or_default()
+                )),
             );
         }
         return Some(Check::ok(format!(
@@ -2676,13 +2717,15 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
             app_id: "com.gfit.workout".into(),
             app_name: Some("GFIT Workout".into()),
             pid: Some(42),
+            project_name: None,
+            project_root: None,
         });
         let own = OwnMcp {
             app_label: "R2 (com.r2.app)".into(),
             mcp_port: Some(9601),
         };
         let check =
-            check_mcp_json_owner(9556, Some("com.r2.app"), Some(&own), &gfit).expect("check");
+            check_mcp_json_owner(9556, Some("com.r2.app"), None, Some(&own), &gfit).expect("check");
         assert_eq!(check.status, Status::Fail);
         assert!(
             check.label.contains("GFIT Workout (com.gfit.workout)"),
@@ -2695,7 +2738,8 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
             .contains("http://127.0.0.1:9601/mcp"));
 
         // Not running: still names the other app, and explains how to find the port.
-        let check = check_mcp_json_owner(9556, Some("com.r2.app"), None, &gfit).expect("check");
+        let check =
+            check_mcp_json_owner(9556, Some("com.r2.app"), None, None, &gfit).expect("check");
         assert_eq!(check.status, Status::Fail);
         assert!(check.fix.unwrap_or_default().contains("mcp_port_range"));
 
@@ -2704,14 +2748,17 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
             app_id: "com.r2.app".into(),
             app_name: Some("R2".into()),
             pid: None,
+            project_name: None,
+            project_root: None,
         });
-        let check = check_mcp_json_owner(9601, Some("com.r2.app"), Some(&own), &r2).unwrap();
+        let check = check_mcp_json_owner(9601, Some("com.r2.app"), None, Some(&own), &r2).unwrap();
         assert_eq!(check.status, Status::Ok);
 
         // Older plugin answers without identity, but the live PID file disagrees.
         let check = check_mcp_json_owner(
             9556,
             Some("com.r2.app"),
+            None,
             Some(&own),
             &McpPortOwner::Unidentified,
         )
@@ -2724,17 +2771,56 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
         );
 
         // Nothing to compare: no finding.
+        assert!(check_mcp_json_owner(
+            9556,
+            Some("com.r2.app"),
+            None,
+            None,
+            &McpPortOwner::Unidentified
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn mcp_json_port_owned_by_another_checkout_of_the_same_app_fails() {
+        let base = std::env::temp_dir().join(format!("tc-doctor-proj-{}", std::process::id()));
+        let (here, there) = (base.join("r2"), base.join("r2-worktree"));
+        std::fs::create_dir_all(&here).unwrap();
+        std::fs::create_dir_all(&there).unwrap();
+        let served = |root: &Path| {
+            McpPortOwner::App(ServedApp {
+                app_id: "com.r2.app".into(),
+                app_name: Some("R2".into()),
+                pid: Some(7),
+                project_name: Some("R2".into()),
+                project_root: Some(root.to_path_buf()),
+            })
+        };
+        let check =
+            check_mcp_json_owner(9556, Some("com.r2.app"), Some(&here), None, &served(&there))
+                .unwrap();
+        assert_eq!(check.status, Status::Fail);
         assert!(
-            check_mcp_json_owner(9556, Some("com.r2.app"), None, &McpPortOwner::Unidentified)
-                .is_none()
+            check.label.contains("belongs to another project"),
+            "{}",
+            check.label
         );
+        assert!(check.label.contains("project R2 at"), "{}", check.label);
+        let check =
+            check_mcp_json_owner(9556, Some("com.r2.app"), Some(&here), None, &served(&here))
+                .unwrap();
+        assert_eq!(check.status, Status::Ok);
+        assert!(check.label.contains("project R2"), "{}", check.label);
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
     fn served_app_reads_initialize_meta_and_url_ports() {
         let app = served_app(&json!({"result":{"_meta":{"dev.tauri-connector/app":
-            {"appId":"com.x","appName":"X","pid":3}}}}))
+            {"appId":"com.x","appName":"X","pid":3,"projectName":"X","projectRoot":"/src/x"}}}}))
         .unwrap();
+        assert_eq!(app.project_name.as_deref(), Some("X"));
+        assert_eq!(app.project_root.as_deref(), Some(Path::new("/src/x")));
         assert_eq!(app.app_id, "com.x");
         assert_eq!(app.pid, Some(3));
         assert!(served_app(&json!({"result":{}})).is_none());

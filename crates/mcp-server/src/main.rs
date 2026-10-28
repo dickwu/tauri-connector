@@ -27,7 +27,19 @@ const FALLBACK_TARGET: (&str, u16) = ("127.0.0.1", 9555);
 
 #[tokio::main]
 async fn main() {
-    let server = Arc::new(Server::new());
+    let project = match project_arg(std::env::args().skip(1)) {
+        Ok(project) => project,
+        Err(error) => {
+            eprintln!("[tauri-connector-mcp] {error}");
+            std::process::exit(2);
+        }
+    };
+    let mut server = Server::new();
+    server.project = project;
+    if let Some(project) = server.requested_project() {
+        eprintln!("[tauri-connector-mcp] Serving project '{project}' only");
+    }
+    let server = Arc::new(server);
     let in_flight = InFlight::default();
     let mut tasks = JoinSet::new();
 
@@ -156,8 +168,40 @@ impl InFlight {
     }
 }
 
+/// `--project <name>` / `--project=<name>`: only serve that project's app
+/// (`TAURI_CONNECTOR_PROJECT` works too). Other arguments were always
+/// ignored, so they still are, with a warning.
+fn project_arg(args: impl IntoIterator<Item = String>) -> Result<Option<String>, String> {
+    let mut args = args.into_iter();
+    let mut project = None;
+    while let Some(arg) = args.next() {
+        if arg == "--project" {
+            project = Some(
+                args.next()
+                    .filter(|value| !value.trim().is_empty() && !value.starts_with("--"))
+                    .ok_or("--project needs a project name")?,
+            );
+        } else if let Some(value) = arg.strip_prefix("--project=") {
+            if value.trim().is_empty() {
+                return Err("--project needs a project name".into());
+            }
+            project = Some(value.to_owned());
+        } else {
+            eprintln!("[tauri-connector-mcp] Ignoring unknown argument '{arg}' (supported: --project <name>)");
+        }
+    }
+    Ok(project)
+}
+
+/// `_meta` key for the project this server serves.
+const PROJECT_META_KEY: &str = "dev.tauri-connector/project";
+
 /// Connection state shared by all requests.
 struct Server {
+    /// `--project`; `TAURI_CONNECTOR_PROJECT` applies when unset.
+    project: Option<String>,
+    /// The app discovery last selected: id, name, project and port.
+    served: StdMutex<Option<Value>>,
     client: RwLock<ConnectorClient>,
     /// Discovered (or last used) app endpoint; `None` until discovery succeeds.
     target: Mutex<Option<(String, u16)>>,
@@ -167,10 +211,30 @@ struct Server {
 impl Server {
     fn new() -> Self {
         Self {
+            project: None,
+            served: StdMutex::new(None),
             client: RwLock::new(ConnectorClient::new()),
             target: Mutex::new(None),
             negotiated_protocol: StdMutex::new(None),
         }
+    }
+
+    fn requested_project(&self) -> Option<String> {
+        self.project
+            .clone()
+            .or_else(|| std::env::var(connector_client::project::PROJECT_ENV).ok())
+            .filter(|project| !project.trim().is_empty())
+    }
+
+    /// Which project this server serves, for `initialize` `_meta`.
+    fn project_meta(&self) -> Value {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        json!({
+            "requested": self.requested_project(),
+            "workingDirectoryProject": connector_client::project::cwd_project_root(&cwd)
+                .map(|root| root.to_string_lossy().into_owned()),
+            "served": self.served.lock().unwrap().clone(),
+        })
     }
 
     #[cfg(test)]
@@ -209,7 +273,8 @@ impl Server {
                         "title": "Tauri Connector",
                         "version": env!("CARGO_PKG_VERSION")
                     },
-                    "instructions": tools::server_instructions()
+                    "instructions": tools::server_instructions(),
+                    "_meta": { PROJECT_META_KEY: self.project_meta() }
                 });
                 JsonRpcResponse::success(id, result)
             }
@@ -294,9 +359,31 @@ impl Server {
     }
 
     async fn discover(&self, client: &ConnectorClient) -> Result<(String, u16), String> {
-        let resolved = discovery::resolve_connection(ConnectionOptions::from_current_dir())
+        let options = ConnectionOptions {
+            project: self.project.clone(),
+            ..ConnectionOptions::from_current_dir()
+        };
+        let resolved = discovery::resolve_connection(options)
             .await
             .map_err(|e| format!("discovery failed: {e}"))?;
+        let facts = connector_client::project::ProjectFacts::of(
+            resolved.identity.as_ref(),
+            resolved.instance.as_ref(),
+        );
+        let served = json!({
+            "appId": facts.app_id,
+            "appName": facts.app_name,
+            "projectName": facts.label(),
+            "projectRoot": facts.root,
+            "host": resolved.host,
+            "port": resolved.port,
+        });
+        eprintln!(
+            "[tauri-connector-mcp] Serving project '{}' ({})",
+            facts.label(),
+            facts.app_id.unwrap_or("unknown app")
+        );
+        *self.served.lock().unwrap() = Some(served);
         if let Some(identity) = &resolved.identity {
             client.bind_instance(&identity.app_instance_id)?;
         }
@@ -317,6 +404,39 @@ mod tests {
 
     fn request(value: Value) -> JsonRpcRequest {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn project_argument_is_parsed_and_other_arguments_are_ignored() {
+        let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(project_arg(args(&[])).unwrap(), None);
+        assert_eq!(
+            project_arg(args(&["--project", "R2"])).unwrap().as_deref(),
+            Some("R2")
+        );
+        assert_eq!(
+            project_arg(args(&["--project=git-strata"]))
+                .unwrap()
+                .as_deref(),
+            Some("git-strata")
+        );
+        assert!(project_arg(args(&["--project"])).is_err());
+        assert!(project_arg(args(&["--project", "--other"])).is_err());
+        assert_eq!(project_arg(args(&["--port", "9555"])).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn initialize_reports_the_requested_and_served_project() {
+        let mut server = Server::with_target("127.0.0.1", 9555);
+        server.project = Some("R2".into());
+        *server.served.lock().unwrap() = Some(json!({"projectName":"R2","port":9555}));
+        let init = request(
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}),
+        );
+        let result = server.handle_request(json!(1), &init).await.result.unwrap();
+        let meta = &result["_meta"][PROJECT_META_KEY];
+        assert_eq!(meta["requested"], "R2");
+        assert_eq!(meta["served"]["projectName"], "R2");
     }
 
     #[tokio::test]

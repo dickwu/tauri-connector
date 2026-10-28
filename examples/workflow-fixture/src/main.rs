@@ -270,14 +270,17 @@ fn main() {
             .ok()
             .and_then(|p| p.parse::<u16>().ok())
             .unwrap_or(19555);
+        let mut connector = tauri_plugin_connector::ConnectorBuilder::new()
+            .port_range(port, port)
+            .mcp_port_range(port + 1, port + 1)
+            .workflow_token(token);
+        // CONNECTOR_FIXTURE_PROJECT names the project, so two fixtures can
+        // stand in for two different apps in project-selection checks.
+        if let Ok(project) = std::env::var("CONNECTOR_FIXTURE_PROJECT") {
+            connector = connector.project_name(&project);
+        }
         builder
-            .plugin(
-                tauri_plugin_connector::ConnectorBuilder::new()
-                    .port_range(port, port)
-                    .mcp_port_range(port + 1, port + 1)
-                    .workflow_token(token)
-                    .build(),
-            )
+            .plugin(connector.build())
             .setup(|app| {
                 #[cfg(target_os = "macos")]
                 if std::env::var("CONNECTOR_FIXTURE_BACKGROUND").as_deref() == Ok("1") {

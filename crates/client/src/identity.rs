@@ -26,6 +26,16 @@ pub struct AppIdentity {
     /// App version from the app's package info (plugins 0.17.5+).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_version: Option<String>,
+    /// Project name (plugins 0.17.5+): builder name, productName, Cargo
+    /// package or directory. `None` = older plugin ("unknown project").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    /// Directory holding the Tauri project (plugins 0.17.5+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<PathBuf>,
+    /// `[package] name` of the app crate (plugins 0.17.5+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo_package: Option<String>,
 }
 
 impl AppIdentity {

@@ -17,6 +17,9 @@ fn identity() -> AppIdentity {
         plugin_version: None,
         app_name: None,
         app_version: None,
+        project_name: None,
+        project_root: None,
+        cargo_package: None,
     }
 }
 fn hint() -> ConnectorInstance {
@@ -32,6 +35,9 @@ fn hint() -> ConnectorInstance {
         exe: None,
         started_at: Some(123),
         pid_file: PathBuf::from("fixture.connector.json"),
+        project_name: None,
+        project_root: None,
+        cargo_package: None,
     }
 }
 #[test]
@@ -158,6 +164,7 @@ fn options(root: &std::path::Path) -> connector_client::discovery::ConnectionOpt
         app_instance_id: None,
         pid_file: None,
         allow_unrelated_app: false,
+        project: None,
     }
 }
 

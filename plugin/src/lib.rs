@@ -41,6 +41,7 @@ mod mcp_tool_schema;
 mod mcp_tools;
 mod net;
 pub(crate) mod picker;
+mod project;
 mod protocol;
 mod runtime;
 pub(crate) mod screenshot;
@@ -293,6 +294,7 @@ pub struct ConnectorBuilder {
     workflow_token: Option<String>,
     capture_preview_commands: Vec<String>,
     capture_preview_paths: Vec<String>,
+    project_name: Option<String>,
 }
 
 fn capture_setting(name: &str) -> Vec<String> {
@@ -322,6 +324,7 @@ impl ConnectorBuilder {
             workflow_token: std::env::var("TAURI_CONNECTOR_WORKFLOW_TOKEN").ok(),
             capture_preview_commands: capture_setting("TAURI_CONNECTOR_CAPTURE_PREVIEW_COMMANDS"),
             capture_preview_paths: capture_setting("TAURI_CONNECTOR_CAPTURE_PREVIEW_PATHS"),
+            project_name: None,
         }
     }
 
@@ -338,6 +341,18 @@ impl ConnectorBuilder {
     pub fn port_range(self, start: u16, end: u16) -> Self {
         Self {
             port_range: (start, end),
+            ..self
+        }
+    }
+
+    /// Name this app's project in `status`, the identity response, the PID
+    /// file and MCP `initialize` (0.17.5+). Default: `productName`, then the
+    /// app crate's package name, then its directory. Set it when two
+    /// checkouts or apps would otherwise look alike; the CLI's `--project`
+    /// (and `TAURI_CONNECTOR_PROJECT`) select by it.
+    pub fn project_name(self, name: &str) -> Self {
+        Self {
+            project_name: Some(name.to_string()),
             ..self
         }
     }
@@ -386,6 +401,9 @@ impl ConnectorBuilder {
         let workflow_token = self.workflow_token;
         let preview_commands = self.capture_preview_commands;
         let preview_paths = self.capture_preview_paths;
+        if let Some(name) = self.project_name.as_deref() {
+            project::set_explicit_name(name);
+        }
 
         PluginBuilder::<Wry>::new("connector")
             .js_init_script(format!("{}\n{}", bridge::early_init_script(), runtime::initialization_script()))
@@ -571,6 +589,7 @@ impl ConnectorBuilder {
                         bridge_port,
                         &config.product_name.clone().unwrap_or_default(),
                         &config.identifier,
+                        project::current(&handle),
                         &log_dir_for_pid,
                     ) {
                         let _ = PID_FILE.set(path);
@@ -627,6 +646,7 @@ fn write_pid_file(
     bridge_port: u16,
     app_name: &str,
     app_id: &str,
+    project: &project::Project,
     log_dir: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
@@ -647,6 +667,9 @@ fn write_pid_file(
         "app_name": app_name,
         "app_id": app_id,
         "app_instance_id": identity::app_instance_id(),
+        "project_name": project.name,
+        "project_root": project.root.as_ref().map(|root| root.to_string_lossy().into_owned()),
+        "cargo_package": project.cargo_package,
         "log_dir": log_dir.to_string_lossy(),
         "exe": exe.to_string_lossy(),
         "started_at": identity::started_at(),

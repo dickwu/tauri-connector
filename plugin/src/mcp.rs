@@ -720,6 +720,8 @@ fn app_meta(identity: &Value) -> Value {
         "appName": identity["appName"],
         "pid": identity["pid"],
         "pluginVersion": identity["pluginVersion"],
+        "projectName": identity["projectName"],
+        "projectRoot": identity["projectRoot"],
     })
 }
 
@@ -922,7 +924,10 @@ mod tests {
         assert_eq!(body["result"]["protocolVersion"], "2025-11-25");
         assert_eq!(body["result"]["serverInfo"]["title"], "Tauri Connector");
         let meta = app_meta(&json!({"appId":"com.example","appName":"Example","pid":7,
-            "pluginVersion":"0.17.5","workspacePath":"/private"}));
+            "pluginVersion":"0.17.5","workspacePath":"/private","projectName":"Example",
+            "projectRoot":"/src/example"}));
+        assert_eq!(meta["projectName"], "Example");
+        assert_eq!(meta["projectRoot"], "/src/example");
         assert_eq!(meta["appId"], "com.example");
         assert_eq!(meta["appName"], "Example");
         assert!(meta.get("workspacePath").is_none());

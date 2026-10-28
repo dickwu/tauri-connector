@@ -40,6 +40,10 @@ struct Cli {
     /// still attach to an unrelated app found by port scan (also TAURI_CONNECTOR_ANY_APP=1)
     #[arg(long, global = true)]
     any_app: bool,
+    /// Only connect to an app of this project: its project name, Cargo
+    /// package, app name, app id or root directory (also TAURI_CONNECTOR_PROJECT)
+    #[arg(long, global = true)]
+    project: Option<String>,
     /// Explicit path to .connector.json
     #[arg(long, global = true)]
     pid_file: Option<PathBuf>,
@@ -815,6 +819,7 @@ async fn run_cli(cli: Cli) {
             }),
         pid_file: cli.pid_file.clone(),
         allow_unrelated_app: cli.any_app,
+        project: cli.project.clone(),
     };
 
     if matches!(cli.command, Commands::Examples) {
@@ -917,6 +922,12 @@ async fn run_cli(cli: Cli) {
         {
             statuses.push(row);
         }
+        // List every app on the shared default ports, with its project, even
+        // when none could be selected (several projects use 9555/9556).
+        if connection_options.pid_file.is_none() {
+            let scanned = discovery::scan_statuses(&host, &statuses).await;
+            statuses.extend(scanned);
+        }
         if *json {
             println!(
                 "{}",
@@ -932,7 +943,12 @@ async fn run_cli(cli: Cli) {
                 let mut line = format!("connected: {}:{} ({:?})", r.host, r.port, r.source);
                 if let Some(identity) = &r.identity {
                     line.push_str(&format!(
-                        " app={} id={} plugin={}",
+                        " project={:?} app={} id={} plugin={}",
+                        connector_client::project::ProjectFacts::of(
+                            Some(identity),
+                            r.instance.as_ref()
+                        )
+                        .label(),
                         identity
                             .app_name
                             .as_deref()
@@ -955,9 +971,10 @@ async fn run_cli(cli: Cli) {
                 for s in statuses {
                     let state = s.state();
                     let plugin = discovery::plugin_version_label(s.identity.as_ref());
+                    let project = s.project;
                     let i = s.instance;
                     println!(
-                        "  {state} {}:{} pid={} app={} id={} plugin={plugin} file={}",
+                        "  {state} {}:{} pid={} project={project:?} app={} id={} plugin={plugin} file={}",
                         host,
                         i.ws_port,
                         i.pid,

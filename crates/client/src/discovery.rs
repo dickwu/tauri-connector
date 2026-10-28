@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::identity::{workspace_matches, AppIdentity};
+use crate::project::{cwd_project_root, is_other_project, ProjectFacts, PROJECT_ENV};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -28,6 +29,13 @@ pub struct ConnectorInstance {
     pub started_at: Option<u64>,
     #[serde(skip_deserializing)]
     pub pid_file: PathBuf,
+    /// Project the app belongs to (plugins 0.17.5+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cargo_package: Option<String>,
 }
 
 impl ConnectorInstance {
@@ -52,6 +60,9 @@ pub struct ConnectionOptions {
     /// Allow attaching to a port-scanned app that does not match the app a
     /// stale `.connector.json` names (`--any-app`, `TAURI_CONNECTOR_ANY_APP=1`).
     pub allow_unrelated_app: bool,
+    /// Only connect to an app of this project (`--project`,
+    /// `TAURI_CONNECTOR_PROJECT`); see [`crate::project::ProjectFacts::matches`].
+    pub project: Option<String>,
 }
 
 impl ConnectionOptions {
@@ -64,6 +75,7 @@ impl ConnectionOptions {
             app_instance_id: None,
             pid_file: None,
             allow_unrelated_app: false,
+            project: None,
         }
     }
 }
@@ -211,6 +223,9 @@ pub struct InstanceStatus {
     /// What the endpoint reported about itself, when it answered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<AppIdentity>,
+    /// Project name, or `unknown project` for plugins before 0.17.5.
+    #[serde(default)]
+    pub project: String,
 }
 
 /// `plugin=` label for status output; older plugins do not report a version.
@@ -248,11 +263,33 @@ pub fn port_scan_status(
     if resolved.instance.is_some() || statuses.iter().any(|s| s.instance.ws_port == resolved.port) {
         return None;
     }
-    let identity = resolved.identity.as_ref()?;
-    Some(InstanceStatus {
+    Some(scanned_status(resolved.port, resolved.identity.as_ref()?))
+}
+
+/// Status rows for every verified app answering on the default port range
+/// that no row in `statuses` already covers, so `status` lists every app
+/// (with its project) even when it cannot pick one.
+pub async fn scan_statuses(host: &str, statuses: &[InstanceStatus]) -> Vec<InstanceStatus> {
+    use futures_util::stream;
+    let mut rows = stream::iter(
+        DEFAULT_SCAN_RANGE.filter(|port| !statuses.iter().any(|s| s.instance.ws_port == *port)),
+    )
+    .map(|port| async move { (port, endpoint_identity(host, port, 250).await) })
+    .buffer_unordered(12)
+    .filter_map(|(port, result)| async move {
+        result.ok().map(|identity| scanned_status(port, &identity))
+    })
+    .collect::<Vec<_>>()
+    .await;
+    rows.sort_by_key(|row| row.instance.ws_port);
+    rows
+}
+
+fn scanned_status(port: u16, identity: &AppIdentity) -> InstanceStatus {
+    InstanceStatus {
         instance: ConnectorInstance {
             pid: identity.pid,
-            ws_port: resolved.port,
+            ws_port: port,
             mcp_port: None,
             bridge_port: None,
             app_name: identity.app_name.clone(),
@@ -262,6 +299,9 @@ pub fn port_scan_status(
             exe: None,
             started_at: Some(identity.started_at),
             pid_file: PathBuf::new(),
+            project_name: identity.project_name.clone(),
+            project_root: identity.project_root.clone(),
+            cargo_package: identity.cargo_package.clone(),
         },
         pid_alive: true,
         ws_reachable: true,
@@ -269,8 +309,9 @@ pub fn port_scan_status(
         legacy_plugin: false,
         stale: false,
         error: None,
+        project: ProjectFacts::of(Some(identity), None).label(),
         identity: Some(identity.clone()),
-    })
+    }
 }
 
 /// Whether an identity error means the host refused our credentials (the
@@ -331,9 +372,19 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
         .app_instance_id
         .clone()
         .or_else(|| std::env::var("TAURI_CONNECTOR_APP_INSTANCE_ID").ok());
-    for identifier in [app_id.as_deref(), expected_instance.as_deref()]
-        .into_iter()
-        .flatten()
+    let project = opts
+        .project
+        .clone()
+        .or_else(|| std::env::var(PROJECT_ENV).ok())
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+    for identifier in [
+        app_id.as_deref(),
+        expected_instance.as_deref(),
+        project.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
     {
         if identifier.is_empty()
             || identifier.len() > 256
@@ -356,7 +407,12 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
         let identity = endpoint_identity(&host, port, 1500).await;
         let identity = match identity {
             Ok(identity) => Some(identity),
-            Err(error) if app_id.is_some() || expected_instance.is_some() || pid_file.is_some() => {
+            Err(error)
+                if app_id.is_some()
+                    || expected_instance.is_some()
+                    || pid_file.is_some()
+                    || project.is_some() =>
+            {
                 if !is_unauthorized_error(&error) && is_legacy_plugin(&host, port, 1500).await {
                     return Err(legacy_plugin_error(&[port]));
                 }
@@ -384,6 +440,15 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
                     Some(&hint),
                 )?;
             }
+            if let Some(selector) = project.as_deref() {
+                let facts = ProjectFacts::of(Some(identity), None);
+                if !facts.matches(selector) {
+                    return Err(format!(
+                        "project_mismatch: port {port} serves {}, not project '{selector}'",
+                        describe_project(&facts)
+                    ));
+                }
+            }
         }
         return Ok(ResolvedConnection {
             host,
@@ -397,7 +462,15 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
             identity,
         });
     }
-    let constrained = app_id.is_some() || expected_instance.is_some() || pid_file.is_some();
+    let constrained =
+        app_id.is_some() || expected_instance.is_some() || pid_file.is_some() || project.is_some();
+    let wrong_project = |identity: &AppIdentity, hint: Option<&ConnectorInstance>| {
+        project
+            .as_deref()
+            .is_some_and(|selector| !ProjectFacts::of(Some(identity), hint).matches(selector))
+    };
+    // Apps whose project another selector ruled out, for the error message.
+    let mut other_projects = Vec::new();
     let hints = discover_instances(&opts.cwd, app_id.as_deref(), pid_file.as_deref());
     // Tier 1: endpoints that match an explicit constraint or this workspace.
     let mut candidates = Vec::new();
@@ -453,11 +526,16 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
                         instance: hint,
                     });
                 }
+            } else if wrong_project(&identity, Some(&hint)) {
+                other_projects.push(ResolvedConnection {
+                    host: host.clone(),
+                    port: hint.ws_port,
+                    source: ConnectionSource::PidFile,
+                    instance: Some(hint),
+                    identity: Some(identity),
+                });
             } else {
-                let in_workspace = identity
-                    .workspace_path
-                    .as_deref()
-                    .is_some_and(|path| workspace_matches(&opts.cwd, path));
+                let in_workspace = in_workspace(&opts.cwd, &identity);
                 let candidate = ResolvedConnection {
                     host: host.clone(),
                     port: hint.ws_port,
@@ -495,10 +573,8 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
                 )
                 .is_ok()
                 {
-                    let in_workspace = identity
-                        .workspace_path
-                        .as_deref()
-                        .is_some_and(|path| workspace_matches(&opts.cwd, path));
+                    let in_workspace = in_workspace(&opts.cwd, &identity);
+                    let wrong_project = wrong_project(&identity, None);
                     let candidate = ResolvedConnection {
                         host: host.clone(),
                         port,
@@ -506,7 +582,9 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
                         instance: None,
                         identity: Some(identity),
                     };
-                    if constrained || in_workspace {
+                    if wrong_project {
+                        other_projects.push(candidate);
+                    } else if constrained || in_workspace {
                         candidates.push(candidate);
                     } else {
                         others.push(candidate);
@@ -532,7 +610,12 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
     }
     if candidates.is_empty() && others.len() == 1 && !constrained {
         // Exactly one verified app is running and nothing ties the working
-        // directory to another one: select it, as `status` does.
+        // directory to another one: select it, as `status` does. An app that
+        // reports a different project than the working directory's is
+        // refused: several apps share the default ports.
+        if !allow_unrelated_app {
+            project_gate(&opts.cwd, &others[0])?;
+        }
         candidates = others;
     } else if candidates.is_empty() && others.len() > 1 {
         // Several unrelated apps: report them instead of a bare app_not_found.
@@ -546,7 +629,71 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
     if candidates.is_empty() && !legacy_ports.is_empty() {
         return Err(legacy_plugin_error(&legacy_ports));
     }
+    if candidates.is_empty() && !other_projects.is_empty() {
+        let selector = project.as_deref().unwrap_or_default();
+        let running = other_projects
+            .iter()
+            .map(|candidate| {
+                format!(
+                    "{} on port {}",
+                    describe_project(&ProjectFacts::of(
+                        candidate.identity.as_ref(),
+                        candidate.instance.as_ref()
+                    )),
+                    candidate.port
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "project_mismatch: no running app belongs to project '{selector}'; running: {running}. Run `tauri-connector status` to list projects"
+        ));
+    }
     select_unique(candidates)
+}
+
+/// Whether the endpoint's workspace or project root contains the working
+/// directory.
+fn in_workspace(cwd: &Path, identity: &AppIdentity) -> bool {
+    [
+        identity.workspace_path.as_deref(),
+        identity.project_root.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|path| workspace_matches(cwd, path))
+}
+
+/// `R2 (com.example.r2) [project R2 at /src/r2]`, or `unknown project`.
+fn describe_project(facts: &ProjectFacts<'_>) -> String {
+    let app = match (facts.app_name, facts.app_id) {
+        (Some(name), Some(id)) => format!("{name} ({id})"),
+        (None, Some(id)) => id.to_string(),
+        (Some(name), None) => name.to_string(),
+        (None, None) => "an app".to_string(),
+    };
+    match facts.root {
+        Some(root) => format!("{app} [project {} at {}]", facts.label(), root.display()),
+        None => format!("{app} [{}]", facts.label()),
+    }
+}
+
+/// Refuse a fallback app that belongs to a different project than `cwd`.
+/// Apps that do not report a project root (plugins before 0.17.5) pass.
+pub fn project_gate(cwd: &Path, candidate: &ResolvedConnection) -> Result<(), String> {
+    let facts = ProjectFacts::of(candidate.identity.as_ref(), candidate.instance.as_ref());
+    let cwd_root = cwd_project_root(cwd);
+    if !is_other_project(cwd_root.as_deref(), facts.root) {
+        return Ok(());
+    }
+    let selector = facts.name.or(facts.app_id).unwrap_or_default();
+    Err(format!(
+        "project_mismatch: the only running app is {} on port {}, but this directory belongs to the project at {}. Start this project's app, or pass --project '{selector}' (or --port {}) to use the other one, or set {ANY_APP_ENV}=1 (CLI: --any-app)",
+        describe_project(&facts),
+        candidate.port,
+        cwd_root.as_deref().unwrap_or(cwd).display(),
+        candidate.port,
+    ))
 }
 
 pub fn select_unique(
@@ -556,8 +703,8 @@ pub fn select_unique(
         0=>Err("app_not_found: no endpoint satisfies the requested identity; no default-instance fallback was attempted".into()),
         1=>Ok(candidates.remove(0)),
         _=>{
-            let summaries=candidates.iter().map(|candidate|json!({"host":candidate.host,"port":candidate.port,"appId":candidate.identity.as_ref().map(|identity|&identity.app_id),"appInstanceId":candidate.identity.as_ref().map(|identity|&identity.app_instance_id)})).collect::<Vec<_>>();
-            Err(format!("ambiguous_app: {} verified candidates {}; specify --app-instance-id or --host/--port",candidates.len(),json!(summaries)))
+            let summaries=candidates.iter().map(|candidate|json!({"host":candidate.host,"port":candidate.port,"appId":candidate.identity.as_ref().map(|identity|&identity.app_id),"appInstanceId":candidate.identity.as_ref().map(|identity|&identity.app_instance_id),"project":ProjectFacts::of(candidate.identity.as_ref(),candidate.instance.as_ref()).label()})).collect::<Vec<_>>();
+            Err(format!("ambiguous_app: {} verified candidates {}; specify --project, --app-instance-id or --host/--port",candidates.len(),json!(summaries)))
         },
     }
 }
@@ -656,7 +803,9 @@ pub async fn instance_statuses(
         } else {
             (false, false, Some("process is not running".to_string()))
         };
+        let project = ProjectFacts::of(reported.as_ref(), Some(&instance)).label();
         statuses.push(InstanceStatus {
+            project,
             instance,
             pid_alive,
             ws_reachable,
@@ -740,6 +889,12 @@ fn read_instance_file(path: &Path) -> Option<ConnectorInstance> {
         exe: Option<PathBuf>,
         #[serde(default)]
         started_at: Option<u64>,
+        #[serde(default)]
+        project_name: Option<String>,
+        #[serde(default)]
+        project_root: Option<PathBuf>,
+        #[serde(default)]
+        cargo_package: Option<String>,
     }
 
     let raw: RawInstance = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
@@ -755,6 +910,9 @@ fn read_instance_file(path: &Path) -> Option<ConnectorInstance> {
         exe: raw.exe,
         started_at: raw.started_at,
         pid_file: path.to_path_buf(),
+        project_name: raw.project_name,
+        project_root: raw.project_root,
+        cargo_package: raw.cargo_package,
     })
 }
 
@@ -818,6 +976,9 @@ mod tests {
             plugin_version: None,
             app_name: None,
             app_version: None,
+            project_name: None,
+            project_root: None,
+            cargo_package: None,
         };
         let resolved = ResolvedConnection {
             host: "127.0.0.1".into(),
@@ -862,6 +1023,9 @@ mod tests {
             exe: None,
             started_at: None,
             pid_file: PathBuf::from("/tmp/.connector.json"),
+            project_name: None,
+            project_root: None,
+            cargo_package: None,
         };
         assert_eq!(
             instance.snapshots_dir(),
@@ -890,6 +1054,9 @@ mod tests {
             exe: None,
             started_at: None,
             pid_file: PathBuf::from("/tmp/.connector.json"),
+            project_name: None,
+            project_root: None,
+            cargo_package: None,
         };
         let status = InstanceStatus {
             instance,
@@ -900,6 +1067,7 @@ mod tests {
             stale: false,
             error: None,
             identity: None,
+            project: "unknown project".into(),
         };
         assert_eq!(status.state(), "unauthorized");
         let old_plugin = InstanceStatus {
@@ -914,5 +1082,96 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(legacy.state(), "stale");
+    }
+}
+
+#[cfg(test)]
+mod project_tests {
+    use super::*;
+
+    fn scanned(root: Option<PathBuf>, name: Option<&str>) -> ResolvedConnection {
+        ResolvedConnection {
+            host: "127.0.0.1".into(),
+            port: 9555,
+            source: ConnectionSource::PortScan,
+            instance: None,
+            identity: Some(AppIdentity {
+                app_instance_id: "inst".into(),
+                app_id: "com.example.gfit".into(),
+                pid: 7,
+                started_at: 1,
+                workspace_id: None,
+                workspace_path: None,
+                inspection_protocol_version: 1,
+                workflow_protocol_version: None,
+                plugin_version: Some("0.17.5".into()),
+                app_name: Some("GFIT Workout".into()),
+                app_version: None,
+                project_name: name.map(str::to_owned),
+                project_root: root,
+                cargo_package: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn the_only_running_app_is_refused_when_it_belongs_to_another_project() {
+        let base = std::env::temp_dir().join(format!("tc-gate-{}", uuid::Uuid::new_v4()));
+        let base = {
+            std::fs::create_dir_all(&base).unwrap();
+            base.canonicalize().unwrap()
+        };
+        let r2 = base.join("r2");
+        let gfit = base.join("gfit");
+        std::fs::create_dir_all(r2.join("src-tauri")).unwrap();
+        std::fs::create_dir_all(gfit.join("src-tauri")).unwrap();
+
+        let other = scanned(Some(gfit.clone()), Some("GFIT Workout"));
+        let error = project_gate(&r2, &other).unwrap_err();
+        assert!(error.starts_with("project_mismatch:"), "{error}");
+        assert!(
+            error.contains("GFIT Workout (com.example.gfit) [project GFIT Workout at"),
+            "{error}"
+        );
+        assert!(error.contains("--project 'GFIT Workout'"), "{error}");
+        // Same project (from src-tauri too), an older plugin, and a working
+        // directory outside any Tauri project all keep the fallback.
+        assert!(project_gate(&gfit.join("src-tauri"), &other).is_ok());
+        assert!(project_gate(&r2, &scanned(None, None)).is_ok());
+        assert!(project_gate(&base, &other).is_ok());
+
+        let row = port_scan_status(&scanned(None, None), &[]).unwrap();
+        assert_eq!(row.project, "unknown project");
+        let row = port_scan_status(&other, &[]).unwrap();
+        assert_eq!(row.project, "GFIT Workout");
+        assert_eq!(row.instance.project_root.as_deref(), Some(gfit.as_path()));
+        let json = serde_json::to_value(&row).unwrap();
+        assert_eq!(json["project"], "GFIT Workout");
+        assert_eq!(json["identity"]["projectName"], "GFIT Workout");
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn pid_files_carry_the_project_and_older_ones_still_parse() {
+        let dir = std::env::temp_dir().join(format!("tc-pid-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".connector.json");
+        std::fs::write(
+            &path,
+            r#"{"pid":1,"ws_port":9555,"app_id":"com.r2","project_name":"R2","project_root":"/src/r2","cargo_package":"r2-app"}"#,
+        )
+        .unwrap();
+        let instance = read_instance_file(&path).unwrap();
+        assert_eq!(instance.project_name.as_deref(), Some("R2"));
+        assert_eq!(instance.project_root.as_deref(), Some(Path::new("/src/r2")));
+        assert_eq!(instance.cargo_package.as_deref(), Some("r2-app"));
+        assert!(ProjectFacts::of(None, Some(&instance)).matches("r2-app"));
+        std::fs::write(&path, r#"{"pid":1,"ws_port":9555}"#).unwrap();
+        let old = read_instance_file(&path).unwrap();
+        assert_eq!(
+            ProjectFacts::of(None, Some(&old)).label(),
+            "unknown project"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

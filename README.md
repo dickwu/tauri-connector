@@ -808,6 +808,8 @@ cargo build -p connector-mcp-server --release
 }
 ```
 
+When several apps run at once (they share 9555/9556 by default), add `"args": ["--project", "<name>"]` (or `TAURI_CONNECTOR_PROJECT`) so the server only attaches to that project's app; `tauri-connector status` lists every instance's project, and a 0.17.5+ app can set its name with `ConnectorBuilder::new().project_name("...")` (default: `productName`).
+
 For workflows, launch the standalone server with the same `TAURI_CONNECTOR_WORKFLOW_TOKEN` as the host. It reads the token from its environment unless an explicit `authToken` is supplied in the tool call. The standalone server forwards execution to the app's workflow service and does not run a separate copy of the steps.
 
 ## Plugin Configuration
@@ -824,6 +826,7 @@ use tauri_plugin_connector::ConnectorBuilder;
             .bind_address("127.0.0.1")  // localhost only (the default)
             .port_range(8000, 8100)     // WS port range, inclusive (default: 9555-9655)
             .mcp_port_range(8100, 8200) // MCP port range, inclusive (default: 9556-9656)
+            .project_name("my-app")    // name shown by `status` and matched by --project (default: productName)
             .build()
     );
 }

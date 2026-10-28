@@ -365,6 +365,9 @@ mod tests {
                 exe: None,
                 started_at: None,
                 pid_file: PathBuf::from(".connector.json"),
+                project_name: None,
+                project_root: None,
+                cargo_package: None,
             }),
         }
     }
@@ -406,6 +409,9 @@ mod tests {
             plugin_version: None,
             app_name: None,
             app_version: None,
+            project_name: None,
+            project_root: None,
+            cargo_package: None,
         });
         let mut second = first.clone();
         second.host = "127-0-0-1".into();

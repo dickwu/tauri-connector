@@ -19,6 +19,7 @@ pub mod discovery;
 pub mod identity;
 pub mod inspection;
 pub mod outcome;
+pub mod project;
 pub mod workflow;
 
 const DEFAULT_TIMEOUT_MS: u64 = 35_000;

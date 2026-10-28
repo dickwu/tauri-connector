@@ -2,6 +2,8 @@
 
 Complete reference for the `tauri-connector` CLI binary. Commands resolve the connection as `--host/--port` > `TAURI_CONNECTOR_*` env > nearby `.connector.json` > port scan. Every command (not only `status`) accepts a live `.connector.json` found under the working directory or its ancestors (including `src-tauri/target`) once the endpoint proves it is that process, even when the app runs from another directory; from an unrelated directory it selects the single verified running app and reports `ambiguous_app` when there are several. `--app-id`, `--app-instance-id` and `--pid-file` never fall back. A nearby `.connector.json` whose process is dead, or whose port now answers as another process, blocks the single-app fallback (0.17.5+): the command fails with `stale_pid_file`, naming the record and any app the port scan found instead, rather than attaching to an unrelated app. It still attaches to a scanned app with the record's app id. Restart the app (it rewrites the record), delete the stale file, pass `--app-id`/`--port`, or opt in with `--any-app` (`TAURI_CONNECTOR_ANY_APP=1`, also honoured by the standalone MCP server).
 
+**Projects (0.17.5+).** Several apps (R2, GFIT Workout, Hub, git-strata-gui) share the default ports 9555/9556, so each 0.17.5 plugin reports its project: `projectName` (the builder's `project_name(..)`, else `productName`, else the Cargo package, else the directory name), `projectRoot` (the directory holding `src-tauri`) and `cargoPackage`, in `identity` and in `.connector.json`. `--project <name>` (or `TAURI_CONNECTOR_PROJECT`) selects the instance whose project name, Cargo package, app name, app id, root directory name or absolute root matches (case-insensitive) and fails with `project_mismatch`, listing the running projects, when none does. Without it, a command run inside a Tauri project (a directory with `src-tauri/` or `tauri.conf.json`) refuses the only running app when that app reports a different project root, and names the `--project`/`--port`/`--any-app` way out. Plugins older than 0.17.5 report no project and show `unknown project`; they are never refused for it.
+
 Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-cli --release`
 
 ## Environment Variables
@@ -12,6 +14,7 @@ Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-
 | `TAURI_CONNECTOR_PORT` | discovered | Plugin WebSocket port |
 | `TAURI_CONNECTOR_PID_FILE` | | Explicit `.connector.json` path |
 | `TAURI_CONNECTOR_APP_ID` | | Filter discovered instances by app identifier |
+| `TAURI_CONNECTOR_PROJECT` | | Select the instance belonging to this project (CLI `--project`; also read by `tauri-connector-mcp`) |
 | `TAURI_CONNECTOR_ANY_APP` | | `1` lets discovery attach to an unrelated port-scanned app when a nearby `.connector.json` is stale (CLI `--any-app`) |
 | `TAURI_CONNECTOR_WORKFLOW_TOKEN` | | Host token (>= 32 bytes) for workflows; rich inspection/picker/capture APIs need it only when the host configured one |
 
@@ -22,13 +25,14 @@ Install: `brew install dickwu/tap/tauri-connector` or `cargo build -p connector-
 ```bash
 tauri-connector status
 tauri-connector status --json
+tauri-connector --project R2 status
 tauri-connector --app-id com.example.app logs -l error
 tauri-connector --window-id settings snapshot -i
 tauri-connector --pid-file src-tauri/target/.connector.json snapshot -i
 tauri-connector bridge
 ```
 
-`status` lists live and stale candidates with `plugin=<version>` per row (`<0.17.5 (unreported)` for older plugins), the connected app's name, id and plugin version, and the discovery error when nothing connects (`resolveError` in `--json`). `identity` returns `appId`, `appName`, `appVersion`, `pluginVersion`, the instance id and protocol versions; for a plugin older than 0.17.5 it prints `pluginVersion: null` with a `pluginVersionNote`. `bridge` shows connected webviews, pending evals, whether eval fallback is available (`fallbackAvailable`), and `workflowProtocolVersion` (`1` on plugins >= 0.15; the CLI checks it before sending any `workflow` request). `--window-id` is global and scopes snapshots, refs, interactions, screenshots, logs, and window operations to a specific Tauri window label.
+`status` lists live and stale candidates, plus every verified app answering on ports 9555–9655 (`file=(port scan)`), with `project="<name>"` and `plugin=<version>` per row (`unknown project` and `<0.17.5 (unreported)` for older plugins), even when it cannot pick one; the connected app's project, name, id and plugin version, and the discovery error when nothing connects (`resolveError` in `--json`). `identity` returns `appId`, `appName`, `appVersion`, `pluginVersion`, the instance id and protocol versions; for a plugin older than 0.17.5 it prints `pluginVersion: null` with a `pluginVersionNote`. `bridge` shows connected webviews, pending evals, whether eval fallback is available (`fallbackAvailable`), and `workflowProtocolVersion` (`1` on plugins >= 0.15; the CLI checks it before sending any `workflow` request). `--window-id` is global and scopes snapshots, refs, interactions, screenshots, logs, and window operations to a specific Tauri window label.
 
 ---
 
