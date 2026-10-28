@@ -462,7 +462,9 @@ impl Bridge {
 
     async fn provisional_navigation(&self, window_id: &str) -> bool {
         use tauri::Manager;
-        let Some(app) = self.app_handle.lock().await.clone() else {
+        // Never wait on the app handle: a holder may be spending this
+        // request's deadline, and the transports report that budget.
+        let Some(app) = self.app_handle.try_lock().ok().and_then(|app| app.clone()) else {
             return false;
         };
         let Some(window) = app.get_webview_window(window_id) else {
@@ -478,7 +480,9 @@ impl Bridge {
     /// document is ready before the load-finished injection.
     async fn reinject_bridge(&self, window_id: &str) -> bool {
         use tauri::Manager;
-        let Some(app) = self.app_handle.lock().await.clone() else {
+        // Never wait on the app handle: a holder may be spending this
+        // request's deadline, and the transports report that budget.
+        let Some(app) = self.app_handle.try_lock().ok().and_then(|app| app.clone()) else {
             return false;
         };
         let Some(window) = app.get_webview_window(window_id) else {
