@@ -209,13 +209,16 @@ pub struct Bridge {
     late_hook: Arc<StdMutex<Option<LateSettlementHook>>>,
     /// Test seam: when set, native deliveries go here instead of a webview.
     native_sink: Arc<StdMutex<Option<mpsc::UnboundedSender<String>>>>,
+    /// Test seam: overrides the native "window is in the background" check.
+    background_override: Arc<StdMutex<Option<bool>>>,
 }
 
 /// Pause between attempts while a gated script reports the page is not ready.
 const NOT_RUN_RETRY: Duration = Duration::from_millis(50);
 
-/// Inclusive port range for the internal bridge listener.
-const BRIDGE_PORT_RANGE: (u16, u16) = (9300, 9400);
+/// How long a page in a background window gets to answer a liveness probe
+/// before a command is refused as `window_not_visible` (nothing sent).
+const BACKGROUND_PROBE: Duration = Duration::from_millis(1500);
 
 impl Bridge {
     /// Start the internal bridge WebSocket server.
@@ -225,8 +228,18 @@ impl Bridge {
     /// to the caller instead of leaving a handle to a bridge nobody serves.
     /// Must be called from within a Tokio runtime.
     pub fn start() -> Result<Self, String> {
-        let (std_listener, port) =
-            crate::net::bind_in_range("127.0.0.1", BRIDGE_PORT_RANGE.0, BRIDGE_PORT_RANGE.1)?;
+        // Inclusive port range for the internal bridge listener; default
+        // 9300-9400, `TAURI_CONNECTOR_BRIDGE_PORT_RANGE` overrides it.
+        use connector_client::ports;
+        let (range, invalid) =
+            ports::env_range(ports::BRIDGE_RANGE_VAR, None, ports::DEFAULT_BRIDGE_RANGE);
+        if let Some(error) = invalid {
+            eprintln!(
+                "[connector] ignoring {error}; using {}-{}",
+                range.0, range.1
+            );
+        }
+        let (std_listener, port) = crate::net::bind_in_range("127.0.0.1", range.0, range.1)?;
         let listener = TokioTcpListener::from_std(std_listener)
             .map_err(|e| format!("Failed to register bridge listener: {e}"))?;
 
@@ -242,6 +255,7 @@ impl Bridge {
             runtime: Arc::new(crate::runtime::RuntimeManager::default()),
             late_hook: Arc::new(StdMutex::new(None)),
             native_sink: Arc::new(StdMutex::new(None)),
+            background_override: Arc::new(StdMutex::new(None)),
         };
 
         let bridge_clone = bridge.clone();
@@ -422,6 +436,16 @@ impl Bridge {
             authorize,
         };
         let script = script.gated();
+        // git-strata: a page in a background window can be suspended; a
+        // command sent there used to wait out the whole deadline and then
+        // quarantine the window. Probe first and refuse before sending.
+        if self.window_in_background(window_id).await
+            && !self.page_answers_probe(window_id, &request).await
+        {
+            return Err(request.not_dispatched(
+                "window_not_visible: the page did not answer a liveness probe while its window is in the background, so the script was not sent. Run `tauri-connector windows focus` (MCP manage_window action=focus) and retry; if the window is visible, the page's main thread may be blocked",
+            ));
+        }
         let mut reinjected = false;
         // The page's last refusal: once the deadline passes after one, report
         // it rather than a bare "deadline expired" (coarse sleeps on Windows
@@ -479,6 +503,88 @@ impl Bridge {
             refused = Some(reason);
             tokio::time::sleep(NOT_RUN_RETRY).await;
         }
+    }
+
+    /// Whether the window is unfocused, hidden or minimized. Unknown (no app
+    /// handle, or the main thread did not answer quickly) counts as not.
+    async fn window_in_background(&self, window_id: &str) -> bool {
+        if let Some(forced) = *self.background_override.lock().unwrap() {
+            return forced;
+        }
+        use tauri::Manager;
+        let Some(app) = self.app_handle.try_lock().ok().and_then(|app| app.clone()) else {
+            return false;
+        };
+        let Some(window) = app.get_webview_window(window_id) else {
+            return false;
+        };
+        let check = tokio::task::spawn_blocking(move || {
+            !window.is_focused().unwrap_or(true)
+                || !window.is_visible().unwrap_or(true)
+                || window.is_minimized().unwrap_or(false)
+        });
+        matches!(
+            tokio::time::timeout(Duration::from_millis(500), check).await,
+            Ok(Ok(true))
+        )
+    }
+
+    /// A trivial command on its own request id. `false` only when the page
+    /// is connected but did not answer in time; a missing client, a CSP that
+    /// blocks string compilation, or any reply counts as answering, so the
+    /// normal path (and its own errors) takes over.
+    async fn page_answers_probe(&self, window_id: &str, request: &DispatchRequest<'_>) -> bool {
+        let deadline = std::cmp::min(request.deadline, Instant::now() + BACKGROUND_PROBE);
+        let client = {
+            let Ok(clients) = tokio::time::timeout_at(deadline, self.clients.lock()).await else {
+                return true;
+            };
+            match clients.get(window_id) {
+                Some(client) if !client.eval_blocked => client.clone(),
+                _ => return true,
+            }
+        };
+        let id = format!("{}:liveness", request.id);
+        let (tx, rx) = oneshot::channel();
+        let registration_id = uuid::Uuid::new_v4();
+        {
+            let mut pending = self.pending.lock().unwrap();
+            if pending.contains_key(&id) {
+                return true;
+            }
+            pending.insert(
+                id.clone(),
+                PendingRequest {
+                    conn_id: client.conn_id.clone(),
+                    registration_id,
+                    tx,
+                    awaiting_late_result: false,
+                },
+            );
+        }
+        let msg = serde_json::to_string(&BridgeCommand {
+            id: id.clone(),
+            script: "/*__CONNECTOR_LIVENESS__*/1".into(),
+        })
+        .expect("probe serializes");
+        let answered = if client.tx.send(msg).is_err() {
+            true
+        } else {
+            tokio::time::timeout_at(deadline, rx).await.is_ok()
+        };
+        let mut pending = self.pending.lock().unwrap();
+        if pending
+            .get(&id)
+            .is_some_and(|entry| entry.registration_id == registration_id)
+        {
+            pending.remove(&id);
+        }
+        answered
+    }
+
+    #[cfg(test)]
+    pub(crate) fn force_background(&self, background: Option<bool>) {
+        *self.background_override.lock().unwrap() = background;
     }
 
     async fn provisional_navigation(&self, window_id: &str) -> bool {
@@ -1221,7 +1327,12 @@ impl PageScript {
         }
         let needs_bridge = BRIDGE_HELPERS.iter().any(|helper| self.ws.contains(helper));
         let gate = page_gate(needs_bridge);
-        let wrap = |expression: &str| format!("({gate},(\n{expression}\n))");
+        let mark = if requests_navigation(&self.ws) {
+            MARK_NAVIGATION
+        } else {
+            ""
+        };
+        let wrap = |expression: &str| format!("({gate},{mark}(\n{expression}\n))");
         Self {
             ws: wrap(&self.ws),
             candidates: self
@@ -1281,29 +1392,46 @@ const vm = require('vm');
 const cases = JSON.parse(require('fs').readFileSync(0, 'utf8'));
 const out = {};
 const waits = [];
+const run = (ctx, scripts) => {
+  for (const script of scripts) {
+    try { vm.runInContext(script, ctx); } catch (e) { if (!e || e.name !== 'SyntaxError') throw e; }
+  }
+};
 for (const c of cases) {
   const sandbox = { setTimeout, clearTimeout, Promise, console };
   sandbox.window = sandbox;
   if (c.document) sandbox.document = c.document;
-  if (c.pageState) sandbox.__CONNECTOR_PAGE_STATE__ = Object.assign({}, c.pageState, c.pageState.unloadingAgoMs !== undefined ? { unloadingAt: Date.now() - c.pageState.unloadingAgoMs } : {});
+  if (c.location) sandbox.location = { reload() {} };
+  if (c.pageState) sandbox.__CONNECTOR_PAGE_STATE__ = Object.assign({}, c.pageState, c.pageState.unloadingAgoMs !== undefined ? { unloadingAt: Date.now() - c.pageState.unloadingAgoMs } : {}, c.pageState.navRequestedAgoMs !== undefined ? { navRequestedAt: Date.now() - c.pageState.navRequestedAgoMs } : {});
   if (c.bridge) sandbox.__CONNECTOR_BRIDGE__ = true;
   sandbox.__CONNECTOR_EFFECTS__ = { mark() { return 0; }, unchangedSince() { return true; } };
+  let ctx;
   waits.push(new Promise((resolve) => {
+    // With `then`, the first reply is kept and `then` runs in the same page.
+    let phase = 0;
+    const settle = (reply) => {
+      if (phase === 0 && c.then) {
+        phase = 1;
+        out[c.id] = reply;
+        setTimeout(() => run(ctx, c.then), 0);
+        return;
+      }
+      if (phase === 1) { out[c.id].then = reply; resolve(out[c.id]); return; }
+      resolve(out[c.id] = reply);
+    };
     sandbox.__CONNECTOR_RUN__ = function (id, fn, o) {
       Promise.resolve().then(fn).then(
-        (r) => resolve(out[c.id] = { id, result: r === undefined ? null : r }),
-        (e) => resolve(out[c.id] = { id, error: String(e && e.message || e), effect: o || 'none' }));
+        (r) => settle({ id, result: r === undefined ? null : r }),
+        (e) => settle({ id, error: String(e && e.message || e), effect: o || 'none' }));
     };
     sandbox.__TAURI_INTERNALS__ = { invoke(cmd, args) {
       const p = JSON.parse(args.payload);
-      resolve(out[c.id] = Object.assign({ event: args.event, result: null }, p));
+      settle(Object.assign({ event: args.event, result: null }, p));
     } };
     setTimeout(() => resolve(out[c.id] = out[c.id] || { timeout: true }), 2000).unref();
   }));
-  const ctx = vm.createContext(sandbox, { codeGeneration: { strings: c.strings, wasm: false } });
-  for (const script of c.scripts) {
-    try { vm.runInContext(script, ctx); } catch (e) { if (!e || e.name !== 'SyntaxError') throw e; }
-  }
+  ctx = vm.createContext(sandbox, { codeGeneration: { strings: c.strings, wasm: false } });
+  run(ctx, c.scripts);
 }
 Promise.all(waits).then(() => { process.stdout.write(JSON.stringify(out)); process.exit(0); });
 "#;
@@ -1414,6 +1542,31 @@ pub const NOT_RUN: &str = "connector_not_run";
 /// the mark must expire; commands then run against it again.
 pub const UNLOAD_WINDOW_MS: u64 = 15_000;
 
+/// How long after a script requested a cross-document navigation (see
+/// `navRequestedAt` in early.js) the document counts as navigating, until
+/// `beforeunload` takes over. Short, because a request an app cancels or
+/// that never commits leaves the old document live.
+pub const NAV_REQUEST_WINDOW_MS: u64 = 5_000;
+
+/// Scripts that request a cross-document navigation of this document. The
+/// `Location` methods cannot be patched in the page, so a script calling
+/// them marks the navigation itself once it has run.
+fn requests_navigation(script: &str) -> bool {
+    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    PATTERN
+        .get_or_init(|| {
+            regex::Regex::new(
+                r"\blocation\s*\.\s*(?:reload|assign|replace)\s*\(|\blocation(?:\s*\.\s*href)?\s*=[^=]|\bhistory\s*\.\s*go\s*\(",
+            )
+            .expect("navigation pattern compiles")
+        })
+        .is_match(script)
+}
+
+/// Marks the page state after the script settled successfully, so the next
+/// command waits for the new document instead of running on the old one.
+const MARK_NAVIGATION: &str = "(function(v){var m=function(){var s=window.__CONNECTOR_PAGE_STATE__;if(s)s.navRequestedAt=Date.now();};if(v&&typeof v.then==='function')return v.then(function(x){m();return x;});m();return v;})";
+
 /// Bridge-defined helpers a script may call; such a script also waits for
 /// the bridge in the current document.
 const BRIDGE_HELPERS: &[&str] = &["__CONNECTOR_SNAPSHOT__", "__CONNECTOR_TAKE_LOGS__"];
@@ -1428,7 +1581,7 @@ fn page_gate(needs_bridge: bool) -> String {
         ""
     };
     format!(
-        "(function(){{var w=window,d=w.document,s=w.__CONNECTOR_PAGE_STATE__,r=null;if(s&&s.unloadingAt&&Date.now()-s.unloadingAt<{UNLOAD_WINDOW_MS})r='page_navigating';else if(d&&d.readyState==='loading')r='page_loading';{helper}if(r)throw new Error('{NOT_RUN}: '+r);}})()"
+        "(function(){{var w=window,d=w.document,s=w.__CONNECTOR_PAGE_STATE__,r=null,n=Date.now();if(s&&((s.unloadingAt&&n-s.unloadingAt<{UNLOAD_WINDOW_MS})||(s.navRequestedAt&&n-s.navRequestedAt<{NAV_REQUEST_WINDOW_MS})))r='page_navigating';else if(d&&d.readyState==='loading')r='page_loading';{helper}if(r)throw new Error('{NOT_RUN}: '+r);}})()"
     )
 }
 
@@ -1526,13 +1679,13 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
   }}
   if (!pageState) {{
     // Documents created before the plugin registered its init script.
-    pageState = {{ epoch: Date.now().toString(36), unloadingAt: 0, logs: null, dropped: 0 }};
+    pageState = {{ epoch: Date.now().toString(36), unloadingAt: 0, navRequestedAt: 0, logs: null, dropped: 0 }};
     try {{
       Object.defineProperty(window, '__CONNECTOR_PAGE_STATE__', {{ value: pageState, configurable: true }});
       const unloading = function() {{ pageState.unloadingAt = Date.now(); }};
       window.addEventListener('beforeunload', unloading, true);
       window.addEventListener('pagehide', unloading, true);
-      window.addEventListener('pageshow', function(e) {{ if (e && e.persisted) pageState.unloadingAt = 0; }}, true);
+      window.addEventListener('pageshow', function(e) {{ if (e && e.persisted) {{ pageState.unloadingAt = 0; pageState.navRequestedAt = 0; }} }}, true);
     }} catch (_) {{}}
   }}
 
@@ -2781,6 +2934,7 @@ pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<Str
         runtime: Arc::new(crate::runtime::RuntimeManager::default()),
         late_hook: Arc::new(StdMutex::new(None)),
         native_sink: Arc::new(StdMutex::new(None)),
+        background_override: Arc::new(StdMutex::new(None)),
     };
     bridge.clients.lock().await.insert(
         "main".into(),
@@ -4137,6 +4291,22 @@ process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].m
                 Some("evt")
             ),
             case(
+                "nav-requested",
+                &plain,
+                &ready,
+                json!({"unloadingAt": 0, "navRequestedAgoMs": 10}),
+                true,
+                None
+            ),
+            case(
+                "nav-request-expired",
+                &plain,
+                &ready,
+                json!({"unloadingAt": 0, "navRequestedAgoMs": NAV_REQUEST_WINDOW_MS + 1000}),
+                false,
+                Some("evt")
+            ),
+            case(
                 "no-helper",
                 &helper,
                 &ready,
@@ -4155,8 +4325,14 @@ process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].m
             json!(7),
             "a failed navigation must not block forever"
         );
+        assert_eq!(
+            out["nav-request-expired"]["result"],
+            json!(7),
+            "a cancelled navigation request must not block forever"
+        );
         for (id, reason) in [
             ("reloading", "page_navigating"),
+            ("nav-requested", "page_navigating"),
             ("parsing", "page_loading"),
             ("no-helper", "helper_missing"),
         ] {
@@ -4179,6 +4355,52 @@ process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].m
             PageScript::trusted(crate::runtime::PROBE).gated().ws,
             crate::runtime::PROBE
         );
+    }
+
+    /// git-strata #8 remainder: a script that calls `location.reload()`
+    /// marks the document as navigating once it ran, so the next command is
+    /// refused (and retried) instead of being answered by the old page.
+    #[test]
+    fn scripts_that_request_navigation_mark_the_document_navigating() {
+        for script in [
+            "window.__old='X'; location.reload()",
+            "location.href = '/next'",
+            "window.location='/x'",
+            "location.assign('/a')",
+            "document.location.replace('/b')",
+            "history.go(0)",
+        ] {
+            assert!(requests_navigation(script), "{script}");
+        }
+        for script in [
+            "location.href",
+            "location.href === '/x'",
+            "[window.__old, performance.timeOrigin]",
+            "history.pushState({}, '', '/x')",
+            "mylocation = 1",
+        ] {
+            assert!(!requests_navigation(script), "{script}");
+        }
+        let reload = PageScript::trusted("(window.__old='X', location.reload(), 1)").gated();
+        let cases = json!([
+            {"id": "mark", "strings": false, "document": {"readyState": "interactive"},
+             "pageState": {"unloadingAt": 0, "navRequestedAt": 0}, "bridge": false,
+             "location": true,
+             "scripts": test_native_scripts(&reload, "mark", Some("evt")),
+             "then": test_native_scripts(&PageScript::trusted("window.__old").gated(), "after", Some("evt2"))},
+        ]);
+        let Some(out) = run_native_harness(&cases) else {
+            eprintln!("node unavailable; skipping");
+            return;
+        };
+        assert_eq!(out["mark"]["result"], json!(1), "{}", out["mark"]);
+        assert_eq!(
+            out["mark"]["then"]["error"],
+            json!(format!("{NOT_RUN}: page_navigating")),
+            "the old page must not answer the next command: {}",
+            out["mark"]
+        );
+        assert!(!reload.ws.is_empty());
     }
 
     /// The host retries a refused command (nothing ran) until the page is
@@ -4251,6 +4473,52 @@ process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].m
             other => panic!("expected not dispatched, got {other:?}"),
         }
         pump.abort();
+    }
+
+    /// git-strata: a command to a suspended page in a background window is
+    /// refused fast as window_not_visible, never sent (so never
+    /// quarantined); a live background page runs it normally.
+    #[tokio::test]
+    async fn background_windows_are_probed_before_a_command_is_sent() {
+        let (bridge, mut rx) = queued_bridge().await;
+        bridge.force_background(Some(true));
+        let started = Instant::now();
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_typed("mutate()", 30_000, "main")
+                .await
+        });
+        let probe: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(probe["script"], "/*__CONNECTOR_LIVENESS__*/1");
+        // Suspended page: no reply.
+        match task.await.unwrap() {
+            Err(BridgeError::NotDispatched { reason, .. }) => {
+                assert!(reason.starts_with("window_not_visible"), "{reason}")
+            }
+            other => panic!("expected window_not_visible, got {other:?}"),
+        }
+        assert!(started.elapsed() < Duration::from_secs(5), "fails fast");
+        assert!(rx.try_recv().is_err(), "the script itself was never sent");
+        assert!(bridge.pending.lock().unwrap().is_empty());
+
+        let worker = bridge.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .execute_js_for_window_typed("document.title", 5_000, "main")
+                .await
+        });
+        let probe: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        super::test_page_message(&bridge, json!({"id": probe["id"], "result": 1})).await;
+        let command: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert!(
+            command["script"]
+                .as_str()
+                .unwrap()
+                .contains("document.title")
+        );
+        super::test_page_message(&bridge, json!({"id": command["id"], "result": "t"})).await;
+        assert_eq!(task.await.unwrap().unwrap(), json!("t"));
     }
 
     /// Messages logged at document start, before the bridge exists (e.g.

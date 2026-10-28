@@ -312,9 +312,12 @@ fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
     let request_id = error.request_id().to_string();
     let dispatched = error.is_dispatched();
     let mut outcome = match error {
-        BridgeError::NotDispatched { reason, .. } => ExecutionOutcome::not_dispatched(
-            WorkflowError::new("execution_failed", "dispatching", reason),
-        ),
+        // Nothing reached the page, so a retry is never a replay.
+        BridgeError::NotDispatched { reason, .. } => {
+            let mut error = WorkflowError::new(not_dispatched_code(&reason), "dispatching", reason);
+            error.retryable_before_dispatch = true;
+            ExecutionOutcome::not_dispatched(error)
+        }
         // A settled rejection releases its lease only with page evidence that
         // nothing effect-capable was dispatched; otherwise it stays quarantined.
         BridgeError::ExecutionFailed { error, effect, .. } => ExecutionOutcome::failed(
@@ -327,6 +330,18 @@ fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
     };
     outcome.dispatch = serde_json::json!({"requestId": request_id, "dispatched": dispatched});
     outcome
+}
+
+/// Machine code for a refusal before dispatch, from the bridge's reason
+/// prefix (git-strata: a deadline refusal said `execution_failed`).
+fn not_dispatched_code(reason: &str) -> &'static str {
+    let prefix = reason.split(':').next().unwrap_or_default().trim();
+    match prefix {
+        "page_navigating" => "page_navigating",
+        "page_loading" | "helper_missing" => "page_not_ready",
+        "window_not_visible" => "window_not_visible",
+        _ => "execution_failed",
+    }
 }
 
 // ============ JavaScript Execution ============
@@ -5087,6 +5102,42 @@ mod tests {
         });
         assert_eq!(failed.execution, ExecutionStatus::Failed);
         assert_eq!(failed.effect, EffectStatus::Possible);
+    }
+
+    #[test]
+    fn deadline_refusals_name_the_page_state_and_are_retryable() {
+        // git-strata: the refusal said execution_failed / retryable false.
+        use crate::bridge::BridgeError;
+        for (reason, code) in [
+            (
+                "page_navigating: the page was navigating away until the deadline; the script did not run",
+                "page_navigating",
+            ),
+            (
+                "page_loading: the page was still loading until the deadline; the script did not run",
+                "page_not_ready",
+            ),
+            (
+                "helper_missing: the page was missing the connector bridge until the deadline",
+                "page_not_ready",
+            ),
+            (
+                "window_not_visible: the page did not answer",
+                "window_not_visible",
+            ),
+            (
+                "Bridge client for window 'main' is not connected",
+                "execution_failed",
+            ),
+        ] {
+            let outcome = super::bridge_error_outcome(BridgeError::NotDispatched {
+                request_id: "r".into(),
+                reason: reason.into(),
+            });
+            let error = outcome.error.unwrap();
+            assert_eq!(error.code, code, "{reason}");
+            assert!(error.retryable_before_dispatch, "{reason}");
+        }
     }
 
     #[test]
