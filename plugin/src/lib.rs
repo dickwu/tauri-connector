@@ -68,8 +68,23 @@ pub fn __connector_mcp_tool_definitions() -> serde_json::Value {
 }
 
 const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1";
-const DEFAULT_PORT_RANGE: (u16, u16) = (9555, 9655);
-const DEFAULT_MCP_PORT_RANGE: (u16, u16) = (9556, 9656);
+const DEFAULT_PORT_RANGE: (u16, u16) = connector_client::ports::DEFAULT_WS_RANGE;
+const DEFAULT_MCP_PORT_RANGE: (u16, u16) = connector_client::ports::DEFAULT_MCP_RANGE;
+
+/// A listener range after environment overrides: `range_var`, then
+/// `start_var`, then the builder's value. An invalid value is logged and
+/// ignored.
+fn env_port_range(range_var: &str, start_var: &str, configured: (u16, u16)) -> (u16, u16) {
+    let (range, invalid) =
+        connector_client::ports::env_range(range_var, Some(start_var), configured);
+    if let Some(error) = invalid {
+        eprintln!(
+            "[connector] ignoring {error}; using {}-{}",
+            range.0, range.1
+        );
+    }
+    range
+}
 
 // ============ Tauri IPC Commands ============
 // These are callable from the frontend via `invoke('plugin:connector|...')`
@@ -338,6 +353,8 @@ impl ConnectorBuilder {
     }
 
     /// Set the inclusive port range for the WebSocket server. Default: 9555-9655.
+    /// `TAURI_CONNECTOR_PORT_RANGE` (`START-END`) or `TAURI_CONNECTOR_PORT`
+    /// (start port) in the app's environment override it.
     pub fn port_range(self, start: u16, end: u16) -> Self {
         Self {
             port_range: (start, end),
@@ -358,6 +375,7 @@ impl ConnectorBuilder {
     }
 
     /// Set the inclusive port range for the embedded MCP HTTP server. Default: 9556-9656.
+    /// `TAURI_CONNECTOR_MCP_PORT_RANGE` or `TAURI_CONNECTOR_MCP_PORT` override it.
     pub fn mcp_port_range(self, start: u16, end: u16) -> Self {
         Self {
             mcp_port_range: (start, end),
@@ -395,8 +413,13 @@ impl ConnectorBuilder {
     /// Build the plugin.
     pub fn build(self) -> TauriPlugin<Wry> {
         let bind_address = self.bind_address;
-        let port_range = self.port_range;
-        let mcp_port_range = self.mcp_port_range;
+        use connector_client::ports;
+        let port_range = env_port_range(ports::WS_RANGE_VAR, ports::WS_PORT_VAR, self.port_range);
+        let mcp_port_range = env_port_range(
+            ports::MCP_RANGE_VAR,
+            ports::MCP_PORT_VAR,
+            self.mcp_port_range,
+        );
         let mcp_enabled = self.mcp_enabled;
         let workflow_token = self.workflow_token;
         let preview_commands = self.capture_preview_commands;

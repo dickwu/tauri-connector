@@ -12,7 +12,6 @@ use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_SCAN_RANGE: std::ops::RangeInclusive<u16> = 9555..=9655;
 
 /// Connector instance metadata written by the plugin into `.connector.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -272,7 +271,8 @@ pub fn port_scan_status(
 pub async fn scan_statuses(host: &str, statuses: &[InstanceStatus]) -> Vec<InstanceStatus> {
     use futures_util::stream;
     let mut rows = stream::iter(
-        DEFAULT_SCAN_RANGE.filter(|port| !statuses.iter().any(|s| s.instance.ws_port == *port)),
+        crate::ports::ws_scan_range()
+            .filter(|port| !statuses.iter().any(|s| s.instance.ws_port == *port)),
     )
     .map(|port| async move { (port, endpoint_identity(host, port, 250).await) })
     .buffer_unordered(12)
@@ -554,7 +554,8 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
     if pid_file.is_none() {
         use futures_util::stream;
         let results = stream::iter(
-            DEFAULT_SCAN_RANGE.filter(|port| !endpoints.contains(&(host.clone(), *port))),
+            crate::ports::ws_scan_range()
+                .filter(|port| !endpoints.contains(&(host.clone(), *port))),
         )
         .map(|port| {
             let host = host.clone();

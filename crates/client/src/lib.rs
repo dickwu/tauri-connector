@@ -19,6 +19,7 @@ pub mod discovery;
 pub mod identity;
 pub mod inspection;
 pub mod outcome;
+pub mod ports;
 pub mod project;
 pub mod workflow;
 
