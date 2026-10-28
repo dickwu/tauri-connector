@@ -397,3 +397,87 @@ fn capture_reports_why_its_source_was_selected() {
     let explicit = source_selection(S::WindowNative, &[S::WindowNative], S::WindowNative);
     assert!(explicit["reason"].as_str().unwrap().contains("explicitly"));
 }
+
+#[test]
+fn legacy_window_fallback_is_cropped_to_the_webview_viewport_or_says_it_is_not() {
+    use super::legacy_viewport_crop as crop;
+    // Inter: protected capture timed out and the xcap fallback returned the
+    // full 3840x2100 window, title bar included. With the page viewport
+    // (3840x2036 device px) the 64 px title band is cut.
+    let inter = crop(
+        (3840, 2100),
+        (3840, 2100),
+        Some((0, 0)),
+        (3840, 2100),
+        Some((3840, 2036)),
+    );
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            (inter.x, inter.y, inter.width, inter.height),
+            (0, 64, 3840, 2036)
+        );
+        assert_eq!(inter.basis, "css_viewport");
+        assert!(inter.warning().is_none());
+        assert_eq!(inter.report((3840, 2100))["cropped"], true);
+    }
+    // An outer frame with a known client offset drops the decorations.
+    let decorated = crop(
+        (1000, 740),
+        (1000, 740),
+        Some((0, 40)),
+        (1000, 700),
+        Some((1000, 700)),
+    );
+    assert_eq!(
+        (
+            decorated.x,
+            decorated.y,
+            decorated.width,
+            decorated.height,
+            decorated.basis
+        ),
+        (0, 40, 1000, 700, "css_viewport")
+    );
+    // Page viewport unreadable (still compiling): client area only, warned.
+    let unread = crop((3840, 2100), (3840, 2100), Some((0, 0)), (3840, 2100), None);
+    assert_eq!(unread.basis, "client_area");
+    assert_eq!(unread.report((3840, 2100))["cropped"], false);
+    assert_eq!(
+        unread.warning().unwrap()["code"],
+        "viewport_crop_unverified"
+    );
+    // Unprovable geometry keeps the whole frame and says it is not cropped.
+    let unknown = crop(
+        (3900, 2200),
+        (3840, 2100),
+        Some((0, 0)),
+        (3840, 2100),
+        Some((3840, 2036)),
+    );
+    assert_eq!(
+        (
+            unknown.x,
+            unknown.y,
+            unknown.width,
+            unknown.height,
+            unknown.basis
+        ),
+        (0, 0, 3900, 2200, "uncropped")
+    );
+    assert!(
+        unknown.warning().unwrap()["message"]
+            .as_str()
+            .unwrap()
+            .contains("NOT cropped")
+    );
+    // An Overlay title bar whose page fills the window is already the viewport.
+    let overlay = crop(
+        (2400, 1600),
+        (2400, 1600),
+        Some((0, 0)),
+        (2400, 1600),
+        Some((2400, 1600)),
+    );
+    assert_eq!(overlay.basis, "css_viewport");
+    assert_eq!(overlay.report((2400, 1600))["cropped"], false);
+}

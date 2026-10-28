@@ -604,6 +604,101 @@ fn title_bar_inset(image: (u32, u32), expected: (u32, u32)) -> Option<u32> {
     (inset <= MAX_TITLE_BAR_PX).then_some(inset)
 }
 
+/// Where the legacy full-window capture was cropped to, in image pixels.
+#[cfg_attr(not(feature = "xcap"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ViewportCrop {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    /// `css_viewport` (proved against the page's CSS viewport),
+    /// `client_area` (window decorations removed, viewport unverified) or
+    /// `uncropped` (the whole window, possibly with its title bar).
+    pub basis: &'static str,
+}
+
+#[cfg_attr(not(feature = "xcap"), allow(dead_code))]
+impl ViewportCrop {
+    pub(crate) fn report(&self, image: (u32, u32)) -> Value {
+        let cropped = (self.x, self.y, self.width, self.height) != (0, 0, image.0, image.1);
+        json!({
+            "cropped": cropped,
+            "basis": self.basis,
+            "rectPx": {"x": self.x, "y": self.y, "width": self.width, "height": self.height},
+            "windowPx": {"width": image.0, "height": image.1},
+        })
+    }
+
+    /// A warning unless the crop was proved against the page viewport.
+    pub(crate) fn warning(&self) -> Option<Value> {
+        let message = match self.basis {
+            "css_viewport" => return None,
+            "client_area" => {
+                "native window capture was cropped to the window's client area, but the page viewport could not be read, so a title bar band may remain"
+            }
+            _ => {
+                "native window capture is NOT cropped to the webview viewport; it may include the title bar and window chrome"
+            }
+        };
+        Some(json!({"code": "viewport_crop_unverified", "message": message, "basis": self.basis}))
+    }
+}
+
+/// Crop for a legacy whole-window (xcap) frame: strip the window
+/// decorations when the frame is the outer window, then a macOS title-bar
+/// band when the page's CSS viewport (`expected`, device px) proves one. It
+/// never fails: an unprovable crop keeps more pixels and says so in `basis`.
+#[cfg_attr(not(feature = "xcap"), allow(dead_code))]
+pub(crate) fn legacy_viewport_crop(
+    image: (u32, u32),
+    outer_size: (u32, u32),
+    client_offset: Option<(i32, i32)>,
+    inner_size: (u32, u32),
+    expected: Option<(u32, u32)>,
+) -> ViewportCrop {
+    let mut crop = ViewportCrop {
+        x: 0,
+        y: 0,
+        width: image.0,
+        height: image.1,
+        basis: "uncropped",
+    };
+    if image == outer_size
+        && let Some((dx, dy)) = client_offset
+        && dx >= 0
+        && dy >= 0
+        && dx as u64 + u64::from(inner_size.0) <= u64::from(image.0)
+        && dy as u64 + u64::from(inner_size.1) <= u64::from(image.1)
+        && inner_size.0 > 0
+        && inner_size.1 > 0
+    {
+        crop = ViewportCrop {
+            x: dx as u32,
+            y: dy as u32,
+            width: inner_size.0,
+            height: inner_size.1,
+            basis: "client_area",
+        };
+    } else if image == inner_size {
+        crop.basis = "client_area";
+    }
+    if crop.basis != "client_area" {
+        return crop;
+    }
+    let Some(expected) = expected else {
+        return crop;
+    };
+    if let Some(top) = title_bar_inset((crop.width, crop.height), expected) {
+        crop.y += top;
+        crop.height = expected.1;
+        crop.basis = "css_viewport";
+    } else if crop.width.abs_diff(expected.0) <= 1 && crop.height.abs_diff(expected.1) <= 1 {
+        crop.basis = "css_viewport";
+    }
+    crop
+}
+
 async fn process_frame(
     frame: RawFrame,
     probe: Probe,

@@ -2289,7 +2289,7 @@ pub async fn screenshot(
     // Tier 1: xcap native capture (cross-platform, pixel-accurate)
     #[cfg(feature = "xcap")]
     if let Some(app) = app {
-        match xcap_screenshot(app, window_id, format, quality, max_width).await {
+        match xcap_screenshot(app, window_id, format, quality, max_width, bridge).await {
             Ok(result) => {
                 let result = retake_uniform_capture(
                     result,
@@ -2349,6 +2349,7 @@ async fn xcap_screenshot(
     format: &str,
     quality: u8,
     max_width: Option<u32>,
+    bridge: &Bridge,
 ) -> Result<serde_json::Value, String> {
     let tauri_window = app
         .get_webview_window(window_id)
@@ -2357,9 +2358,44 @@ async fn xcap_screenshot(
     let title = tauri_window
         .title()
         .map_err(|e| format!("Failed to get window title: {e}"))?;
+    // Geometry to crop the whole-window frame down to the webview viewport
+    // (Inter: the fallback returned 3840x2100 with the title bar).
+    let outer_size = tauri_window
+        .outer_size()
+        .map(|size| (size.width, size.height))
+        .unwrap_or_default();
+    let inner_size = tauri_window
+        .inner_size()
+        .map(|size| (size.width, size.height))
+        .unwrap_or_default();
+    let client_offset = match (tauri_window.outer_position(), tauri_window.inner_position()) {
+        (Ok(outer), Ok(inner)) => inner
+            .x
+            .checked_sub(outer.x)
+            .zip(inner.y.checked_sub(outer.y)),
+        _ => None,
+    };
+    let expected = bridge
+        .execute_js_for_window(
+            "({w: window.innerWidth, h: window.innerHeight, d: window.devicePixelRatio || 1})",
+            PAGE_HIDDEN_PROBE_MS,
+            window_id,
+        )
+        .await
+        .ok()
+        .and_then(|value| {
+            let (w, h, d) = (
+                value["w"].as_f64()?,
+                value["h"].as_f64()?,
+                value["d"].as_f64()?,
+            );
+            let (w, h) = ((w * d).round(), (h * d).round());
+            (w >= 1.0 && h >= 1.0 && w <= f64::from(u32::MAX) && h <= f64::from(u32::MAX))
+                .then_some((w as u32, h as u32))
+        });
 
     // xcap uses blocking OS APIs — run on a blocking thread
-    let captured = tokio::task::spawn_blocking(move || -> Result<image::RgbaImage, String> {
+    let (captured, crop, window_px) = tokio::task::spawn_blocking(move || -> Result<_, String> {
         let windows =
             xcap::Window::all().map_err(|e| format!("Failed to enumerate windows: {e}"))?;
 
@@ -2373,9 +2409,24 @@ async fn xcap_screenshot(
         )
         .ok_or_else(|| format!("No visible window of this app matching title '{title}'"))?;
 
-        target
+        let image = target
             .capture_image()
-            .map_err(|e| format!("xcap capture failed: {e}"))
+            .map_err(|e| format!("xcap capture failed: {e}"))?;
+        let window_px = image.dimensions();
+        let crop = crate::screenshot::legacy_viewport_crop(
+            window_px,
+            outer_size,
+            client_offset,
+            inner_size,
+            expected,
+        );
+        let image = if (crop.x, crop.y, crop.width, crop.height) == (0, 0, window_px.0, window_px.1)
+        {
+            image
+        } else {
+            image::imageops::crop_imm(&image, crop.x, crop.y, crop.width, crop.height).to_image()
+        };
+        Ok((image, crop, window_px))
     })
     .await
     .map_err(|e| format!("Screenshot task panicked: {e}"))??;
@@ -2399,14 +2450,19 @@ async fn xcap_screenshot(
 
     let base64_data = base64::engine::general_purpose::STANDARD.encode(&encoded);
 
-    Ok(serde_json::json!({
+    let mut result = serde_json::json!({
         "base64": base64_data,
         "mimeType": mime,
         "width": width,
         "height": height,
         "method": "xcap",
         "captureSource": "window_native",
-    }))
+        "viewportCrop": crop.report(window_px),
+    });
+    if let Some(warning) = crop.warning() {
+        result["warnings"] = serde_json::json!([warning]);
+    }
+    Ok(result)
 }
 
 /// Choose this app's window for a legacy xcap capture. Windows owned by
@@ -2720,7 +2776,12 @@ async fn finish_screenshot_response(
     if let Some(warning) = page_hidden_warning(&result, selector.is_none(), window_id, bridge).await
         && let Some(obj) = result.as_object_mut()
     {
-        obj.insert("warnings".to_string(), serde_json::json!([warning]));
+        match obj.get_mut("warnings").and_then(|w| w.as_array_mut()) {
+            Some(list) => list.push(warning),
+            None => {
+                obj.insert("warnings".to_string(), serde_json::json!([warning]));
+            }
+        }
     }
     if save {
         match save_screenshot_artifact(

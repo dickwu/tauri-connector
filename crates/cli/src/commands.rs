@@ -1020,6 +1020,7 @@ pub async fn screenshot(
         "devicePixelRatio": result.get("devicePixelRatio").cloned().unwrap_or(Value::Null),
         "captureSource": result.get("captureSource").cloned().unwrap_or(Value::Null),
         "fallback": result.get("fallback").cloned().unwrap_or(Value::Null),
+        "viewportCrop": result.get("viewportCrop").cloned().unwrap_or(Value::Null),
     });
     append_cli_artifact_manifest(instance, &metadata)?;
     let size_kb = bytes.len() / 1024;
