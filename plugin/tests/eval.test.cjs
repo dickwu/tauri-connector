@@ -67,3 +67,32 @@ test('a pending promise rejects with the timeout mark at the page deadline',asyn
   assert.ok(Date.now()-started<1000);
   assert.equal(await run('new Promise(r => setTimeout(() => r(9), 10))',500),9);
 });
+
+test('async bodies ending in a block keep sync completion values (gfit 0.17.7)',async()=>{
+  globalThis.x=Promise.resolve(1);
+  try{
+    assert.equal(await run('try { await Promise.resolve(1); "inside-try" } catch(e){}'),'inside-try');
+    assert.equal(await run('if (true) { await x; "x" }'),'x');
+    assert.equal(await run('await x; try { "x" } catch(e){}'),'x');
+    assert.equal(await run('await x; try { throw new Error("no") } catch (e) { "caught:" + e.message }'),'caught:no');
+    assert.equal(await run('await x; try { "t" } finally { "f" }'),'t');
+    assert.equal(await run('await x\nif (false) { "a" } else if (false) { "b" } else { "c" }'),'c');
+    assert.equal(await run('await x; { const v = 2; { v * 3 } }'),6);
+    assert.equal(await run('try {\n  const r = await x\n  r + 1 // last\n} catch (e) {\n  "err"\n}'),2);
+    assert.equal(await run('await x; if (true) { "a"; } else "b";'),'a');
+    // Blocks owned by loops are never rewritten into an early return.
+    assert.equal(await run('let n = 0\nawait x\nfor (const i of [1, 2, 3])\n{ n += i }\nn'),6);
+    assert.equal(await run('let n = 0; await x; for (const i of [1, 2, 3]) { n += i }'),undefined);
+    // An empty or declaration-only branch completes like sync code.
+    assert.equal(await run('await x; try { await 0 } catch (e) {}'),0);
+    assert.equal(await run('await x; try { const q = 1 } catch (e) {}'),undefined);
+    assert.equal(await run('await x; if (true) { const z = 1 }'),undefined);
+    // Template and string braces are not block boundaries.
+    assert.equal(await run('await x; if (true) { `a${"}"}b` }'),'a}b');
+    assert.equal(await run('await x; try { "}" } catch (e) {}'),'}');
+    // Each statement still runs exactly once.
+    globalThis.__evalRuns=0;
+    assert.equal(await run('await x; try { globalThis.__evalRuns++; "once" } catch (e) {}'),'once');
+    assert.equal(globalThis.__evalRuns,1);
+  }finally{delete globalThis.x;}
+});
