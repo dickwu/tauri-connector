@@ -931,11 +931,17 @@ async fn run_cli(cli: Cli) {
             let scanned = discovery::scan_statuses(&host, &statuses).await;
             statuses.extend(scanned);
         }
+        let resolved_identity = resolved.as_ref().and_then(|r| r.identity.as_ref());
         let version_warnings = versions::current_warnings(
-            resolved
-                .as_ref()
-                .and_then(|r| r.identity.as_ref())
-                .and_then(|identity| identity.plugin_version.as_deref()),
+            resolved_identity.and_then(|identity| identity.plugin_version.as_deref()),
+            resolved_identity
+                .and_then(|identity| {
+                    identity
+                        .project_root
+                        .as_deref()
+                        .or(identity.workspace_path.as_deref())
+                })
+                .or(Some(connection_options.cwd.as_path())),
         );
         let exit_code = status_exit_code(resolve_error.as_deref());
         if *json {

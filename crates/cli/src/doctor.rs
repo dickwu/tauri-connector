@@ -312,6 +312,7 @@ fn check_environment(cwd: &Path, project: Option<&PathBuf>) -> Section {
         &binaries,
         None,
         tap.as_deref(),
+        crate::versions::PluginSource::Unknown,
     )));
     checks.push(Check::ok(format!("Working directory {}", cwd.display())));
 
@@ -1692,7 +1693,14 @@ async fn check_runtime(
                     {
                         let plugin = identity.plugin_version.as_deref();
                         let mismatch =
-                            version_checks(crate::versions::warnings(&[], plugin, None));
+                            version_checks(crate::versions::warnings(
+                            &[],
+                            plugin,
+                            None,
+                            project.map_or(crate::versions::PluginSource::Unknown, |root| {
+                                crate::versions::plugin_source(root)
+                            }),
+                        ));
                         if mismatch.is_empty() {
                             checks.push(Check::ok(format!(
                                 "Plugin version {} matches the CLI",

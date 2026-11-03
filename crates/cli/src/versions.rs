@@ -124,6 +124,62 @@ fn is_homebrew_path(path: &Path) -> bool {
     text.contains("/Cellar/") || text.contains("/homebrew/") || text.contains("/linuxbrew/")
 }
 
+/// Where the app's lockfile takes `tauri-plugin-connector` from; decides
+/// how the drift warning tells the user to update it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginSource {
+    Registry,
+    Git,
+    Path,
+    Unknown,
+}
+
+/// The `source` of `tauri-plugin-connector` in the nearest `Cargo.lock` at or
+/// above `start` (also `start/src-tauri/Cargo.lock`).
+pub fn plugin_source(start: &Path) -> PluginSource {
+    let mut dirs: Vec<PathBuf> = vec![start.join("src-tauri")];
+    dirs.extend(start.ancestors().map(Path::to_path_buf));
+    dirs.iter()
+        .find_map(|dir| std::fs::read_to_string(dir.join("Cargo.lock")).ok())
+        .map(|lock| lock_plugin_source(&lock))
+        .unwrap_or(PluginSource::Unknown)
+}
+
+fn lock_plugin_source(lock: &str) -> PluginSource {
+    for package in lock.split("[[package]]") {
+        let field = |key: &str| {
+            package.lines().find_map(|line| {
+                let (name, value) = line.split_once('=')?;
+                (name.trim() == key).then(|| value.trim().trim_matches('"').to_string())
+            })
+        };
+        if field("name").as_deref() != Some("tauri-plugin-connector") {
+            continue;
+        }
+        return match field("source") {
+            Some(source) if source.starts_with("git+") => PluginSource::Git,
+            Some(_) => PluginSource::Registry,
+            None => PluginSource::Path,
+        };
+    }
+    PluginSource::Unknown
+}
+
+/// How to bring the app's plugin up to this CLI.
+fn plugin_update_fix(source: PluginSource) -> String {
+    const UPDATE: &str = "`cargo update -p tauri-plugin-connector -p connector-client`";
+    match source {
+        PluginSource::Git => format!(
+            "update the app's plugin, a git dependency: {UPDATE} in src-tauri (moves both crates to the branch's latest commit; `--precise <version>` does not apply to git sources), then rebuild and restart the app"
+        ),
+        PluginSource::Path => "the app uses a path dependency on tauri-plugin-connector: update that checkout, then rebuild and restart the app".to_string(),
+        PluginSource::Registry | PluginSource::Unknown => format!(
+            "update the app's plugin: {UPDATE} in src-tauri, then rebuild and restart the app (if Cargo.toml pins an older requirement, raise it to \"{major_minor}\" first). Avoid `--precise`: it can re-resolve unrelated dependencies",
+            major_minor = CLI_VERSION.rsplit_once('.').map_or(CLI_VERSION, |(head, _)| head)
+        ),
+    }
+}
+
 /// `(Some(a), Some(b))` only when `keep(a, b)`; otherwise `(None, None)`.
 trait FilterPair<T> {
     fn filter_pair(self, keep: impl Fn(&T, &T) -> bool) -> (Option<T>, Option<T>);
@@ -144,6 +200,7 @@ pub fn warnings(
     binaries: &[PathBinary],
     plugin_version: Option<&str>,
     tap_version: Option<&str>,
+    plugin_source: PluginSource,
 ) -> Vec<VersionWarning> {
     let mut out = Vec::new();
     let cli = parse(CLI_VERSION);
@@ -197,9 +254,7 @@ pub fn warnings(
                 "upgrade the CLI: `brew update && brew upgrade tauri-connector`, or `cargo install connector-cli --locked --force`".to_string()
             }
         } else {
-            format!(
-                "update the app's plugin: `cargo update -p tauri-plugin-connector --precise {CLI_VERSION}` in src-tauri, then restart the app"
-            )
+            plugin_update_fix(plugin_source)
         };
         out.push(VersionWarning {
             code: "cli_plugin_version_mismatch",
@@ -237,11 +292,16 @@ pub fn warnings(
 }
 
 /// The warnings for this machine and an optional connected plugin.
-pub fn current_warnings(plugin_version: Option<&str>) -> Vec<VersionWarning> {
+/// `project` is the app's directory (for the plugin's dependency source).
+pub fn current_warnings(
+    plugin_version: Option<&str>,
+    project: Option<&Path>,
+) -> Vec<VersionWarning> {
     warnings(
         &path_binaries(),
         plugin_version,
         local_tap_version().as_deref(),
+        project.map_or(PluginSource::Unknown, plugin_source),
     )
 }
 
@@ -265,6 +325,7 @@ mod tests {
             ],
             None,
             None,
+            PluginSource::Unknown,
         );
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].code, "multiple_cli_versions");
@@ -280,7 +341,7 @@ mod tests {
             bin("/a/tauri-connector", CLI_VERSION),
             bin("/b/tauri-connector", CLI_VERSION),
         ];
-        assert!(warnings(&same, None, None).is_empty());
+        assert!(warnings(&same, None, None, PluginSource::Unknown).is_empty());
     }
 
     #[test]
@@ -289,25 +350,77 @@ mod tests {
             &[bin("/opt/homebrew/bin/tauri-connector", CLI_VERSION)],
             Some("99.0.0"),
             None,
+            PluginSource::Unknown,
         );
         assert_eq!(older_cli[0].code, "cli_plugin_version_mismatch");
         assert!(older_cli[0].message.contains("older than"));
         assert!(older_cli[0].fix.contains("brew update && brew upgrade"));
-        let older_plugin = warnings(&[], Some("0.1.0"), None);
+        let older_plugin = warnings(&[], Some("0.1.0"), None, PluginSource::Unknown);
         assert!(older_plugin[0].message.contains("newer than"));
         assert!(older_plugin[0]
             .fix
             .contains("cargo update -p tauri-plugin-connector"));
-        assert!(warnings(&[], Some(CLI_VERSION), None).is_empty());
-        assert!(warnings(&[], None, None).is_empty());
+        assert!(warnings(&[], Some(CLI_VERSION), None, PluginSource::Unknown).is_empty());
+        assert!(warnings(&[], None, None, PluginSource::Unknown).is_empty());
+    }
+
+    #[test]
+    fn the_plugin_update_hint_follows_the_dependency_source() {
+        let git_lock = "[[package]]\nname = \"serde\"\nversion = \"1.0.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n\n[[package]]\nname = \"tauri-plugin-connector\"\nversion = \"0.17.7\"\nsource = \"git+https://github.com/dickwu/tauri-connector?branch=main#abc\"\n";
+        assert_eq!(lock_plugin_source(git_lock), PluginSource::Git);
+        assert_eq!(
+            lock_plugin_source(&git_lock.replace(
+                "git+https://github.com/dickwu/tauri-connector?branch=main#abc",
+                "registry+https://github.com/rust-lang/crates.io-index"
+            )),
+            PluginSource::Registry
+        );
+        assert_eq!(
+            lock_plugin_source(
+                "[[package]]\nname = \"tauri-plugin-connector\"\nversion = \"0.17.7\"\n"
+            ),
+            PluginSource::Path
+        );
+        assert_eq!(
+            lock_plugin_source("[[package]]\nname = \"x\"\n"),
+            PluginSource::Unknown
+        );
+
+        let git = warnings(&[], Some("0.1.0"), None, PluginSource::Git);
+        assert!(
+            git[0]
+                .fix
+                .contains("cargo update -p tauri-plugin-connector -p connector-client"),
+            "{}",
+            git[0].fix
+        );
+        assert!(!git[0].fix.contains("--precise {"), "{}", git[0].fix);
+        assert!(git[0].fix.contains("git dependency"));
+        let registry = warnings(&[], Some("0.1.0"), None, PluginSource::Registry);
+        assert!(registry[0]
+            .fix
+            .contains("cargo update -p tauri-plugin-connector -p connector-client"));
+        assert!(registry[0]
+            .fix
+            .contains("re-resolve unrelated dependencies"));
+        assert!(!registry[0]
+            .fix
+            .contains(&format!("--precise {CLI_VERSION}")));
+
+        let dir = std::env::temp_dir().join(format!("tc-lock-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("src-tauri/src")).unwrap();
+        std::fs::write(dir.join("src-tauri/Cargo.lock"), git_lock).unwrap();
+        assert_eq!(plugin_source(&dir), PluginSource::Git);
+        assert_eq!(plugin_source(&dir.join("src-tauri/src")), PluginSource::Git);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn a_stale_tap_hints_brew_update() {
-        let stale = warnings(&[], None, Some("0.1.0"));
+        let stale = warnings(&[], None, Some("0.1.0"), PluginSource::Unknown);
         assert_eq!(stale[0].code, "homebrew_tap_stale");
         assert!(stale[0].fix.contains("brew update"));
-        assert!(warnings(&[], None, Some(CLI_VERSION)).is_empty());
+        assert!(warnings(&[], None, Some(CLI_VERSION), PluginSource::Unknown).is_empty());
         assert_eq!(
             formula_version("class TauriConnector < Formula\n  version \"0.17.5\"\n"),
             Some("0.17.5".into())
