@@ -176,7 +176,7 @@ tauri-connector get <property> [target] [extra]
 | `styles` | `@eN` or CSS | | All computed CSS styles |
 | `count` | CSS selector | | Count of matching elements |
 
-`get title`, `get url`, `get count` and plain properties are sent as read-only (0.17.7+): a timeout or lost reply never quarantines the window. With no webview bridge connected and no answering eval channel the command fails with `bridge_not_connected` (`dispatched: false`, `retryableBeforeDispatch: true`) instead of `outcome_unknown`; open or reload the window and retry.
+`get title`, `get url`, `get count` and plain properties are sent as read-only (0.17.7+): a timeout or lost reply never quarantines the window. With no webview bridge connected and no answering eval channel the command fails with `bridge_not_connected` (`dispatched: false`, `retryableBeforeDispatch: true`) instead of `outcome_unknown`; open or reload the window and retry. Since 0.17.8 that refusal comes after about 3 s instead of at the deadline, and a window label that does not exist yet (app still starting) fails at once with `window_not_ready` (also `dispatched: false`, `retryableBeforeDispatch: true`); retry both.
 
 Examples:
 ```bash

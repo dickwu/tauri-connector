@@ -308,7 +308,7 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
+pub(crate) fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
     let request_id = error.request_id().to_string();
     let dispatched = error.is_dispatched();
     let mut outcome = match error {
@@ -354,6 +354,7 @@ fn not_dispatched_code(reason: &str) -> &'static str {
         "page_loading" | "helper_missing" => "page_not_ready",
         "window_not_visible" => "window_not_visible",
         "bridge_not_connected" => "bridge_not_connected",
+        "window_not_ready" => "window_not_ready",
         _ => "execution_failed",
     }
 }

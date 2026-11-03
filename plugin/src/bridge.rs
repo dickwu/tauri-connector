@@ -211,6 +211,8 @@ pub struct Bridge {
     native_sink: Arc<StdMutex<Option<mpsc::UnboundedSender<String>>>>,
     /// Test seam: overrides the native "window is in the background" check.
     background_override: Arc<StdMutex<Option<bool>>>,
+    /// Test hook: whether the target window exists (see `window_missing`).
+    window_missing_override: Arc<StdMutex<Option<bool>>>,
     /// Test seam: overrides whether the eval fallback channel answers a probe.
     eval_probe_override: Arc<StdMutex<Option<bool>>>,
     /// When a script that starts a navigation (reload, `location` change,
@@ -224,6 +226,11 @@ const NOT_RUN_RETRY: Duration = Duration::from_millis(50);
 /// How long a page in a background window gets to answer a liveness probe
 /// before a command is refused as `window_not_visible` (nothing sent).
 const BACKGROUND_PROBE: Duration = Duration::from_millis(1500);
+
+/// How long a command waits for a page with no bridge client and a silent
+/// eval channel (app starting, first compile, reload) before it is refused
+/// as `bridge_not_connected`, instead of spending its whole deadline.
+const BRIDGE_CONNECT_WAIT: Duration = Duration::from_millis(3000);
 
 impl Bridge {
     /// Start the internal bridge WebSocket server.
@@ -264,6 +271,7 @@ impl Bridge {
             late_hook: Arc::new(StdMutex::new(None)),
             native_sink: Arc::new(StdMutex::new(None)),
             background_override: Arc::new(StdMutex::new(None)),
+            window_missing_override: Arc::new(StdMutex::new(None)),
             eval_probe_override: Arc::new(StdMutex::new(None)),
             nav_requested: Arc::new(StdMutex::new(HashMap::new())),
         };
@@ -460,6 +468,13 @@ impl Bridge {
         let starts_navigation =
             !script.ws.starts_with("/*__CONNECTOR_") && requests_navigation(&script.ws);
         let script = script.gated();
+        // gfit 0.17.7: a command sent while the app was still starting waited
+        // out its deadline. A window that does not exist yet fails at once.
+        if self.window_missing(window_id).await {
+            return Err(request.not_dispatched(format!(
+                "window_not_ready: no webview window labelled '{window_id}' exists yet (the app may still be starting, or the label is wrong; `tauri-connector windows` lists them), so the script was not sent; retry once it opens"
+            )));
+        }
         // git-strata: a page in a background window can be suspended; a
         // command sent there used to wait out the whole deadline and then
         // quarantine the window. Probe first and refuse before sending.
@@ -487,6 +502,10 @@ impl Bridge {
         // it rather than a bare "deadline expired" (coarse sleeps on Windows
         // can overshoot the deadline between attempts).
         let mut refused: Option<String> = None;
+        // When the page was first found with no bridge and a silent eval
+        // channel; such a page gets BRIDGE_CONNECT_WAIT, not the deadline.
+        let mut unconnected_since: Option<Instant> = None;
+        let mut reinjected_bridge = false;
         let unready = |reason: &str| {
             request.not_dispatched(format!(
                 "{reason}: the page was {} until the deadline; the script did not run",
@@ -547,12 +566,41 @@ impl Bridge {
             if reason == "helper_missing" && !reinjected {
                 reinjected = self.reinject_bridge(window_id).await;
             }
+            if reason == "bridge_not_connected" {
+                // The document may have loaded before the bridge was injected.
+                if !reinjected_bridge {
+                    reinjected_bridge = true;
+                    self.reinject_bridge(window_id).await;
+                }
+                let since = *unconnected_since.get_or_insert_with(Instant::now);
+                if since.elapsed() + NOT_RUN_RETRY >= BRIDGE_CONNECT_WAIT {
+                    return Err(request.not_dispatched(format!(
+                        "bridge_not_connected: no webview has connected to the connector bridge for window '{window_id}' and the eval fallback did not answer within {} s (the app may still be starting, the dev server compiling or the page reloading), so the script was not sent; retry shortly",
+                        BRIDGE_CONNECT_WAIT.as_secs()
+                    )));
+                }
+            } else {
+                unconnected_since = None;
+            }
             if Instant::now() + NOT_RUN_RETRY >= request.deadline {
                 return Err(unready(&reason));
             }
             refused = Some(reason);
             tokio::time::sleep(NOT_RUN_RETRY).await;
         }
+    }
+
+    /// True only when the app handle is set and has no webview window with
+    /// this label. Unknown (no handle yet, lock busy) counts as present.
+    async fn window_missing(&self, window_id: &str) -> bool {
+        if let Some(forced) = *self.window_missing_override.lock().unwrap() {
+            return forced;
+        }
+        use tauri::Manager;
+        let Some(app) = self.app_handle.try_lock().ok().and_then(|app| app.clone()) else {
+            return false;
+        };
+        app.get_webview_window(window_id).is_none()
     }
 
     /// Whether the window is unfocused, hidden or minimized. Unknown (no app
@@ -673,6 +721,11 @@ impl Bridge {
     #[cfg(test)]
     pub(crate) fn force_eval_probe(&self, answers: Option<bool>) {
         *self.eval_probe_override.lock().unwrap() = answers;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn force_window_missing(&self, missing: Option<bool>) {
+        *self.window_missing_override.lock().unwrap() = missing;
     }
 
     #[cfg(test)]
@@ -3028,6 +3081,7 @@ pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<Str
         late_hook: Arc::new(StdMutex::new(None)),
         native_sink: Arc::new(StdMutex::new(None)),
         background_override: Arc::new(StdMutex::new(None)),
+        window_missing_override: Arc::new(StdMutex::new(None)),
         eval_probe_override: Arc::new(StdMutex::new(None)),
         nav_requested: Arc::new(StdMutex::new(HashMap::new())),
     };
@@ -4867,6 +4921,59 @@ process.stdout.write(JSON.stringify({ messages: logs.map(e => e.message), levels
             other => panic!("expected not_dispatched, got {other:?}"),
         }
         assert!(!error.is_dispatched());
+    }
+
+    #[tokio::test]
+    async fn an_unconnected_page_is_refused_quickly_not_at_the_deadline() {
+        // gfit 0.17.7: before any webview connected, a 30 s eval waited out
+        // the whole deadline before failing.
+        let (bridge, _rx) = queued_bridge().await;
+        bridge.clients.lock().await.clear();
+        bridge.force_eval_probe(Some(false));
+        let started = Instant::now();
+        let error = bridge
+            .execute_js_for_window_with_request_id("1", 30_000, "main", "early")
+            .await
+            .unwrap_err();
+        let waited = started.elapsed();
+        assert!(waited >= Duration::from_millis(2500), "{waited:?}");
+        assert!(waited < Duration::from_secs(6), "{waited:?}");
+        match &error {
+            BridgeError::NotDispatched { reason, .. } => {
+                assert!(reason.starts_with("bridge_not_connected"), "{reason}");
+                assert!(reason.contains("retry"), "{reason}");
+            }
+            other => panic!("expected not_dispatched, got {other:?}"),
+        }
+        let outcome = crate::handlers::bridge_error_outcome(error);
+        let typed = outcome.error.unwrap();
+        assert_eq!(typed.code, "bridge_not_connected");
+        assert!(typed.retryable_before_dispatch);
+        assert_eq!(
+            outcome.effect,
+            connector_client::outcome::EffectStatus::None
+        );
+    }
+
+    #[tokio::test]
+    async fn a_window_that_does_not_exist_yet_is_refused_at_once() {
+        let (bridge, mut rx) = queued_bridge().await;
+        bridge.force_window_missing(Some(true));
+        let started = Instant::now();
+        let error = bridge
+            .execute_js_for_window_with_request_id("1", 30_000, "main", "no-window")
+            .await
+            .unwrap_err();
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(rx.try_recv().is_err(), "nothing sent");
+        let outcome = crate::handlers::bridge_error_outcome(error);
+        assert_eq!(
+            outcome.execution,
+            connector_client::outcome::ExecutionStatus::NotDispatched
+        );
+        let typed = outcome.error.unwrap();
+        assert_eq!(typed.code, "window_not_ready");
+        assert!(typed.retryable_before_dispatch);
     }
 
     #[tokio::test]
