@@ -624,6 +624,9 @@ pub async fn dom_snapshot(
         shadow_dom,
     );
 
+    if let Err(e) = bridge.refuse_if_hidden(window_id, id).await {
+        return read_only_error_response(id, "DOM snapshot", e);
+    }
     let result = match bridge
         .execute_js_for_legacy_window(&script, 15_000, window_id)
         .await

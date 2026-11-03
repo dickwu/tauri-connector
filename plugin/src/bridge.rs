@@ -213,6 +213,7 @@ pub struct Bridge {
     background_override: Arc<StdMutex<Option<bool>>>,
     /// Test hook: whether the target window exists (see `window_missing`).
     window_missing_override: Arc<StdMutex<Option<bool>>>,
+    hidden_override: Arc<StdMutex<Option<bool>>>,
     /// Test seam: overrides whether the eval fallback channel answers a probe.
     eval_probe_override: Arc<StdMutex<Option<bool>>>,
     /// When a script that starts a navigation (reload, `location` change,
@@ -272,6 +273,7 @@ impl Bridge {
             native_sink: Arc::new(StdMutex::new(None)),
             background_override: Arc::new(StdMutex::new(None)),
             window_missing_override: Arc::new(StdMutex::new(None)),
+            hidden_override: Arc::new(StdMutex::new(None)),
             eval_probe_override: Arc::new(StdMutex::new(None)),
             nav_requested: Arc::new(StdMutex::new(HashMap::new())),
         };
@@ -621,6 +623,51 @@ impl Bridge {
                 || !window.is_visible().unwrap_or(true)
                 || window.is_minimized().unwrap_or(false)
         });
+        // Right after a show/hide toggle the main thread can be too busy to
+        // answer; an unknown state is probed rather than assumed visible, so
+        // a page suspended by the toggle is refused, never waited out.
+        !matches!(
+            tokio::time::timeout(Duration::from_millis(500), check).await,
+            Ok(Ok(false))
+        )
+    }
+
+    /// Refuse a rendering-dependent read (snapshot) at once when the window
+    /// is natively hidden or minimized. The page of a just-hidden window can
+    /// still answer a probe for a moment and then be suspended mid-read, so
+    /// probing alone gave a different answer from run to run (R2 0.17.7).
+    pub(crate) async fn refuse_if_hidden(
+        &self,
+        window_id: &str,
+        request_id: &str,
+    ) -> Result<(), BridgeError> {
+        if self.window_hidden(window_id).await {
+            return Err(BridgeError::NotDispatched {
+                request_id: request_id.to_string(),
+                reason: format!(
+                    "window_not_visible: window '{window_id}' is hidden or minimized, so its page is not rendered and the read was not sent. Run `tauri-connector windows focus` (MCP manage_window action=focus) first, then retry"
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Whether the window is natively hidden or minimized (not merely
+    /// unfocused). Unknown counts as not.
+    async fn window_hidden(&self, window_id: &str) -> bool {
+        if let Some(forced) = *self.hidden_override.lock().unwrap() {
+            return forced;
+        }
+        use tauri::Manager;
+        let Some(app) = self.app_handle.try_lock().ok().and_then(|app| app.clone()) else {
+            return false;
+        };
+        let Some(window) = app.get_webview_window(window_id) else {
+            return false;
+        };
+        let check = tokio::task::spawn_blocking(move || {
+            !window.is_visible().unwrap_or(true) || window.is_minimized().unwrap_or(false)
+        });
         matches!(
             tokio::time::timeout(Duration::from_millis(500), check).await,
             Ok(Ok(true))
@@ -726,6 +773,11 @@ impl Bridge {
     #[cfg(test)]
     pub(crate) fn force_window_missing(&self, missing: Option<bool>) {
         *self.window_missing_override.lock().unwrap() = missing;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn force_hidden(&self, hidden: Option<bool>) {
+        *self.hidden_override.lock().unwrap() = hidden;
     }
 
     #[cfg(test)]
@@ -3083,6 +3135,7 @@ pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<Str
         native_sink: Arc::new(StdMutex::new(None)),
         background_override: Arc::new(StdMutex::new(None)),
         window_missing_override: Arc::new(StdMutex::new(None)),
+        hidden_override: Arc::new(StdMutex::new(None)),
         eval_probe_override: Arc::new(StdMutex::new(None)),
         nav_requested: Arc::new(StdMutex::new(HashMap::new())),
     };
@@ -4676,6 +4729,28 @@ process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].m
             }
             other => panic!("expected window_not_visible, got {other:?}"),
         }
+    }
+
+    /// R2 0.17.7: a snapshot right after the window was hidden sometimes
+    /// ran (the page still answered the probe) and sometimes timed out. A
+    /// natively hidden window now refuses the read at once, every time,
+    /// without sending anything.
+    #[tokio::test]
+    async fn a_hidden_window_refuses_a_snapshot_every_time() {
+        let (bridge, mut rx) = queued_bridge().await;
+        bridge.force_hidden(Some(true));
+        for attempt in 0..5 {
+            match bridge.refuse_if_hidden("main", "snap").await {
+                Err(BridgeError::NotDispatched { reason, .. }) => assert!(
+                    reason.starts_with("window_not_visible") && reason.contains("windows focus"),
+                    "attempt {attempt}: {reason}"
+                ),
+                other => panic!("attempt {attempt}: expected window_not_visible, got {other:?}"),
+            }
+        }
+        assert!(rx.try_recv().is_err(), "nothing was sent to the page");
+        bridge.force_hidden(Some(false));
+        assert!(bridge.refuse_if_hidden("main", "snap").await.is_ok());
     }
 
     /// git-strata: a command to a suspended page in a background window is
