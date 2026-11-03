@@ -1,4 +1,5 @@
-//! Application-owned leases. Unknown writes retain quarantine until explicit host resolution.
+//! Application-owned leases. Unknown writes retain quarantine until explicit
+//! host resolution, a late settlement, or [`QUARANTINE_TTL_MS`] expiry.
 
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
@@ -12,6 +13,13 @@ const LATE_HISTORY: usize = 32;
 /// eval sent together). A quarantine is never waited on.
 pub const LEASE_QUEUE_WAIT: std::time::Duration =
     std::time::Duration::from_millis(connector_client::LEASE_QUEUE_WAIT_MS);
+
+/// How long an unknown-outcome quarantine isolates its resources before it
+/// expires on its own (R2 0.17.7: every command answered `resource_busy`
+/// until a manual step). Expiry is checked whenever a lease is requested and
+/// whenever quarantines are listed, so `resources list` reports, and drops,
+/// exactly the quarantines that already outlived the TTL, and nothing else.
+pub const QUARANTINE_TTL_MS: u64 = connector_client::QUARANTINE_TTL_MS;
 
 #[derive(Clone, Default)]
 pub struct ResourceArbiter {
@@ -56,6 +64,9 @@ pub enum LateOutcome {
     Failed,
     /// No result arrived (connection closed or the late window expired).
     Lost,
+    /// No settlement arrived before [`QUARANTINE_TTL_MS`]; the quarantine
+    /// lifted itself.
+    Expired,
 }
 
 impl LateOutcome {
@@ -65,6 +76,7 @@ impl LateOutcome {
             Self::FailedWithoutEffect => "failed_without_effect",
             Self::Failed => "failed",
             Self::Lost => "lost",
+            Self::Expired => "expired",
         }
     }
 
@@ -94,16 +106,43 @@ fn now_ms() -> u64 {
 
 fn describe(id: &str, held: &Held) -> Option<Value> {
     let quarantine = held.quarantine.as_ref()?;
+    let expires_at = quarantine.since_ms.saturating_add(QUARANTINE_TTL_MS);
     Some(json!({
         "id": id,
         "requestId": quarantine.request_id,
         "reason": quarantine.reason,
         "resources": held.resources,
         "sinceMs": quarantine.since_ms,
+        "expiresInMs": expires_at.saturating_sub(now_ms()),
     }))
 }
 
 impl ArbiterState {
+    /// Drops quarantines older than [`QUARANTINE_TTL_MS`] at `now` and
+    /// records each one as an `expired` settlement. Returns how many lifted.
+    fn expire_quarantines(&mut self, now: u64) -> usize {
+        let expired: Vec<String> = self
+            .held
+            .iter()
+            .filter(|(_, held)| {
+                held.quarantine
+                    .as_ref()
+                    .is_some_and(|q| now.saturating_sub(q.since_ms) >= QUARANTINE_TTL_MS)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &expired {
+            if let Some(held) = self.held.remove(id) {
+                let request_id = held
+                    .quarantine
+                    .and_then(|q| q.request_id)
+                    .unwrap_or_else(|| id.clone());
+                self.record_late(&request_id, LateOutcome::Expired, true);
+            }
+        }
+        expired.len()
+    }
+
     /// One history entry per request: a repeat settlement for the same
     /// requestId (WebSocket and eval paths, or a retried watch) refreshes the
     /// existing entry instead of adding an identical line. A settled outcome
@@ -112,7 +151,7 @@ impl ArbiterState {
         if let Some(index) = self.late.iter().position(|r| r.request_id == request_id) {
             let mut record = self.late.remove(index).expect("index is in range");
             let rank = |o: LateOutcome| match o {
-                LateOutcome::Lost => 0,
+                LateOutcome::Lost | LateOutcome::Expired => 0,
                 LateOutcome::Failed => 1,
                 LateOutcome::Succeeded | LateOutcome::FailedWithoutEffect => 2,
             };
@@ -141,10 +180,19 @@ impl ResourceArbiter {
         self.inner.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// The arbiter state with expired quarantines already lifted.
+    fn lock_current(&self) -> std::sync::MutexGuard<'_, ArbiterState> {
+        let mut state = self.lock();
+        if state.expire_quarantines(now_ms()) > 0 {
+            self.released.notify_waiters();
+        }
+        state
+    }
+
     pub fn try_acquire(&self, mut resources: Vec<String>) -> Result<Lease, Value> {
         resources.sort();
         resources.dedup();
-        let mut state = self.lock();
+        let mut state = self.lock_current();
         let blockers: Vec<(&String, &Held)> = state
             .held
             .iter()
@@ -173,9 +221,15 @@ impl ResourceArbiter {
                         )
                     })
                     .collect();
+                let expires = quarantines
+                    .iter()
+                    .filter_map(|q| q["expiresInMs"].as_u64())
+                    .max()
+                    .unwrap_or_default();
                 format!(
-                    "A previous operation with an unknown outcome quarantined this resource: {}. Check the app state, then run `tauri-connector resources release` (MCP: resources action=release) to lift it",
-                    ids.join(", ")
+                    "A previous operation with an unknown outcome quarantined this resource: {}. Check the app state, then run `tauri-connector resources release` (MCP: resources action=release) to lift it now; otherwise it expires on its own in {} s",
+                    ids.join(", "),
+                    expires.div_ceil(1000)
                 )
             } else {
                 "A conflicting application operation holds this resource".to_string()
@@ -241,7 +295,7 @@ impl ResourceArbiter {
     }
 
     pub fn quarantined(&self) -> usize {
-        self.lock()
+        self.lock_current()
             .held
             .values()
             .filter(|h| h.quarantine.is_some())
@@ -265,7 +319,7 @@ impl ResourceArbiter {
 
     /// Quarantined scopes plus recent late settlements, for `resources list`.
     pub fn list(&self) -> Value {
-        let state = self.lock();
+        let state = self.lock_current();
         let quarantined: Vec<Value> = state
             .held
             .iter()
@@ -284,7 +338,11 @@ impl ResourceArbiter {
                 })
             })
             .collect();
-        json!({ "quarantined": quarantined, "lateSettlements": late })
+        json!({
+            "quarantined": quarantined,
+            "lateSettlements": late,
+            "quarantineTtlMs": QUARANTINE_TTL_MS,
+        })
     }
 
     /// Explicit host resolution. `target` matches a requestId or quarantine id;
@@ -720,5 +778,73 @@ mod tests {
             arbiter.list()["lateSettlements"][0]["releasedQuarantine"],
             true
         );
+    }
+
+    fn backdate(arbiter: &ResourceArbiter, by_ms: u64) {
+        for held in arbiter.lock().held.values_mut() {
+            if let Some(q) = held.quarantine.as_mut() {
+                q.since_ms = q.since_ms.saturating_sub(by_ms);
+            }
+        }
+    }
+
+    #[test]
+    fn a_stale_quarantine_expires_on_the_next_acquire() {
+        // R2 0.17.7: every command said resource_busy until a manual step.
+        let arbiter = ResourceArbiter::default();
+        let lease = arbiter.try_acquire(vec!["ui".into()]).unwrap();
+        lease.quarantine_request("outcome_unknown", Some("req-old"));
+        drop(lease);
+        let busy = arbiter.try_acquire(vec!["ui".into()]).err().unwrap();
+        assert_eq!(busy["quarantined"], true);
+        let left = busy["quarantines"][0]["expiresInMs"].as_u64().unwrap();
+        assert!(left > 0 && left <= QUARANTINE_TTL_MS, "{busy}");
+        assert!(
+            busy["message"]
+                .as_str()
+                .unwrap()
+                .contains("expires on its own"),
+            "{busy}"
+        );
+        backdate(&arbiter, QUARANTINE_TTL_MS);
+        let lease = arbiter.try_acquire(vec!["ui".into()]).expect("expired");
+        drop(lease);
+        assert_eq!(arbiter.quarantined(), 0);
+        let listed = arbiter.list();
+        assert_eq!(listed["lateSettlements"][0]["requestId"], "req-old");
+        assert_eq!(listed["lateSettlements"][0]["outcome"], "expired");
+        assert_eq!(listed["lateSettlements"][0]["releasedQuarantine"], true);
+        assert_eq!(listed["quarantineTtlMs"], QUARANTINE_TTL_MS);
+    }
+
+    #[test]
+    fn listing_only_drops_quarantines_past_their_ttl() {
+        let arbiter = ResourceArbiter::default();
+        let fresh = arbiter.try_acquire(vec!["ui".into()]).unwrap();
+        fresh.quarantine_request("outcome_unknown", Some("req-fresh"));
+        drop(fresh);
+        // A read-only listing never lifts a live quarantine.
+        for _ in 0..3 {
+            assert_eq!(arbiter.list()["quarantined"].as_array().unwrap().len(), 1);
+        }
+        assert_eq!(arbiter.quarantined(), 1);
+        backdate(&arbiter, QUARANTINE_TTL_MS - 1);
+        assert_eq!(arbiter.list()["quarantined"].as_array().unwrap().len(), 1);
+        backdate(&arbiter, 1);
+        assert!(arbiter.list()["quarantined"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_expired_quarantine_does_not_hold_a_queued_request() {
+        let arbiter = ResourceArbiter::default();
+        let lease = arbiter.try_acquire(vec!["backend".into()]).unwrap();
+        lease.quarantine("interrupted");
+        drop(lease);
+        backdate(&arbiter, QUARANTINE_TTL_MS);
+        let lease = arbiter
+            .acquire_within(vec!["backend".into()], std::time::Duration::ZERO)
+            .await
+            .expect("an expired quarantine is not a conflict");
+        drop(lease);
     }
 }

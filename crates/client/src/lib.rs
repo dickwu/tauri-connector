@@ -36,6 +36,10 @@ pub const EVAL_CLIENT_MARGIN_MS: u64 = 5_000;
 /// replies `resource_busy` (shared so client waits cover the queue).
 pub const LEASE_QUEUE_WAIT_MS: u64 = 15_000;
 
+/// How long the plugin keeps an unknown-outcome quarantine before it lifts
+/// itself (no late settlement, no explicit `resources release`).
+pub const QUARANTINE_TTL_MS: u64 = 60_000;
+
 /// Client wait for a protected `webview_screenshot` with the given capture
 /// deadline: the lease queue, then the capture, then a reply margin, so a
 /// long eval holding the window ends as the plugin's `resource_busy`

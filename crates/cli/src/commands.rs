@@ -2447,8 +2447,13 @@ fn format_resources(result: &Value) -> String {
             .as_array()
             .map(|r| r.iter().filter_map(Value::as_str).collect())
             .unwrap_or_default();
+        // 0.17.8+ plugins report when the quarantine expires on its own.
+        let expires = entry["expiresInMs"]
+            .as_u64()
+            .map(|ms| format!(", expires in {}s", ms.div_ceil(1000)))
+            .unwrap_or_default();
         out.push_str(&format!(
-            "quarantined {} ({}) scopes: {}\n",
+            "quarantined {} ({}) scopes: {}{expires}\n",
             entry["requestId"]
                 .as_str()
                 .or(entry["id"].as_str())
@@ -2858,6 +2863,19 @@ mod tests {
         assert_eq!(text.matches("late result req-7").count(), 1, "{text}");
         assert!(text.contains("late result req-7: lost (x3)\n"), "{text}");
         assert!(text.contains("late result req-8: lost\n"), "{text}");
+    }
+
+    #[test]
+    fn resources_output_shows_when_a_quarantine_expires() {
+        let text = super::format_resources(&serde_json::json!({
+            "quarantined": [{"id": "q3", "requestId": "req-3", "reason": "outcome_unknown",
+                "resources": ["backend"], "expiresInMs": 41_200}],
+            "quarantineTtlMs": 60_000
+        }));
+        assert!(
+            text.contains("quarantined req-3 (outcome_unknown) scopes: backend, expires in 42s"),
+            "{text}"
+        );
     }
 
     #[test]
