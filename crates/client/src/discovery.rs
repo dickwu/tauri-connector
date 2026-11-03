@@ -285,12 +285,48 @@ pub async fn scan_statuses(host: &str, statuses: &[InstanceStatus]) -> Vec<Insta
     .map(|port| async move { (port, endpoint_identity(host, port, 250).await) })
     .buffer_unordered(12)
     .filter_map(|(port, result)| async move {
-        result.ok().map(|identity| scanned_status(port, &identity))
+        match result {
+            Ok(identity) => Some(scanned_status(port, &identity)),
+            Err(error) if is_unauthorized_error(&error) => Some(unauthorized_scan_status(port)),
+            Err(_) => None,
+        }
     })
     .collect::<Vec<_>>()
     .await;
     rows.sort_by_key(|row| row.instance.ws_port);
     rows
+}
+
+/// A port-scan row for an app that refused identity (it needs a workflow
+/// token), so `status` does not claim that nothing runs.
+fn unauthorized_scan_status(port: u16) -> InstanceStatus {
+    InstanceStatus {
+        instance: ConnectorInstance {
+            pid: 0,
+            ws_port: port,
+            mcp_port: None,
+            bridge_port: None,
+            app_name: None,
+            app_id: None,
+            app_instance_id: None,
+            log_dir: None,
+            exe: None,
+            started_at: None,
+            pid_file: PathBuf::new(),
+            project_name: None,
+            project_root: None,
+            cargo_package: None,
+            startup_error: None,
+        },
+        pid_alive: true,
+        ws_reachable: true,
+        unauthorized: true,
+        legacy_plugin: false,
+        stale: false,
+        error: Some(format!("unauthorized: {UNAUTHORIZED_HINT}")),
+        project: crate::project::UNKNOWN_PROJECT.to_string(),
+        identity: None,
+    }
 }
 
 fn scanned_status(port: u16, identity: &AppIdentity) -> InstanceStatus {
@@ -569,6 +605,53 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
             }
         }
     }
+    // Apps outside a `target/` directory (packaged bundles launched with
+    // `open`, whose cwd is `/`) record themselves in their app data dir.
+    // Like port-scan hits they are not "near" the working directory.
+    let mut scan_unauthorized = Vec::new();
+    if pid_file.is_none() && std::env::var_os("TAURI_CONNECTOR_PID_FILE").is_none() {
+        for hint in app_data_instances(app_id.as_deref()) {
+            if hint.startup_error.is_some() || endpoints.contains(&(host.clone(), hint.ws_port)) {
+                continue;
+            }
+            match endpoint_identity(&host, hint.ws_port, 1500).await {
+                Ok(identity) => {
+                    if validate_identity(
+                        &identity,
+                        app_id.as_deref(),
+                        expected_instance.as_deref(),
+                        Some(&hint),
+                    )
+                    .is_err()
+                    {
+                        continue;
+                    }
+                    endpoints.insert((host.clone(), hint.ws_port));
+                    let wrong_project = wrong_project(&identity, Some(&hint));
+                    let in_workspace = in_workspace(&opts.cwd, &identity);
+                    let candidate = ResolvedConnection {
+                        host: host.clone(),
+                        port: hint.ws_port,
+                        source: ConnectionSource::PidFile,
+                        instance: Some(hint),
+                        identity: Some(identity),
+                    };
+                    if wrong_project {
+                        other_projects.push(candidate);
+                    } else if constrained || in_workspace {
+                        candidates.push(candidate);
+                    } else {
+                        others.push(candidate);
+                    }
+                }
+                Err(error) if is_unauthorized_error(&error) => {
+                    endpoints.insert((host.clone(), hint.ws_port));
+                    scan_unauthorized.push(hint.ws_port);
+                }
+                Err(_) => {}
+            }
+        }
+    }
     if pid_file.is_none() {
         use futures_util::stream;
         let results = stream::iter(
@@ -583,6 +666,11 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
         .collect::<Vec<_>>()
         .await;
         for (port, result) in results {
+            if let Err(error) = &result {
+                if is_unauthorized_error(error) {
+                    scan_unauthorized.push(port);
+                }
+            }
             if let Ok(identity) = result {
                 if validate_identity(
                     &identity,
@@ -668,7 +756,36 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
             "project_mismatch: no running app belongs to project '{selector}'; running: {running}. Run `tauri-connector status` to list projects"
         ));
     }
+    if candidates.is_empty() && !scan_unauthorized.is_empty() {
+        scan_unauthorized.sort_unstable();
+        return Err(format!(
+            "unauthorized: no app answered without credentials, and the app(s) on port(s) {scan_unauthorized:?} refused identity; {UNAUTHORIZED_HINT}"
+        ));
+    }
+    if candidates.is_empty() {
+        return Err(not_found_error(&opts.cwd, constrained));
+    }
     select_unique(candidates)
+}
+
+/// `app_not_found` naming every place discovery looked.
+fn not_found_error(cwd: &Path, constrained: bool) -> String {
+    let range = crate::ports::ws_scan_range();
+    let app_data = app_data_root()
+        .map(|root| {
+            format!(
+                "{}/<identifier>/.tauri-connector/.connector.json",
+                root.display()
+            )
+        })
+        .unwrap_or_else(|| "the app data directory".to_string());
+    format!(
+        "app_not_found: no {}running connector app found. Checked `.connector.json` under target/ directories at and above {}, live records in {app_data} (apps outside target/, e.g. a bundle launched with `open`), and ports {}-{}. Start the app with the connector enabled (debug build, connector feature), or pass --pid-file or --port when it uses a port outside that range",
+        if constrained { "matching " } else { "" },
+        cwd.display(),
+        range.start(),
+        range.end(),
+    )
 }
 
 /// Whether the endpoint's workspace or project root contains the working
@@ -792,7 +909,17 @@ pub async fn instance_statuses(
     host: Option<&str>,
 ) -> Vec<InstanceStatus> {
     let host = host.unwrap_or(DEFAULT_HOST);
-    let instances = discover_instances(cwd, app_id, pid_file);
+    let mut instances = discover_instances(cwd, app_id, pid_file);
+    if pid_file.is_none() && std::env::var_os("TAURI_CONNECTOR_PID_FILE").is_none() {
+        for instance in app_data_instances(app_id) {
+            if !instances
+                .iter()
+                .any(|known| known.pid_file == instance.pid_file)
+            {
+                instances.push(instance);
+            }
+        }
+    }
     let mut statuses = Vec::with_capacity(instances.len());
     for instance in instances {
         let pid_alive = pid_is_alive(instance.pid);
@@ -876,6 +1003,71 @@ pub fn discover_instances(
         instances.push(instance);
     }
     instances
+}
+
+/// Overrides the per-user app data root searched for PID files of apps that
+/// run outside a `target/` directory (tests, unusual layouts).
+pub const APP_DATA_ROOT_ENV: &str = "TAURI_CONNECTOR_APP_DATA_ROOT";
+
+/// Where Tauri keeps `app_data_dir()` for every app: `~/Library/Application
+/// Support` (macOS), `%APPDATA%` (Windows), `$XDG_DATA_HOME` or
+/// `~/.local/share` (Linux).
+pub fn app_data_root() -> Option<PathBuf> {
+    if let Some(root) = std::env::var_os(APP_DATA_ROOT_ENV).filter(|root| !root.is_empty()) {
+        return Some(root.into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support"))
+    }
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::env::var_os("XDG_DATA_HOME")
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+            })
+    }
+}
+
+/// PID files that apps outside a `target/` directory (a packaged `.app`
+/// launched with `open`, an installed build) write to
+/// `<root>/<identifier>/.tauri-connector/.connector.json`.
+pub fn app_data_pid_files(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut files = entries
+        .flatten()
+        .map(|entry| {
+            entry
+                .path()
+                .join(".tauri-connector")
+                .join(".connector.json")
+        })
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
+/// Records of running apps from [`app_data_pid_files`]. Records of exited
+/// apps are skipped: an app closed long ago is not a stale-record error for
+/// whatever directory the CLI runs in.
+pub fn app_data_instances(app_id: Option<&str>) -> Vec<ConnectorInstance> {
+    app_data_root()
+        .map(|root| app_data_pid_files(&root))
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|path| read_instance_file(path))
+        .filter(|instance| app_id.is_none_or(|id| instance.app_id.as_deref() == Some(id)))
+        .filter(|instance| pid_is_alive(instance.pid))
+        .collect()
 }
 
 /// Build the candidate list documented by the CLI/playbook.

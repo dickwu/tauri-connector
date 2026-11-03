@@ -1556,7 +1556,19 @@ fn find_pid_file(root: &Path) -> Option<PathBuf> {
             .join(".connector.json"),
         root.join("target").join("release").join(".connector.json"),
     ];
-    candidates.into_iter().find(|p| p.is_file())
+    candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .or_else(|| app_data_pid_file(tauri_conf_identifier(root)?.as_str()))
+}
+
+/// The live record of this project's app when it runs outside `target/`
+/// (a packaged bundle launched with `open` writes to its app data dir).
+fn app_data_pid_file(identifier: &str) -> Option<PathBuf> {
+    connector_client::discovery::app_data_instances(Some(identifier))
+        .into_iter()
+        .next()
+        .map(|instance| instance.pid_file)
 }
 
 fn read_pid_file(path: &Path) -> Option<PidInfo> {

@@ -995,7 +995,7 @@ async fn run_cli(cli: Cli) {
                         "  {state} {}:{} pid={} project={project:?} app={} id={} plugin={plugin} file={}",
                         host,
                         i.ws_port,
-                        i.pid,
+                        if i.pid == 0 { "?".to_string() } else { i.pid.to_string() },
                         i.app_name.as_deref().unwrap_or("?"),
                         i.app_id.as_deref().unwrap_or("?"),
                         if i.pid_file.as_os_str().is_empty() {
