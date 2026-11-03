@@ -368,7 +368,7 @@ pub async fn screenshot(
     args["includeImage"] = json!(output.is_some());
     let report = crate::commands::capture_screenshot(client, &args, resolved).await?;
     let existed = output.is_some_and(|path| std::path::Path::new(path).exists());
-    let bytes = match output {
+    let (bytes, artifact) = match output {
         Some(path) => {
             let encoded = report
                 .get("base64")
@@ -376,15 +376,26 @@ pub async fn screenshot(
                 .ok_or("captured image unavailable for explicit export")?;
             let bytes = crate::commands::b64_decode(encoded)?;
             write_export(path, &bytes, overwrite)?;
-            Some(bytes)
+            let written = crate::commands::ArtifactWrite {
+                path: path.into(),
+                requested_path: path.into(),
+                resolved_from_collision: false,
+                overwrote: existed && overwrite,
+            };
+            let format = args["format"].as_str().unwrap_or("png");
+            let artifact =
+                crate::commands::screenshot_artifact(&report, &written, &bytes, format, resolved);
+            crate::commands::record_screenshot_artifact(resolved, &artifact)?;
+            (Some(bytes), Some(artifact))
         }
-        None => None,
+        None => (None, None),
     };
     print_json(&crate::commands::source_screenshot_output(
         report,
         output,
         bytes.as_deref(),
         existed && overwrite,
+        artifact,
     ));
     Ok(())
 }

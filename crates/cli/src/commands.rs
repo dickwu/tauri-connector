@@ -1264,42 +1264,7 @@ fn finish_default_screenshot(
     let artifact = write_screenshot_artifact(&target, &bytes, overwrite)?;
     let width = report["image"]["widthPx"].as_u64().unwrap_or(0);
     let height = report["image"]["heightPx"].as_u64().unwrap_or(0);
-    let created_at = now_ms();
-    let artifact_id = format!(
-        "shot_{}",
-        artifact
-            .path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("screenshot")
-    );
-    let metadata = json!({
-        "artifactId": artifact_id.clone(),
-        "id": artifact_id,
-        "kind": "screenshot",
-        "captureKind": "full",
-        "path": artifact.path.to_string_lossy(),
-        "requestedPath": artifact.requested_path.to_string_lossy(),
-        "resolvedFromCollision": artifact.resolved_from_collision,
-        "overwrote": artifact.overwrote,
-        "sha256": sha256_hex(&bytes),
-        "bytes": bytes.len(),
-        "width": width,
-        "height": height,
-        "format": format,
-        "createdAt": created_at,
-        "createdAtMs": created_at,
-        "source": "viewport",
-        "selector": Value::Null,
-        "windowId": window_id(),
-        "annotated": false,
-        "annotations": Value::Null,
-        "snapshotId": latest_ref_cache_snapshot_id(resolved).unwrap_or(Value::Null),
-        "refsPath": latest_ref_cache_path(resolved).unwrap_or(Value::Null),
-        "devicePixelRatio": report["viewport"]["devicePixelRatio"].clone(),
-        "captureSource": report["captureSource"].clone(),
-        "protectedArtifactId": report["artifactId"].clone(),
-    });
+    let metadata = screenshot_artifact(&report, &artifact, &bytes, format, Some(resolved));
     append_cli_artifact_manifest(instance, &metadata)?;
     if artifact.resolved_from_collision {
         eprintln!(
@@ -1319,6 +1284,66 @@ fn finish_default_screenshot(
         .unwrap_or_default()
     );
     Ok(())
+}
+
+/// The `artifact` descriptor of a screenshot file the CLI wrote, identical
+/// for the default capture and `--source`/`--target`/`--bring-to-front`
+/// (0.17.8: the latter printed a smaller object whose `artifactId` was the
+/// plugin's protected id). `artifactId` is always `shot_<file stem>`, the id
+/// recorded in the CLI artifact manifest; the plugin's in-memory capture id
+/// is `protectedArtifactId` (and the top-level `artifactId`).
+pub(crate) fn screenshot_artifact(
+    report: &Value,
+    artifact: &ArtifactWrite,
+    bytes: &[u8],
+    format: &str,
+    resolved: Option<&ResolvedConnection>,
+) -> Value {
+    let created_at = now_ms();
+    let artifact_id = format!(
+        "shot_{}",
+        artifact
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("screenshot")
+    );
+    json!({
+        "artifactId": artifact_id.clone(),
+        "id": artifact_id,
+        "kind": "screenshot",
+        "captureKind": "full",
+        "path": artifact.path.to_string_lossy(),
+        "requestedPath": artifact.requested_path.to_string_lossy(),
+        "resolvedFromCollision": artifact.resolved_from_collision,
+        "overwrote": artifact.overwrote,
+        "sha256": sha256_hex(bytes),
+        "bytes": bytes.len(),
+        "width": report["image"]["widthPx"].as_u64().unwrap_or(0),
+        "height": report["image"]["heightPx"].as_u64().unwrap_or(0),
+        "format": format,
+        "createdAt": created_at,
+        "createdAtMs": created_at,
+        "source": "viewport",
+        "selector": Value::Null,
+        "windowId": window_id(),
+        "annotated": false,
+        "annotations": Value::Null,
+        "snapshotId": resolved.and_then(latest_ref_cache_snapshot_id).unwrap_or(Value::Null),
+        "refsPath": resolved.and_then(latest_ref_cache_path).unwrap_or(Value::Null),
+        "devicePixelRatio": report.pointer("/viewport/devicePixelRatio").cloned().unwrap_or(Value::Null),
+        "captureSource": report.get("captureSource").cloned().unwrap_or(Value::Null),
+        "protectedArtifactId": report.get("artifactId").cloned().unwrap_or(Value::Null),
+    })
+}
+
+/// Record a screenshot file written outside the default path in the CLI
+/// artifact manifest, like the default path does.
+pub(crate) fn record_screenshot_artifact(
+    resolved: Option<&ResolvedConnection>,
+    artifact: &Value,
+) -> Result<(), String> {
+    append_cli_artifact_manifest(resolved.and_then(|r| r.instance.as_ref()), artifact)
 }
 
 /// Legacy top-level fields first (path, width, height, sizeKb, sha256,
@@ -1406,26 +1431,12 @@ pub(crate) fn source_screenshot_output(
     exported_path: Option<&str>,
     bytes: Option<&[u8]>,
     overwrote: bool,
+    artifact: Option<Value>,
 ) -> Value {
     let dimension = |key: &str| report.pointer(&format!("/image/{key}")).cloned();
     let sha256 = bytes.map(sha256_hex);
-    // `artifact` mirrors the default path's descriptor of the written file;
-    // null when nothing was written (no --output).
-    let artifact = exported_path.map(|path| {
-        json!({
-            "artifactId": report.get("artifactId").cloned().unwrap_or(Value::Null),
-            "kind": "screenshot",
-            "captureKind": "full",
-            "path": path,
-            "requestedPath": path,
-            "resolvedFromCollision": false,
-            "overwrote": overwrote,
-            "sha256": sha256,
-            "bytes": bytes.map(<[u8]>::len),
-            "captureSource": report.get("captureSource").cloned().unwrap_or(Value::Null),
-            "source": "viewport",
-        })
-    });
+    // `artifact` is the same descriptor the default path prints
+    // (`screenshot_artifact`); null when nothing was written (no --output).
     let mut out = json!({
         "path": exported_path,
         "exportedPath": exported_path,
@@ -1489,11 +1500,11 @@ fn screenshot_warning_messages(warnings: &Value) -> Vec<String> {
         .collect()
 }
 
-struct ArtifactWrite {
-    path: PathBuf,
-    requested_path: PathBuf,
-    resolved_from_collision: bool,
-    overwrote: bool,
+pub(crate) struct ArtifactWrite {
+    pub(crate) path: PathBuf,
+    pub(crate) requested_path: PathBuf,
+    pub(crate) resolved_from_collision: bool,
+    pub(crate) overwrote: bool,
 }
 
 pub(crate) fn resolve_screenshot_path(
@@ -2763,11 +2774,24 @@ mod tests {
             800,
             json!([]),
         );
+        let written = super::ArtifactWrite {
+            path: std::path::PathBuf::from("/tmp/b.png"),
+            requested_path: std::path::PathBuf::from("/tmp/b.png"),
+            resolved_from_collision: false,
+            overwrote: true,
+        };
         let explicit = super::source_screenshot_output(
             report.clone(),
             Some("/tmp/b.png"),
             Some(&[0u8; 2048]),
             true,
+            Some(super::screenshot_artifact(
+                &report,
+                &written,
+                &[0u8; 2048],
+                "png",
+                None,
+            )),
         );
         let shared = [
             "path",
@@ -2799,6 +2823,30 @@ mod tests {
         assert!(default.get("base64").is_none() && explicit.get("base64").is_none());
         assert_eq!(default["artifactId"], "inst:artifact:1");
         assert_eq!(default["artifact"]["artifactId"], "shot_a");
+        // 0.17.8: `--bring-to-front`/`--source` printed an 11-key artifact
+        // whose id was the plugin's `inst:artifact:..`; the default printed
+        // 25 keys with `shot_<stem>`. Both now use `screenshot_artifact`.
+        let default_artifact =
+            super::screenshot_artifact(&report, &artifact, &[0u8; 2048], "png", None);
+        let keys = |v: &serde_json::Value| {
+            let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+            k.sort();
+            k
+        };
+        assert_eq!(keys(&explicit["artifact"]), keys(&default_artifact));
+        assert_eq!(keys(&default_artifact).len(), 25);
+        assert_eq!(explicit["artifact"]["artifactId"], "shot_b");
+        assert_eq!(default_artifact["artifactId"], "shot_a");
+        assert_eq!(
+            explicit["artifact"]["protectedArtifactId"],
+            "inst:artifact:1"
+        );
+        assert_eq!(explicit["artifactId"], default["artifactId"]);
+        let mut top_default = keys(&default);
+        let mut top_explicit = keys(&explicit);
+        top_default.retain(|k| k != "artifact");
+        top_explicit.retain(|k| k != "artifact");
+        assert_eq!(top_default, top_explicit);
         assert_eq!(default["exportedPath"], "/tmp/a.png");
         assert_eq!(explicit["path"], "/tmp/b.png");
         assert_eq!(explicit["width"], 1200);
@@ -2808,7 +2856,7 @@ mod tests {
         assert_eq!(explicit["artifact"]["path"], "/tmp/b.png");
         // An older plugin reports no viewportCrop: it is still present.
         assert_eq!(default["viewportCrop"]["basis"], "not_reported");
-        let unexported = super::source_screenshot_output(report, None, None, false);
+        let unexported = super::source_screenshot_output(report, None, None, false, None);
         assert_eq!(unexported["path"], serde_json::Value::Null);
         assert_eq!(unexported["artifact"], serde_json::Value::Null);
         assert_eq!(unexported["height"], 800);
