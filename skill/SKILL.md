@@ -534,7 +534,7 @@ tauri-connector doctor --json          # machine-readable output (exit code 0/1)
 
 The `--json` payload includes a top-level `setup_pattern` field with one of `"feature-gated" | "legacy" | "mixed" | "none"` — branch on this in CI to apply pattern-specific gates without re-parsing the section list.
 
-It checks four areas -- environment, plugin setup (both install patterns), live runtime (PID file, WebSocket ping, bridge status, MCP lifecycle), and integrations -- and its output enumerates every check it ran. Exit code is non-zero when any required check fails, and the `--json` payload includes a top-level `fixes` array with every remediation, so it drops cleanly into CI or pre-commit. Use `--no-runtime` when the Tauri app isn't running (offline setup validation).
+It checks four areas -- environment, plugin setup (both install patterns), live runtime (PID file, WebSocket ping, bridge status, MCP lifecycle), and integrations -- and its output enumerates every check it ran. Exit code is 1 when any check fails (✗ / `"status":"fail"`; warnings never fail the run). Since 0.17.8 a running app whose connector did not start (its PID file carries `startup_error`, e.g. an exact port in use) and an explicit `--pid-file` that cannot be read are failures too, rather than probing ports another app may own, and the `--json` payload includes a top-level `fixes` array with every remediation, so it drops cleanly into CI or pre-commit. Use `--no-runtime` when the Tauri app isn't running (offline setup validation).
 
 First move when something looks wrong: `tauri-connector doctor`. Second move: read the `Fix:` line.
 

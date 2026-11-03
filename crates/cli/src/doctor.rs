@@ -219,6 +219,11 @@ pub async fn run(opts: Options) -> Result<(), String> {
         .clone()
         .or_else(|| project_root.as_ref().and_then(|r| find_pid_file(r)))
         .and_then(|p| read_pid_file(&p).map(|info| (p, info)));
+    let missing_pid_file = opts
+        .pid_file
+        .as_ref()
+        .filter(|_| pid_info.is_none())
+        .map(|path| unreadable_pid_file(path));
     // Fix text names the MCP port the app actually bound, not 9556.
     let mcp_port = pid_info
         .as_ref()
@@ -235,15 +240,21 @@ pub async fn run(opts: Options) -> Result<(), String> {
             .and_then(|r| mcp_json_url(r))
             .and_then(|url| loopback_url_port(&url));
         let expected_app_id = project_root.as_ref().and_then(|r| tauri_conf_identifier(r));
-        sections.push(
-            check_runtime(
-                project_root.as_ref(),
-                pid_info,
-                mcp_json_port,
-                expected_app_id.as_deref(),
-            )
-            .await,
-        );
+        let mut runtime = check_runtime(
+            project_root.as_ref(),
+            pid_info,
+            mcp_json_port,
+            expected_app_id.as_deref(),
+        )
+        .await;
+        if let Some(check) = missing_pid_file {
+            // Replaces the generic "not found" warning.
+            runtime
+                .checks
+                .retain(|c| c.label != "PID file (.connector.json) not found");
+            runtime.checks.insert(0, check);
+        }
+        sections.push(runtime);
     }
 
     if let Some(root) = project_root.as_ref() {
@@ -256,7 +267,12 @@ pub async fn run(opts: Options) -> Result<(), String> {
         print_text(&sections);
     }
 
-    if any_fail(&sections) {
+    verdict(&sections)
+}
+
+/// Any failed check fails the run (exit 1); warnings never do.
+fn verdict(sections: &[Section]) -> Result<(), String> {
+    if any_fail(sections) {
         Err("doctor found problems — see the Fix lines above".to_string())
     } else {
         Ok(())
@@ -1516,6 +1532,8 @@ struct PidInfo {
     app_name: Option<String>,
     app_id: Option<String>,
     log_dir: Option<PathBuf>,
+    /// 0.17.8+: the app runs but its connector did not start.
+    startup_error: Option<String>,
 }
 
 fn find_pid_file(root: &Path) -> Option<PathBuf> {
@@ -1569,6 +1587,10 @@ fn read_pid_file(path: &Path) -> Option<PidInfo> {
             .get("log_dir")
             .and_then(|v| v.as_str())
             .map(PathBuf::from),
+        startup_error: value
+            .get("startup_error")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
     })
 }
 
@@ -1619,6 +1641,16 @@ async fn check_runtime(
             fallback_ports()
         }
     };
+
+    if let Some(check) = pid.as_ref().and_then(|(_, info)| startup_failure(info)) {
+        // Whatever answers on the port it tried is another app: probing it
+        // would report a healthy connector that is not this app's.
+        checks.push(check);
+        return Section {
+            name: "Runtime",
+            checks,
+        };
+    }
 
     if let Some((_, info)) = &pid {
         checks.push(check_pid_alive(info));
@@ -1757,6 +1789,30 @@ async fn check_runtime(
         name: "Runtime",
         checks,
     }
+}
+
+/// A running app whose PID file says its connector did not start.
+fn startup_failure(info: &PidInfo) -> Option<Check> {
+    let error = info.startup_error.as_ref()?;
+    if !info.pid.is_some_and(process_alive) {
+        return None;
+    }
+    Some(
+        Check::fail(
+            "Connector did not start in the running app",
+            "free the port (or pick another with TAURI_CONNECTOR_PORT / TAURI_CONNECTOR_MCP_PORT / TAURI_CONNECTOR_BRIDGE_PORT, or a range with *_PORT_RANGE), then restart the app; `tauri-connector status` lists every running connector and its port",
+        )
+        .with_detail(error.clone()),
+    )
+}
+
+/// A `--pid-file` that was named but cannot be read is a failure, not a
+/// reason to probe the default ports (which may belong to another app).
+fn unreadable_pid_file(path: &Path) -> Check {
+    Check::fail(
+        format!("PID file {} unreadable", path.display()),
+        "check the path, or drop --pid-file / TAURI_CONNECTOR_PID_FILE to search the project's target directories",
+    )
 }
 
 fn check_pid_alive(info: &PidInfo) -> Check {
@@ -3128,6 +3184,61 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
     #[test]
     fn indent_snippet_prefixes_two_spaces() {
         assert_eq!(indent_snippet("a\nb"), "  a\n  b");
+    }
+
+    #[test]
+    fn any_failed_check_fails_the_run_and_warnings_do_not() {
+        let section = |checks| Section {
+            name: "Test",
+            checks,
+        };
+        assert!(verdict(&[section(vec![Check::ok("a"), Check::warn("b", "fix")])]).is_ok());
+        assert!(verdict(&[
+            section(vec![Check::ok("a")]),
+            section(vec![Check::warn("b", "fix"), Check::fail("c", "fix")]),
+        ])
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn a_connector_that_did_not_start_fails_without_probing_another_app() {
+        let info = PidInfo {
+            pid: Some(u64::from(std::process::id())),
+            ws_port: Some(9555),
+            mcp_port: None,
+            bridge_port: None,
+            app_name: Some("Pinned".into()),
+            app_id: Some("com.example.pinned".into()),
+            log_dir: None,
+            startup_error: Some("WebSocket server: port 9555 is in use".into()),
+        };
+        let section = check_runtime(
+            None,
+            Some((PathBuf::from("/tmp/.connector.json"), info)),
+            None,
+            None,
+        )
+        .await;
+        let failed: Vec<_> = section
+            .checks
+            .iter()
+            .filter(|check| check.status == Status::Fail)
+            .collect();
+        assert_eq!(failed.len(), 1, "only the startup failure");
+        assert_eq!(
+            failed[0].label,
+            "Connector did not start in the running app"
+        );
+        assert!(failed[0].detail.as_deref().unwrap().contains("is in use"));
+        assert!(!section
+            .checks
+            .iter()
+            .any(|check| check.label.contains("WebSocket")));
+        assert!(verdict(&[section]).is_err());
+        assert_eq!(
+            unreadable_pid_file(Path::new("/nope/.connector.json")).status,
+            Status::Fail
+        );
     }
 
     #[test]
