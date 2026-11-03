@@ -35,6 +35,11 @@ pub struct ConnectorInstance {
     pub project_root: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cargo_package: Option<String>,
+    /// Set (plugins 0.17.8+) when the app is running but its connector did
+    /// not start, e.g. an exact port was in use. Such a file names no
+    /// endpoint; `ws_port` is the port it tried (0 when unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_error: Option<String>,
 }
 
 impl ConnectorInstance {
@@ -237,9 +242,12 @@ pub fn plugin_version_label(identity: Option<&AppIdentity>) -> String {
 }
 
 impl InstanceStatus {
-    /// Human label: `ready`, `unauthorized`, `legacy_plugin`, or `stale`.
+    /// Human label: `ready`, `unauthorized`, `legacy_plugin`, `failed` (app
+    /// running, connector not started) or `stale`.
     pub fn state(&self) -> &'static str {
-        if self.stale {
+        if self.pid_alive && self.instance.startup_error.is_some() {
+            "failed"
+        } else if self.stale {
             "stale"
         } else if self.unauthorized {
             "unauthorized"
@@ -302,6 +310,7 @@ fn scanned_status(port: u16, identity: &AppIdentity) -> InstanceStatus {
             project_name: identity.project_name.clone(),
             project_root: identity.project_root.clone(),
             cargo_package: identity.cargo_package.clone(),
+            startup_error: None,
         },
         pid_alive: true,
         ws_reachable: true,
@@ -491,6 +500,15 @@ pub async fn resolve_connection(opts: ConnectionOptions) -> Result<ResolvedConne
             stale.push(StaleRecord {
                 reason: format!("process {} is not running", hint.pid),
                 instance: hint,
+            });
+            continue;
+        }
+        // The app runs but its connector never started (e.g. its exact port
+        // was taken): whatever answers on that port is another app.
+        if let Some(error) = &hint.startup_error {
+            stale.push(StaleRecord {
+                reason: format!("its connector did not start ({error})"),
+                instance: hint.clone(),
             });
             continue;
         }
@@ -780,30 +798,37 @@ pub async fn instance_statuses(
         let pid_alive = pid_is_alive(instance.pid);
         let mut legacy_plugin = false;
         let mut reported = None;
-        let (ws_reachable, unauthorized, error) = if pid_alive {
-            match endpoint_identity(host, instance.ws_port, 1_000).await {
-                Ok(identity) => {
-                    let checked = validate_identity(&identity, app_id, None, Some(&instance));
-                    reported = Some(identity);
-                    match checked {
-                        Ok(()) => (true, false, None),
-                        Err(e) => (false, false, Some(e)),
+        let (ws_reachable, unauthorized, error) =
+            if let Some(failure) = instance.startup_error.as_ref().filter(|_| pid_alive) {
+                (
+                    false,
+                    false,
+                    Some(format!("connector did not start: {failure}")),
+                )
+            } else if pid_alive {
+                match endpoint_identity(host, instance.ws_port, 1_000).await {
+                    Ok(identity) => {
+                        let checked = validate_identity(&identity, app_id, None, Some(&instance));
+                        reported = Some(identity);
+                        match checked {
+                            Ok(()) => (true, false, None),
+                            Err(e) => (false, false, Some(e)),
+                        }
                     }
+                    Err(e) if is_unauthorized_error(&e) => (
+                        true,
+                        true,
+                        Some(format!("unauthorized: {UNAUTHORIZED_HINT}")),
+                    ),
+                    Err(_) if is_legacy_plugin(host, instance.ws_port, 1_000).await => {
+                        legacy_plugin = true;
+                        (true, false, Some(legacy_plugin_error(&[instance.ws_port])))
+                    }
+                    Err(e) => (false, false, Some(e)),
                 }
-                Err(e) if is_unauthorized_error(&e) => (
-                    true,
-                    true,
-                    Some(format!("unauthorized: {UNAUTHORIZED_HINT}")),
-                ),
-                Err(_) if is_legacy_plugin(host, instance.ws_port, 1_000).await => {
-                    legacy_plugin = true;
-                    (true, false, Some(legacy_plugin_error(&[instance.ws_port])))
-                }
-                Err(e) => (false, false, Some(e)),
-            }
-        } else {
-            (false, false, Some("process is not running".to_string()))
-        };
+            } else {
+                (false, false, Some("process is not running".to_string()))
+            };
         let project = ProjectFacts::of(reported.as_ref(), Some(&instance)).label();
         statuses.push(InstanceStatus {
             project,
@@ -896,6 +921,8 @@ fn read_instance_file(path: &Path) -> Option<ConnectorInstance> {
         project_root: Option<PathBuf>,
         #[serde(default)]
         cargo_package: Option<String>,
+        #[serde(default)]
+        startup_error: Option<String>,
     }
 
     let raw: RawInstance = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
@@ -914,6 +941,7 @@ fn read_instance_file(path: &Path) -> Option<ConnectorInstance> {
         project_name: raw.project_name,
         project_root: raw.project_root,
         cargo_package: raw.cargo_package,
+        startup_error: raw.startup_error,
     })
 }
 
@@ -946,8 +974,9 @@ pub async fn ping_ws(host: &str, port: u16, timeout_ms: u64) -> Result<(), Strin
     }
 }
 
+/// Whether a process with this id exists (always `true` off Unix).
 #[cfg(unix)]
-fn pid_is_alive(pid: u32) -> bool {
+pub fn pid_is_alive(pid: u32) -> bool {
     unsafe extern "C" {
         fn kill(pid: i32, sig: i32) -> i32;
     }
@@ -955,7 +984,7 @@ fn pid_is_alive(pid: u32) -> bool {
 }
 
 #[cfg(not(unix))]
-fn pid_is_alive(_pid: u32) -> bool {
+pub fn pid_is_alive(_pid: u32) -> bool {
     true
 }
 
@@ -1027,6 +1056,7 @@ mod tests {
             project_name: None,
             project_root: None,
             cargo_package: None,
+            startup_error: None,
         };
         assert_eq!(
             instance.snapshots_dir(),
@@ -1058,6 +1088,7 @@ mod tests {
             project_name: None,
             project_root: None,
             cargo_package: None,
+            startup_error: None,
         };
         let status = InstanceStatus {
             instance,

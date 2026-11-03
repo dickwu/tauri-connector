@@ -38,6 +38,7 @@ fn hint() -> ConnectorInstance {
         project_name: None,
         project_root: None,
         cargo_package: None,
+        startup_error: None,
     }
 }
 #[test]
@@ -449,5 +450,45 @@ async fn status_rows_carry_the_reported_plugin_version() {
         connector_client::discovery::plugin_version_label(Some(&old)),
         "<0.17.5 (unreported)"
     );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn a_connector_that_failed_to_start_is_reported_not_attached_through_its_port() {
+    // Exact port taken: the app runs, but the port in its PID file belongs to
+    // another app. Status says `failed`; commands name the failure instead of
+    // attaching to the other app.
+    let root = std::env::temp_dir().join(format!(
+        "connector-failed-{}",
+        connector_client::inspection::new_request_key()
+    ));
+    std::fs::create_dir_all(root.join("target")).unwrap();
+    let other_app_port = spawn_plugin_with_identity(root.canonicalize().unwrap()).await;
+    let path = root.join("target/.connector.json");
+    std::fs::write(
+        &path,
+        serde_json::json!({"pid":std::process::id(),"ws_port":other_app_port,
+            "app_name":"Pinned","app_id":"com.example.pinned","started_at":1,
+            "startup_error":format!("WebSocket server: port {other_app_port} is in use")})
+        .to_string(),
+    )
+    .unwrap();
+    let statuses =
+        connector_client::discovery::instance_statuses(&root, None, Some(&path), None).await;
+    assert_eq!(statuses[0].state(), "failed");
+    assert!(!statuses[0].ws_reachable);
+    assert!(
+        statuses[0]
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("is in use")),
+        "{:?}",
+        statuses[0].error
+    );
+    let error = connector_client::discovery::resolve_connection(options(&root))
+        .await
+        .unwrap_err();
+    assert!(error.contains("connector did not start"), "{error}");
+    assert!(error.contains("Pinned (com.example.pinned)"), "{error}");
     std::fs::remove_dir_all(root).unwrap();
 }

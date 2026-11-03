@@ -368,6 +368,7 @@ mod tests {
                 project_name: None,
                 project_root: None,
                 cargo_package: None,
+                startup_error: None,
             }),
         }
     }

@@ -575,18 +575,41 @@ impl ConnectorBuilder {
                 let late_arbiter = plugin_state.workflow.resources.clone();
 
                 tauri::async_runtime::spawn(async move {
+                    // A connector that cannot start still leaves a PID file
+                    // saying so, instead of a stale one from an earlier run
+                    // that points at whichever app now owns the port.
+                    let record_failure = |error: &str, ws_port: u16| {
+                        let config = handle.config();
+                        if let Some(path) = write_pid_file(
+                            PidFacts {
+                                ws_port,
+                                mcp_port: None,
+                                bridge_port: 0,
+                                startup_error: Some(error),
+                            },
+                            &config.product_name.clone().unwrap_or_default(),
+                            &config.identifier,
+                            project::current(&handle),
+                            &log_dir_for_pid,
+                        ) {
+                            let _ = PID_FILE.set(path);
+                        }
+                    };
                     let (port_plan, mcp_port_plan, bridge_port_plan) = match plans {
                         Ok(plans) => plans,
                         Err(e) => {
                             eprintln!("[connector] Not starting: {e}");
+                            record_failure(&e, 0);
                             return;
                         }
                     };
+                    let requested_ws_port = if port_plan.exact.is_some() { port_plan.start } else { 0 };
                     // 1. Start internal bridge (JS <-> plugin via WebSocket)
                     let bridge = match Bridge::start_on(&bridge_port_plan) {
                         Ok(b) => b,
                         Err(e) => {
                             eprintln!("[connector] Failed to start bridge: {e}");
+                            record_failure(&format!("bridge: {e}"), requested_ws_port);
                             return;
                         }
                     };
@@ -639,6 +662,7 @@ impl ConnectorBuilder {
                         Ok(s) => s,
                         Err(e) => {
                             eprintln!("[connector] Failed to create WS server: {e}");
+                            record_failure(&format!("WebSocket server: {e}"), requested_ws_port);
                             return;
                         }
                     };
@@ -669,6 +693,7 @@ impl ConnectorBuilder {
                                 // An exact port is a contract: stop rather
                                 // than run without the MCP the user pinned.
                                 eprintln!("[connector][mcp] Not starting: {e}");
+                                record_failure(&format!("MCP server: {e}"), requested_ws_port);
                                 return;
                             }
                             Err(e) => {
@@ -691,9 +716,12 @@ impl ConnectorBuilder {
 
                     // 7. Write PID file so bun scripts can auto-discover ports
                     if let Some(path) = write_pid_file(
-                        ws_port,
-                        mcp_port_actual,
-                        bridge_port,
+                        PidFacts {
+                            ws_port,
+                            mcp_port: mcp_port_actual,
+                            bridge_port,
+                            startup_error: None,
+                        },
                         &config.product_name.clone().unwrap_or_default(),
                         &config.identifier,
                         project::current(&handle),
@@ -747,10 +775,41 @@ fn remove_own_pid_file(path: &std::path::Path, pid: u32) {
 
 /// Write a `.connector.json` PID file (see [`pid_file_dir`]) so scripts can auto-discover ports.
 /// Returns the path if successful (for cleanup on exit).
-fn write_pid_file(
+/// What a PID file says about the connector's endpoints.
+struct PidFacts<'a> {
     ws_port: u16,
     mcp_port: Option<u16>,
     bridge_port: u16,
+    /// Set when the connector did not start; `ws_port` is then the port it
+    /// was asked for (0 for a range).
+    startup_error: Option<&'a str>,
+}
+
+/// A failed start must not replace the PID file of another process whose
+/// connector is running (two copies of one app sharing a target dir).
+fn keeps_live_pid_file(
+    existing: Option<&serde_json::Value>,
+    own_pid: u32,
+    alive: impl Fn(u32) -> bool,
+) -> bool {
+    let Some(existing) = existing else {
+        return false;
+    };
+    let Some(pid) = existing
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|pid| u32::try_from(pid).ok())
+    else {
+        return false;
+    };
+    let failed = existing
+        .get("startup_error")
+        .is_some_and(|error| !error.is_null());
+    pid != own_pid && !failed && alive(pid)
+}
+
+fn write_pid_file(
+    facts: PidFacts<'_>,
     app_name: &str,
     app_id: &str,
     project: &project::Project,
@@ -765,8 +824,30 @@ fn write_pid_file(
 
     let pid_path = target_dir.join(".connector.json");
     let pid = std::process::id();
+    let PidFacts {
+        ws_port,
+        mcp_port,
+        bridge_port,
+        startup_error,
+    } = facts;
+    if startup_error.is_some() {
+        let existing = std::fs::read_to_string(&pid_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        if keeps_live_pid_file(
+            existing.as_ref(),
+            pid,
+            connector_client::discovery::pid_is_alive,
+        ) {
+            eprintln!(
+                "[connector] Left {} alone: it belongs to another running connector",
+                pid_path.display()
+            );
+            return None;
+        }
+    }
 
-    let info = serde_json::json!({
+    let mut info = serde_json::json!({
         "pid": pid,
         "ws_port": ws_port,
         "mcp_port": mcp_port,
@@ -782,6 +863,9 @@ fn write_pid_file(
         "started_at": identity::started_at(),
         "pid_file": pid_path.to_string_lossy(),
     });
+    if let Some(error) = startup_error {
+        info["startup_error"] = serde_json::Value::from(error);
+    }
 
     let tmp_path = pid_path.with_extension("json.tmp");
     match std::fs::write(&tmp_path, serde_json::to_string_pretty(&info).ok()?)
@@ -846,5 +930,37 @@ mod pid_file_tests {
 
         remove_own_pid_file(&path, 42); // missing file is fine
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_start_replaces_a_stale_pid_file_but_not_a_live_one() {
+        let alive = |pid: u32| pid == 7;
+        let file = |text: &str| serde_json::from_str::<serde_json::Value>(text).unwrap();
+        assert!(
+            !super::keeps_live_pid_file(None, 42, alive),
+            "no file: write one"
+        );
+        assert!(
+            !super::keeps_live_pid_file(Some(&file(r#"{"pid": 9, "ws_port": 9555}"#)), 42, alive),
+            "a dead app's file is replaced"
+        );
+        assert!(
+            !super::keeps_live_pid_file(Some(&file(r#"{"pid": 42, "ws_port": 9555}"#)), 42, alive),
+            "our own file is replaced"
+        );
+        assert!(
+            super::keeps_live_pid_file(Some(&file(r#"{"pid": 7, "ws_port": 9555}"#)), 42, alive),
+            "another running connector keeps its file"
+        );
+        assert!(
+            !super::keeps_live_pid_file(
+                Some(&file(
+                    r#"{"pid": 7, "ws_port": 9555, "startup_error": "port in use"}"#
+                )),
+                42,
+                alive
+            ),
+            "another failed start does not block the newest report"
+        );
     }
 }
