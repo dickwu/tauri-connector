@@ -130,7 +130,8 @@ async function launchFixture(identifier, logName = 'native-app.log') {
       ready = await rpc.js('({native:!!window.__TAURI_INTERNALS__,react:!!window.WorkflowReact,ready:!!window.__WORKFLOW_FIXTURE__,title:document.title})');
       if (ready.ready) break;
     } catch (error) {
-      if (!String(error).includes("Window 'main' not found")) throw error;
+      // 0.17.8 reports a window that does not exist yet as window_not_ready.
+      if (!/window_not_ready|Window 'main' not found/.test(String(error))) throw error;
     }
     await delay(100);
   }
