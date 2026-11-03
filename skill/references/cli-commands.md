@@ -272,7 +272,9 @@ tauri-connector scroll [direction] [amount] [--selector <sel>]
 |---|---|---|
 | `direction` | `down` | `up`, `down`, `left`, `right` |
 | `amount` | `300` | Pixels to scroll |
-| `--selector` | | Element to scroll (page if omitted) |
+| `--selector` | | Element (or `@ref`) whose container to scroll |
+
+Since 0.17.8 `scroll` moves the container a user would scroll, not just the document: with `--selector`, that element or its nearest scrollable ancestor; without it, the scrollable container under the viewport centre, then the focused element's, then the hovered element's, then the document. A container that can still move in that direction wins over one at its edge. The result reports `container` (`tag`/`id`/`className`, `document` for the page), `source` (`selector`, `viewport-center`, `focus`, `hover` or `document`), `scrolledBy` (`{x, y}` actually moved; `{0, 0}` means everything was at its edge) and `position`.
 
 ### scrollintoview
 

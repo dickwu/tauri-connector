@@ -550,24 +550,48 @@ pub async fn scroll(
         _ => 0,
     };
 
-    let result = if let Some(t) = target {
-        let action = format!(
-            "el.scrollBy({dx}, {dy}); return {{ action: 'scroll', direction: '{direction}', amount: {amount} }};"
-        );
-        let script = build_resolve_and_act_script(t, refs, &action);
-        exec_js(client, &script, 30_000).await?
-    } else {
-        let script = format!(
-            "(() => {{ window.scrollBy({dx}, {dy}); return {{ action: 'scroll', direction: '{direction}', amount: {amount} }}; }})()"
-        );
-        exec_js(client, &script, 30_000).await?
-    };
+    let result = exec_js(
+        client,
+        &scroll_script(refs, direction, amount, dx, dy, target),
+        30_000,
+    )
+    .await?;
 
     println!(
         "{}",
         serde_json::to_string_pretty(&result).unwrap_or_default()
     );
     Ok(())
+}
+
+/// Canonical copy lives in plugin/js/scroll.js; the two must stay identical.
+const SCROLL_JS: &str = include_str!("scroll.js");
+
+/// Script for `scroll`: with a target, scroll it or its nearest scrollable
+/// ancestor; without one, the container under the viewport centre, the
+/// focused or hovered element's container, then the document.
+fn scroll_script(
+    refs: &RefMap,
+    direction: &str,
+    amount: i32,
+    dx: i32,
+    dy: i32,
+    target: Option<&str>,
+) -> String {
+    let report = format!(
+        "return {{ action: 'scroll', direction: {}, amount: {amount}, ...__scroll }};",
+        serde_json::to_string(direction).unwrap_or_default()
+    );
+    match target {
+        Some(t) => build_resolve_and_act_script(
+            t,
+            refs,
+            &format!("const __scroll = ({SCROLL_JS})(el, {dx}, {dy}); {report}"),
+        ),
+        None => {
+            format!("(() => {{ const __scroll = ({SCROLL_JS})(null, {dx}, {dy}); {report} }})()")
+        }
+    }
 }
 
 /// Scroll an element into view.
@@ -2863,6 +2887,23 @@ mod tests {
         assert_eq!(text.matches("late result req-7").count(), 1, "{text}");
         assert!(text.contains("late result req-7: lost (x3)\n"), "{text}");
         assert!(text.contains("late result req-8: lost\n"), "{text}");
+    }
+
+    #[test]
+    fn scroll_uses_the_container_finder_shared_with_the_plugin() {
+        let plugin =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugin/js/scroll.js");
+        // Published crates have no plugin directory next to them.
+        if let Ok(canonical) = std::fs::read_to_string(plugin) {
+            assert_eq!(super::SCROLL_JS, canonical, "re-copy plugin/js/scroll.js");
+        }
+        let refs = super::RefMap::new();
+        let page = super::scroll_script(&refs, "down", 300, 0, 300, None);
+        assert!(page.contains("connectorScroll"), "{page}");
+        assert!(page.contains("(null, 0, 300)"), "{page}");
+        assert!(!page.contains("window.scrollBy(0, 300)"), "{page}");
+        let element = super::scroll_script(&refs, "left", 50, -50, 0, Some("#list"));
+        assert!(element.contains("(el, -50, 0)"), "{element}");
     }
 
     #[test]

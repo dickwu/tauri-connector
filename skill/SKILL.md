@@ -325,6 +325,7 @@ tauri-connector check @e10                     # Check checkbox
 tauri-connector uncheck @e10                   # Uncheck checkbox
 tauri-connector select @e6 "option1" "opt2"    # Select dropdown
 tauri-connector press Enter
+tauri-connector scroll down 300                # Panel under the viewport centre (0.17.8+), else the page
 tauri-connector scroll down 300 --selector ".list"
 tauri-connector scrollintoview @e20
 ```

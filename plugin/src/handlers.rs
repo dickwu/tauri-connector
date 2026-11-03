@@ -1115,15 +1115,16 @@ pub async fn interact(
         }
         "focus" => "el.focus();".to_string(),
         "scroll" => {
-            let dir = direction.unwrap_or("down");
+            // The target or its nearest scrollable ancestor (0.17.8+), so
+            // scrolling a row inside a panel moves the panel.
             let dist = distance.unwrap_or(300.0);
-            match dir {
-                "up" => format!("el.scrollBy(0, -{dist});"),
-                "down" => format!("el.scrollBy(0, {dist});"),
-                "left" => format!("el.scrollBy(-{dist}, 0);"),
-                "right" => format!("el.scrollBy({dist}, 0);"),
-                _ => format!("el.scrollBy(0, {dist});"),
-            }
+            let (dx, dy) = match direction.unwrap_or("down") {
+                "up" => (0.0, -dist),
+                "left" => (-dist, 0.0),
+                "right" => (dist, 0.0),
+                _ => (0.0, dist),
+            };
+            format!("__interaction = {{ scroll: ({SCROLL_JS})(el, {dx}, {dy}) }};")
         }
         "hover" => {
             // Full hover sequence: pointer events + mouse events + CSS :hover workaround.
@@ -1187,6 +1188,7 @@ pub async fn interact(
 }
 
 const CLICK_JS: &str = include_str!("../js/click.js");
+const SCROLL_JS: &str = include_str!("../js/scroll.js");
 
 /// Page scripts report failures they detected before dispatching any event as
 /// `{dispatched: false, code?, error}`; resolver blocks report `{error}` before

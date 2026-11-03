@@ -34,6 +34,8 @@ Perform gestures on elements: click, double-click, focus, scroll, hover, drag.
 | `durationMs` | number | | 300 | Drag total duration in ms |
 | `dragStrategy` | string | | `auto` | `auto` (checks `el.draggable`), `pointer`, `html5dnd`; any other value is rejected |
 
+`scroll` (0.17.8+) scrolls the target or its nearest scrollable ancestor (document as fallback) and returns `scroll: { container, source, scrolledBy, position }`; `scrolledBy: {x: 0, y: 0}` means the container was already at its edge.
+
 `click` dispatches pointerover/mouseover/pointermove/mousemove/pointerdown/mousedown/(focus)/pointerup/mouseup/click at the element's visual centre, to the element actually hit there when it is the target or inside it. If another element covers the centre, the events still go to the target and the result has `mismatch: true`, `hit` (the covering element) and a `warning`. The `text` strategy resolves to the deepest element whose NBSP/whitespace-normalised text contains the string (visible matches first), not the first ancestor. A missing target, disabled target, stale ref, missing selector/coordinates or unknown action returns `not_dispatched` with `effect: none`, so it never quarantines the lease.
 
 ### webview_keyboard
