@@ -490,6 +490,15 @@ fn eval_page_script(script: &str, page_deadline_ms: u64) -> crate::bridge::PageS
 /// transport failure. With no IPC/network dispatch observed the lease is
 /// released (effect none); otherwise it stays quarantined as before.
 fn eval_error_outcome(error: BridgeError, timeout_ms: u64) -> ExecutionOutcome {
+    if let BridgeError::ExecutionFailed {
+        request_id,
+        error: message,
+        ..
+    } = &error
+        && tauri_acl_denial(message)
+    {
+        return ipc_denied_outcome(request_id, message);
+    }
     let timed_out = matches!(&error, BridgeError::ExecutionFailed { error, .. }
         if error.contains(EVAL_TIMEOUT_MARK));
     let mut outcome = bridge_error_outcome(error);
@@ -2013,6 +2022,46 @@ pub async fn ipc_execute_command(
         }
         Err(e) => Response::outcome_error(id.to_string(), bridge_error_outcome(e)),
     }
+}
+
+/// True when a script failed on Tauri's own refusal of an IPC call (ACL
+/// denial, unknown plugin or command), whatever the command was. Tauri raises
+/// these before any command code runs (R2 0.17.7: `minimize()` without
+/// `core:window:allow-minimize` quarantined the backend and UI).
+fn tauri_acl_denial(error: &str) -> bool {
+    static DENIAL: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    DENIAL
+        .get_or_init(|| {
+            Regex::new(
+                r"(?m)(?:^|[\s:])(?:[\w.:|-]+ not allowed(?:\. Permissions associated with this command\b|\. Plugin not found|\. Command not found| on window \S| on webview \S| on origin \S)|Command [\w.:|-]+ not found\s*$)",
+            )
+            .expect("valid regex")
+        })
+        .is_match(error)
+}
+
+/// Outcome for a script stopped by a Tauri IPC refusal: the denied command
+/// never ran, so nothing is quarantined.
+fn ipc_denied_outcome(request_id: &str, message: &str) -> ExecutionOutcome {
+    let mut outcome = ExecutionOutcome::failed(
+        WorkflowError::new(
+            "ipc_not_allowed",
+            "executing",
+            format!(
+                "{message}\n\nhint: Tauri refused the IPC call before the command ran; grant it in the app's capabilities (src-tauri/capabilities/*.json) for this window, or check the command name"
+            ),
+        ),
+        EffectStatus::None,
+    );
+    outcome.dispatch = serde_json::json!({
+        "requestId": request_id,
+        "dispatched": true,
+        "commandExecuted": false,
+    });
+    outcome.warnings.push(
+        "The denied IPC command did not run, so nothing was quarantined; script statements before the denied call did run".into(),
+    );
+    outcome
 }
 
 /// True for Tauri's own refusals of `command` (ACL denial, unknown plugin or
@@ -5048,6 +5097,53 @@ mod tests {
         assert_eq!(entries[0].window_id, "main");
         assert_eq!(entries[1].window_id, "editor");
         assert!(super::pending_log_entries(&serde_json::json!(null), "main").is_empty());
+    }
+
+    #[test]
+    fn an_eval_stopped_by_a_tauri_acl_denial_is_not_quarantined() {
+        use crate::bridge::BridgeError;
+        use crate::protocol::Response;
+        use connector_client::outcome::EffectStatus;
+        // R2 0.17.7: getCurrentWindow().minimize() without the permission
+        // reported effect:possible and quarantined backend + UI.
+        let denial = "window.minimize not allowed. Permissions associated with this command: core:window:allow-minimize";
+        for message in [
+            denial.to_string(),
+            format!("Error: {denial}"),
+            "Uncaught (in promise) plugin:fs|read not allowed on window \"main\", webview \"main\""
+                .into(),
+            "dialog.open not allowed. Plugin not found".into(),
+            "Command save_file not found".into(),
+        ] {
+            let outcome = super::eval_error_outcome(
+                BridgeError::ExecutionFailed {
+                    request_id: "req-acl".into(),
+                    error: message.clone(),
+                    effect: EffectStatus::Possible,
+                },
+                30_000,
+            );
+            assert_eq!(outcome.effect, EffectStatus::None, "{message}");
+            assert_eq!(outcome.error.as_ref().unwrap().code, "ipc_not_allowed");
+            assert_eq!(outcome.dispatch["commandExecuted"], false);
+            let response = Response::outcome_error("1".into(), outcome);
+            assert!(!response.requires_quarantine(), "{message}");
+        }
+        // A command's own failure still keeps its possible effect.
+        for message in [
+            "disk full: save_file not allowed to grow",
+            "TypeError: x is not a function",
+        ] {
+            let outcome = super::eval_error_outcome(
+                BridgeError::ExecutionFailed {
+                    request_id: "req-x".into(),
+                    error: message.into(),
+                    effect: EffectStatus::Possible,
+                },
+                30_000,
+            );
+            assert_eq!(outcome.effect, EffectStatus::Possible, "{message}");
+        }
     }
 
     #[test]
