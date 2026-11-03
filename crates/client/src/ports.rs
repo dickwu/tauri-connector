@@ -14,6 +14,11 @@
 //! to start and says so, with no fallback to a range. A range is
 //! `START-END` (inclusive) or a single `PORT`, and takes the first free port.
 //! (0.17.6 read `TAURI_CONNECTOR_PORT`/`_MCP_PORT` as `PORT..=PORT+100`.)
+//!
+//! Since 0.17.8 a range plan can carry a `preferred` port: the WebSocket and
+//! MCP ports the same app (by identifier) bound last time, tried before the
+//! scan. Two apps on the default ranges then keep their ports across
+//! restarts in any order, and a single app keeps 9555/9556.
 
 pub const DEFAULT_WS_RANGE: (u16, u16) = (9555, 9655);
 pub const DEFAULT_MCP_RANGE: (u16, u16) = (9556, 9656);
@@ -37,7 +42,13 @@ pub struct PortPlan {
     /// Where an exact port came from (a variable name or
     /// `ConnectorBuilder`); `None` for a range.
     pub exact: Option<String>,
+    /// A range plan's first choice (0.17.8): the port this app bound last
+    /// time. Ignored for exact plans and outside `start..=end`.
+    pub preferred: Option<u16>,
 }
+
+/// Opt out of remembered ports (0.17.8) with `0`/`false`/`off`.
+pub const REMEMBER_PORTS_VAR: &str = "TAURI_CONNECTOR_REMEMBER_PORTS";
 
 impl PortPlan {
     fn range((start, end): (u16, u16)) -> Self {
@@ -45,6 +56,7 @@ impl PortPlan {
             start,
             end,
             exact: None,
+            preferred: None,
         }
     }
 
@@ -53,7 +65,23 @@ impl PortPlan {
             start: port,
             end: port,
             exact: Some(source.to_string()),
+            preferred: None,
         }
+    }
+
+    /// Prefer `port` (a remembered port) on a range plan; exact plans and
+    /// ports outside the range keep the plain scan.
+    pub fn with_preferred(mut self, port: Option<u16>) -> Self {
+        self.preferred =
+            port.filter(|p| self.exact.is_none() && (self.start..=self.end).contains(p));
+        self
+    }
+
+    /// Ports in bind order: the preferred port, then `start..=end`.
+    pub fn candidates(&self) -> impl Iterator<Item = u16> + '_ {
+        self.preferred
+            .into_iter()
+            .chain((self.start..=self.end).filter(move |p| Some(*p) != self.preferred))
     }
 
     /// `9700 (exact, TAURI_CONNECTOR_PORT)` or `9555-9655`.

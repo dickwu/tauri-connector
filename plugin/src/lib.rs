@@ -604,6 +604,13 @@ impl ConnectorBuilder {
                         }
                     };
                     let requested_ws_port = if port_plan.exact.is_some() { port_plan.start } else { 0 };
+                    // 0.17.8: try the ports this app bound last time first, so
+                    // apps sharing the default ranges keep their ports.
+                    let remember_ports = workflow_storage_available
+                        && net::remember_ports_enabled(std::env::var(connector_client::ports::REMEMBER_PORTS_VAR).ok().as_deref());
+                    let remembered = if remember_ports { net::RememberedPorts::load(&log_dir_for_pid) } else { net::RememberedPorts::default() };
+                    let port_plan = port_plan.with_preferred(remembered.ws);
+                    let mcp_port_plan = mcp_port_plan.with_preferred(remembered.mcp);
                     // 1. Start internal bridge (JS <-> plugin via WebSocket)
                     let bridge = match Bridge::start_on(&bridge_port_plan) {
                         Ok(b) => b,
@@ -713,6 +720,12 @@ impl ConnectorBuilder {
                         bind_address,
                         ws_port,
                     );
+
+                    if remember_ports {
+                        remembered
+                            .update(Some(ws_port), &port_plan, mcp_port_actual, &mcp_port_plan)
+                            .save(&log_dir_for_pid);
+                    }
 
                     // 7. Write PID file so bun scripts can auto-discover ports
                     if let Some(path) = write_pid_file(

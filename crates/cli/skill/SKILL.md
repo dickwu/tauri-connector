@@ -35,6 +35,8 @@ Port layout:
 | 9555--9655 | External WebSocket (CLI + bun scripts) |
 | 9556--9656 | Embedded MCP HTTP server: `/mcp` Streamable HTTP, `/sse` legacy HTTP+SSE |
 
+Since 0.17.8 each app first retries the WS/MCP ports it bound last time (`<app data>/<identifier>/.tauri-connector/ports.json`), so several apps on the default ranges keep their ports across restarts in any order; exact ports (`TAURI_CONNECTOR_PORT` / `TAURI_CONNECTOR_MCP_PORT`, `ConnectorBuilder::port` / `mcp_port`) still win. `TAURI_CONNECTOR_REMEMBER_PORTS=0` disables it.
+
 ## Known multi-step intent: workflow first
 
 For a known short sequence, query `workflow_capabilities`, then submit a strict sequential v1 spec with `workflow_run`. The application performs target resolution, input, condition checks and prior-step bindings. Use `workflow_get` to inspect the returned `runId` after a timeout or disconnect. Read an individual retained evidence reference with `evidenceId` and follow `evidencePage.nextOffset` as the next byte `offset` when the report is truncated. Reuse the same `runKey` and spec when the submission response is lost; never restart an uncertain write with a new key.

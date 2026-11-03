@@ -2100,6 +2100,10 @@ fn describe_served(app: &ServedApp) -> String {
     out
 }
 
+/// How to keep an app's MCP port stable when several apps share the
+/// default ranges (gfit: two apps swapped ports on restart).
+const STABLE_PORT_HINT: &str = "Plugins 0.17.8+ reuse the ports each app bound last time (`.tauri-connector/ports.json` in its app data dir), so two apps on the default ranges keep their ports after one run together; older plugins hand out ports in start order. To guarantee a port, pin it exactly with TAURI_CONNECTOR_MCP_PORT / ConnectorBuilder::mcp_port(...) (a busy exact port fails instead of moving), or give each app its own ConnectorBuilder::mcp_port_range(...)";
+
 /// Does the `.mcp.json` port belong to this project's app?
 fn check_mcp_json_owner(
     json_port: u16,
@@ -2111,9 +2115,11 @@ fn check_mcp_json_owner(
     let own_port = own.and_then(|o| o.mcp_port).filter(|p| *p != json_port);
     let fix = match own_port {
         Some(port) => format!(
-            "point .mcp.json at this app's MCP endpoint, then restart the MCP client:\n  \"tauri-connector\": {{ \"type\": \"http\", \"url\": \"http://127.0.0.1:{port}/mcp\" }}\nPin the port with ConnectorBuilder::mcp_port_range(...) so it stays stable when several apps run"
+            "point .mcp.json at this app's MCP endpoint, then restart the MCP client:\n  \"tauri-connector\": {{ \"type\": \"http\", \"url\": \"http://127.0.0.1:{port}/mcp\" }}\n{STABLE_PORT_HINT}"
         ),
-        None => "start this project's app, read its MCP port from `tauri-connector status` (or src-tauri/target/.connector.json `mcp_port`), and set that port in .mcp.json; give each app its own range with ConnectorBuilder::mcp_port_range(...)".to_string(),
+        None => format!(
+            "start this project's app, read its MCP port from `tauri-connector status` (or src-tauri/target/.connector.json `mcp_port`), and set that port in .mcp.json. {STABLE_PORT_HINT}"
+        ),
     };
     if let McpPortOwner::App(app) = owner {
         let expected = expected_app_id?;
@@ -3058,7 +3064,13 @@ pub fn setup(app: &mut tauri::App) { app.add_capability(CAP).unwrap(); }"#,
         let check =
             check_mcp_json_owner(9556, Some("com.r2.app"), None, None, &gfit).expect("check");
         assert_eq!(check.status, Status::Fail);
-        assert!(check.fix.unwrap_or_default().contains("mcp_port_range"));
+        let fix = check.fix.unwrap_or_default();
+        assert!(fix.contains("mcp_port_range"), "{fix}");
+        // 0.17.8: names remembered ports and the exact-port pin.
+        assert!(
+            fix.contains("ports.json") && fix.contains("TAURI_CONNECTOR_MCP_PORT"),
+            "{fix}"
+        );
 
         // The right app owns the port.
         let r2 = McpPortOwner::App(ServedApp {

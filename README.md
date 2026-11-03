@@ -842,6 +842,10 @@ use tauri_plugin_connector::ConnectorBuilder;
 // .connector.json always records the ports actually bound. The CLI and the
 // standalone MCP server read TAURI_CONNECTOR_PORT as their target and
 // TAURI_CONNECTOR_PORT_RANGE as their scan range, so the same env follows the app.
+// 0.17.8: inside a range each app first retries the WS/MCP ports it bound last
+// time (<app data>/<identifier>/.tauri-connector/ports.json), so apps sharing
+// the default ranges keep their ports across restarts in any order. Exact
+// ports win and are not remembered; TAURI_CONNECTOR_REMEMBER_PORTS=0 disables it.
 ConnectorBuilder::new()
     .port(9555)      // exact WS port (0.17.7)
     .mcp_port(9556)  // exact MCP port (0.17.7)

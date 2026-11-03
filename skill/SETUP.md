@@ -303,5 +303,7 @@ use tauri_plugin_connector::ConnectorBuilder;
 
 **Ranges.** `TAURI_CONNECTOR_PORT_RANGE=9700-9800` (WS), `TAURI_CONNECTOR_MCP_PORT_RANGE=9701-9801` (MCP) and `TAURI_CONNECTOR_BRIDGE_PORT_RANGE=9400-9500` (bridge) take the first free port; an invalid range is logged and ignored.
 
+**Remembered ports (0.17.8).** Within a range (default or configured), each app first tries the WebSocket and MCP ports it bound last time, stored per app identifier in `<app data>/<identifier>/.tauri-connector/ports.json`, and only then scans from the range start. A single app therefore keeps 9555/9556, and two apps on the default ranges keep their own ports after their first run together, whichever starts first (before 0.17.8 they swapped 9555/9556 and 9557/9558 depending on start order, breaking a `.mcp.json` pinned to one of them). If the remembered port is busy the scan takes the next free one and that becomes the remembered port. Exact ports always win and are never remembered; `TAURI_CONNECTOR_REMEMBER_PORTS=0` turns this off. For a port that must never move, use an exact port.
+
 Precedence per listener: builder exact > env exact > env range > builder `port_range` / `mcp_port_range` > default. `.connector.json` always records the ports actually bound. On the client side the same `TAURI_CONNECTOR_PORT` is the CLI's / standalone MCP server's target port (the `--port` default), and `TAURI_CONNECTOR_PORT_RANGE` its discovery scan range, so one env block serves both the app and its clients.
 ```
