@@ -946,6 +946,7 @@ async fn run_cli(cli: Cli) {
                     "resolveError": resolve_error,
                     "instances": statuses,
                     "versionWarnings": version_warnings,
+                    "screenLocked": connector_client::screen::screen_locked(),
                 }))
                 .unwrap_or_default()
             );
@@ -1004,6 +1005,9 @@ async fn run_cli(cli: Cli) {
             }
             for warning in &version_warnings {
                 println!("warning: {}\n  fix: {}", warning.message, warning.fix);
+            }
+            if let Some(note) = connector_client::screen::locked_note() {
+                println!("warning: {note}");
             }
         }
         std::process::exit(exit_code);

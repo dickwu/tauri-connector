@@ -1206,6 +1206,7 @@ impl Bridge {
             "pending": pending,
             "awaitingLateResult": awaiting_late_result,
             "fallbackAvailable": self.app_handle.lock().await.is_some(),
+            "screenLocked": connector_client::screen::screen_locked(),
         })
     }
 

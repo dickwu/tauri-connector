@@ -21,6 +21,7 @@ pub mod inspection;
 pub mod outcome;
 pub mod ports;
 pub mod project;
+pub mod screen;
 pub mod workflow;
 
 const DEFAULT_TIMEOUT_MS: u64 = 35_000;
@@ -346,8 +347,17 @@ impl ConnectorClient {
         match tokio::time::timeout(Duration::from_millis(timeout_ms), rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(format!("outcome_unknown: Response channel closed (requestId: {id}); remote execution may continue")),
-            Err(_) => Err(format!("outcome_unknown: Request timeout (requestId: {id}); remote execution may continue")),
+            Err(_) => Err(with_lock_note(format!("outcome_unknown: Request timeout (requestId: {id}); remote execution may continue"))),
         }
+    }
+}
+
+/// Append [`screen::SCREEN_LOCKED_NOTE`] when the screen is locked, so a
+/// throttled app is not mistaken for a dead one.
+pub fn with_lock_note(message: String) -> String {
+    match screen::locked_note() {
+        Some(note) if !message.contains(screen::SCREEN_LOCKED) => format!("{message}\n\n{note}"),
+        _ => message,
     }
 }
 

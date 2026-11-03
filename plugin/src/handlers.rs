@@ -314,7 +314,19 @@ pub(crate) fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
     let mut outcome = match error {
         // Nothing reached the page, so a retry is never a replay.
         BridgeError::NotDispatched { reason, .. } => {
-            let mut error = WorkflowError::new(not_dispatched_code(&reason), "dispatching", reason);
+            let mut code = not_dispatched_code(&reason);
+            let reason = match connector_client::screen::locked_note() {
+                // A locked screen hides and throttles the webview: name the
+                // cause instead of implying a dead or missing page.
+                Some(note) => {
+                    if matches!(code, "window_not_visible" | "bridge_not_connected") {
+                        code = connector_client::screen::SCREEN_LOCKED;
+                    }
+                    format!("{reason}\n\n{note}")
+                }
+                None => reason,
+            };
+            let mut error = WorkflowError::new(code, "dispatching", reason);
             error.retryable_before_dispatch = true;
             ExecutionOutcome::not_dispatched(error)
         }
@@ -325,7 +337,11 @@ pub(crate) fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
             effect,
         ),
         BridgeError::DispatchedOutcomeUnknown { reason, .. } => {
-            ExecutionOutcome::unknown(WorkflowError::new("outcome_unknown", "dispatching", reason))
+            ExecutionOutcome::unknown(WorkflowError::new(
+                "outcome_unknown",
+                "dispatching",
+                connector_client::with_lock_note(reason),
+            ))
         }
     };
     outcome.dispatch = serde_json::json!({"requestId": request_id, "dispatched": dispatched});
@@ -355,6 +371,7 @@ fn not_dispatched_code(reason: &str) -> &'static str {
         "window_not_visible" => "window_not_visible",
         "bridge_not_connected" => "bridge_not_connected",
         "window_not_ready" => "window_not_ready",
+        "screen_locked" => "screen_locked",
         _ => "execution_failed",
     }
 }
@@ -5100,6 +5117,33 @@ mod tests {
         assert_eq!(entries[0].window_id, "main");
         assert_eq!(entries[1].window_id, "editor");
         assert!(super::pending_log_entries(&serde_json::json!(null), "main").is_empty());
+    }
+
+    #[test]
+    fn a_locked_screen_is_named_instead_of_a_dead_page() {
+        use crate::bridge::BridgeError;
+        use connector_client::screen::force_screen_locked;
+        let refused = || BridgeError::NotDispatched {
+            request_id: "req-lock".into(),
+            reason: "window_not_visible: window 'main' is hidden".into(),
+        };
+        force_screen_locked(Some(Some(true)));
+        let outcome = super::bridge_error_outcome(refused());
+        let error = outcome.error.as_ref().unwrap();
+        assert_eq!(error.code, "screen_locked");
+        assert!(error.retryable_before_dispatch);
+        assert!(error.message.contains("app is alive"));
+        let unknown = super::bridge_error_outcome(BridgeError::DispatchedOutcomeUnknown {
+            request_id: "req-lock".into(),
+            reason: "page did not answer".into(),
+        });
+        let error = unknown.error.as_ref().unwrap();
+        assert_eq!(error.code, "outcome_unknown");
+        assert!(error.message.contains("screen_locked"));
+        force_screen_locked(Some(Some(false)));
+        let outcome = super::bridge_error_outcome(refused());
+        assert_eq!(outcome.error.as_ref().unwrap().code, "window_not_visible");
+        force_screen_locked(None);
     }
 
     #[test]

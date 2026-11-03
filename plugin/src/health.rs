@@ -105,6 +105,7 @@ pub async fn query(bridge: &Bridge, args: &Value) -> Result<Value, String> {
     result["checks"]["bridge"] = json!({"status":bridge_status,"connected":connected,"durationMs":start.elapsed().as_millis() as u64});
     result["conclusion"] = json!(format!("bridge_{bridge_status}"));
     if depth == "bridge" {
+        note_screen_lock(&mut result);
         return Ok(result);
     }
     let probe_start = Instant::now();
@@ -156,13 +157,57 @@ pub async fn query(bridge: &Bridge, args: &Value) -> Result<Value, String> {
     result["diagnostics"] = bridge.runtime_diagnostics();
     result["diagnostics"]["activeObservers"] = active_observers;
     result["diagnostics"]["inputGuard"] = input_guard;
+    note_screen_lock(&mut result);
     Ok(result)
+}
+
+/// Report the screen lock, and when the page did not answer while locked,
+/// conclude `screen_locked`: WebKit throttles a locked session's webviews,
+/// so the app is alive (transport answered) rather than dead.
+fn note_screen_lock(result: &mut Value) {
+    let locked = connector_client::screen::screen_locked();
+    result["screenLocked"] = json!(locked);
+    let silent = matches!(
+        result["conclusion"].as_str(),
+        Some(
+            "bridge_unresponsive"
+                | "bridge_unavailable"
+                | "runtime_probe_not_completed"
+                | "runtime_target_unavailable"
+        )
+    );
+    if locked == Some(true) && silent {
+        result["pageConclusion"] = result["conclusion"].clone();
+        result["conclusion"] = json!(connector_client::screen::SCREEN_LOCKED);
+        result["note"] = json!(connector_client::screen::SCREEN_LOCKED_NOTE);
+        result["retryAfterMs"] = json!(STARTING_RETRY_MS);
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::classify_probe;
+    use super::{classify_probe, note_screen_lock};
+    use connector_client::screen::force_screen_locked;
     use serde_json::json;
+
+    #[test]
+    fn a_silent_page_on_a_locked_screen_is_throttled_not_dead() {
+        force_screen_locked(Some(Some(true)));
+        let mut result = json!({"conclusion":"runtime_probe_not_completed"});
+        note_screen_lock(&mut result);
+        assert_eq!(result["conclusion"], "screen_locked");
+        assert_eq!(result["pageConclusion"], "runtime_probe_not_completed");
+        assert_eq!(result["screenLocked"], true);
+        let mut healthy = json!({"conclusion":"runtime_ready"});
+        note_screen_lock(&mut healthy);
+        assert_eq!(healthy["conclusion"], "runtime_ready");
+        force_screen_locked(Some(Some(false)));
+        let mut unlocked = json!({"conclusion":"runtime_probe_not_completed"});
+        note_screen_lock(&mut unlocked);
+        assert_eq!(unlocked["conclusion"], "runtime_probe_not_completed");
+        assert_eq!(unlocked["screenLocked"], false);
+        force_screen_locked(None);
+    }
 
     #[test]
     fn a_cold_loaded_page_is_not_installed_rather_than_missing() {

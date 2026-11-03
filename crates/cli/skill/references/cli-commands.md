@@ -52,6 +52,8 @@ tauri-connector picker cancel <picker-id>
 tauri-connector --window main select-element --request-key isolated-pick-2 --timeout-ms 60000
 ```
 
+On macOS, `status` prints a warning and `status --json` sets `screenLocked: true` while the screen is locked (0.17.8+); `runtime-health` then concludes `screen_locked` instead of an unresponsive page, and request timeouts append the same note. The app is throttled, not dead: unlock the screen and retry.
+
 `--window` aliases global `--window-id`. `picker start` returns immediately by default; `select-element` starts a real picker and waits up to 10000 ms by default. `--wait-ms` changes only response waiting, and never extends the picker deadline. Start/select accept `--no-screenshot`; do not combine it with explicit `--screenshot-source`. Source values are `auto`, `webview_native`, `window_native`, and `dom_rendering`. Retained get/cancel derive their target from the stored context.
 
 Credentials come from `TAURI_CONNECTOR_WORKFLOW_TOKEN` and are never printed or passed in process arguments. Picker stdout is a JSON report; user guidance belongs on stderr. Selected and successful explicit cancellation exit 0; a still-pending selection exits 2; failed, expired, invalidated and unsuccessful operations exit 1. A screenshot warning can accompany a successful selected result. Poll the same handle; after an uncertain start response, reuse the same key/options instead of creating another request. Candidates require current-context and strict semantic revalidation before any later action.
@@ -176,7 +178,7 @@ tauri-connector get <property> [target] [extra]
 | `styles` | `@eN` or CSS | | All computed CSS styles |
 | `count` | CSS selector | | Count of matching elements |
 
-`get title`, `get url`, `get count` and plain properties are sent as read-only (0.17.7+): a timeout or lost reply never quarantines the window. With no webview bridge connected and no answering eval channel the command fails with `bridge_not_connected` (`dispatched: false`, `retryableBeforeDispatch: true`) instead of `outcome_unknown`; open or reload the window and retry.
+`get title`, `get url`, `get count` and plain properties are sent as read-only (0.17.7+): a timeout or lost reply never quarantines the window. With no webview bridge connected and no answering eval channel the command fails with `bridge_not_connected` (`dispatched: false`, `retryableBeforeDispatch: true`) instead of `outcome_unknown`; open or reload the window and retry. Since 0.17.8 that refusal comes after about 3 s instead of at the deadline, and a window label that does not exist yet (app still starting) fails at once with `window_not_ready` (also `dispatched: false`, `retryableBeforeDispatch: true`); retry both.
 
 Examples:
 ```bash
@@ -272,7 +274,9 @@ tauri-connector scroll [direction] [amount] [--selector <sel>]
 |---|---|---|
 | `direction` | `down` | `up`, `down`, `left`, `right` |
 | `amount` | `300` | Pixels to scroll |
-| `--selector` | | Element to scroll (page if omitted) |
+| `--selector` | | Element (or `@ref`) whose container to scroll |
+
+Since 0.17.8 `scroll` moves the container a user would scroll, not just the document: with `--selector`, that element or its nearest scrollable ancestor; without it, the scrollable container under the viewport centre, then the focused element's, then the hovered element's, then the document. A container that can still move in that direction wins over one at its edge. The result reports `container` (`tag`/`id`/`className`, `document` for the page), `source` (`selector`, `viewport-center`, `focus`, `hover` or `document`), `scrolledBy` (`{x, y}` actually moved; `{0, 0}` means everything was at its edge) and `position`.
 
 ### scrollintoview
 
@@ -575,7 +579,7 @@ tauri-connector resources release <requestId>   # lift one after checking the ap
 tauri-connector resources release --all
 ```
 
-A quarantine lifts in three ways: the page later reports the timed-out request finished (success, or a throw with `effect: none`), an explicit `tauri-connector resources release <requestId>` / `--all` (MCP `resources` action=release) after you have checked the app, or an app restart. A timed-out request keeps listening for its page result for 10 minutes; a late success or effect-free failure lifts its quarantine automatically and appears under "late result". A late failure with possible effects keeps it. Each request appears once in the late-result history (a repeat settlement refreshes its line and never downgrades a settled outcome to `lost`); identical lines from older plugins print once with an `(xN)` count.
+A quarantine lifts in three ways: the page later reports the timed-out request finished (success, or a throw with `effect: none`), an explicit `tauri-connector resources release <requestId>` / `--all` (MCP `resources` action=release) after you have checked the app, or an app restart. A timed-out request keeps listening for its page result for 10 minutes; a late success or effect-free failure lifts its quarantine automatically and appears under "late result". A late failure with possible effects keeps it. Since 0.17.8 a quarantine also expires on its own 60 s after it was set (checked on the next acquire or `resources` listing, which is the only thing a listing changes), so a stale one cannot block the app for the rest of the session; the expiry is recorded as an `expired` late result. `resources` prints the time left as `expires in Ns`. Each request appears once in the late-result history (a repeat settlement refreshes its line and never downgrades a settled outcome to `lost`); identical lines from older plugins print once with an `(xN)` count.
 
 ### state
 

@@ -52,6 +52,8 @@ tauri-connector picker cancel <picker-id>
 tauri-connector --window main select-element --request-key isolated-pick-2 --timeout-ms 60000
 ```
 
+On macOS, `status` prints a warning and `status --json` sets `screenLocked: true` while the screen is locked (0.17.8+); `runtime-health` then concludes `screen_locked` instead of an unresponsive page, and request timeouts append the same note. The app is throttled, not dead: unlock the screen and retry.
+
 `--window` aliases global `--window-id`. `picker start` returns immediately by default; `select-element` starts a real picker and waits up to 10000 ms by default. `--wait-ms` changes only response waiting, and never extends the picker deadline. Start/select accept `--no-screenshot`; do not combine it with explicit `--screenshot-source`. Source values are `auto`, `webview_native`, `window_native`, and `dom_rendering`. Retained get/cancel derive their target from the stored context.
 
 Credentials come from `TAURI_CONNECTOR_WORKFLOW_TOKEN` and are never printed or passed in process arguments. Picker stdout is a JSON report; user guidance belongs on stderr. Selected and successful explicit cancellation exit 0; a still-pending selection exits 2; failed, expired, invalidated and unsuccessful operations exit 1. A screenshot warning can accompany a successful selected result. Poll the same handle; after an uncertain start response, reuse the same key/options instead of creating another request. Candidates require current-context and strict semantic revalidation before any later action.

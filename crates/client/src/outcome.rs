@@ -167,6 +167,7 @@ pub const ERROR_CODES: &[&str] = &[
     "window_not_visible",
     "bridge_not_connected",
     "window_not_ready",
+    "screen_locked",
     "ipc_not_allowed",
     "capture_incomplete",
     "protocol_mismatch",
