@@ -828,9 +828,10 @@ mod tests {
             assert_eq!(arbiter.list()["quarantined"].as_array().unwrap().len(), 1);
         }
         assert_eq!(arbiter.quarantined(), 1);
-        backdate(&arbiter, QUARANTINE_TTL_MS - 1);
+        // Leave a second of slack: the real clock keeps moving between steps.
+        backdate(&arbiter, QUARANTINE_TTL_MS - 1_000);
         assert_eq!(arbiter.list()["quarantined"].as_array().unwrap().len(), 1);
-        backdate(&arbiter, 1);
+        backdate(&arbiter, 1_000);
         assert!(arbiter.list()["quarantined"].as_array().unwrap().is_empty());
     }
 
