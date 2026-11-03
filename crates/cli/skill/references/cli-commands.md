@@ -740,7 +740,7 @@ tauri-connector windows                      # list (same as `windows list`)
 tauri-connector windows focus [--window-id <id>]   # 0.17.4+: unminimize, show and focus natively
 ```
 
-`windows focus` works through the native window, not the webview, so it succeeds even when the page is hidden and every webview call times out (`window_not_visible`, `capture_not_ready: render_frame_timeout`). It prints `{windowId, focused, visible, minimized, focusError}`. A locked or sleeping screen still renders nothing until it is unlocked. It needs tauri-plugin-connector 0.17.4+ in the app; older plugins answer with an unknown-variant error and a hint.
+`windows focus` works through the native window, not the webview, so it succeeds even when the page is hidden and every webview call times out (`window_not_visible`, `capture_not_ready: render_frame_timeout`). It prints `{windowId, focused, visible, minimized, focusError}`. On macOS (0.17.8+) it also activates the app and orders the window front, retrying once if the window is not focused after 400 ms, so the window comes in front of whichever app was frontmost; `focused: false` after that means macOS refused activation (for example another app holds a modal session). A locked or sleeping screen still renders nothing until it is unlocked. It needs tauri-plugin-connector 0.17.4+ in the app; older plugins answer with an unknown-variant error and a hint.
 
 ### resize
 

@@ -1908,7 +1908,45 @@ pub async fn window_resize(
 /// Unminimize, show and focus a window natively, then give the compositor a
 /// moment to deliver a frame. Works while the page is hidden because it never
 /// touches the webview.
+///
+/// On macOS `set_focus` alone only makes the window key inside an inactive
+/// app, so it stayed behind the frontmost app (R2 0.17.7). The app is
+/// activated and the window ordered front on the main thread, then the whole
+/// raise is repeated once if the window still is not focused.
 pub(crate) async fn bring_window_to_front(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let mut focus = Ok(());
+    raise_until_focused(
+        || focus = raise_once(window),
+        || window.is_focused().unwrap_or(false),
+        FOCUS_SETTLE,
+    )
+    .await;
+    focus
+}
+
+const FOCUS_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+const FOCUS_ATTEMPTS: usize = 2;
+
+/// Run `raise`, wait `settle`, and repeat (up to `FOCUS_ATTEMPTS`) while the
+/// window does not report focus. Returns the number of attempts made.
+async fn raise_until_focused(
+    mut raise: impl FnMut(),
+    focused: impl Fn() -> bool,
+    settle: std::time::Duration,
+) -> usize {
+    let mut attempts = 0;
+    while attempts < FOCUS_ATTEMPTS {
+        attempts += 1;
+        raise();
+        tokio::time::sleep(settle).await;
+        if focused() {
+            break;
+        }
+    }
+    attempts
+}
+
+fn raise_once(window: &tauri::WebviewWindow) -> Result<(), String> {
     // A hidden application (Cmd-H, or hidden by another tool) keeps its
     // windows ordered out even after window.show(); unhide it first.
     #[cfg(target_os = "macos")]
@@ -1918,9 +1956,36 @@ pub(crate) async fn bring_window_to_front(window: &tauri::WebviewWindow) -> Resu
     }
     let _ = window.unminimize();
     let _ = window.show();
-    let focus = window.set_focus().map_err(|e| e.to_string());
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-    focus
+    #[cfg(target_os = "macos")]
+    activate_and_order_front(window);
+    window.set_focus().map_err(|e| e.to_string())
+}
+
+/// `[NSApp activateIgnoringOtherApps:YES]` plus `makeKeyAndOrderFront:` and
+/// `orderFrontRegardless` on the window, on the main thread.
+#[cfg(target_os = "macos")]
+fn activate_and_order_front(window: &tauri::WebviewWindow) {
+    let ns_window = window.ns_window().ok().map(|ptr| ptr as usize);
+    let _ = window.run_on_main_thread(move || {
+        use objc2::msg_send;
+        use objc2::runtime::{AnyClass, AnyObject, Bool};
+        // SAFETY: AppKit messages sent on the main thread to the shared
+        // application and to the live NSWindow Tauri handed out.
+        unsafe {
+            if let Some(class) = AnyClass::get(c"NSApplication") {
+                let app: *mut AnyObject = msg_send![class, sharedApplication];
+                if !app.is_null() {
+                    let _: () = msg_send![app, activateIgnoringOtherApps: Bool::YES];
+                }
+            }
+            if let Some(ptr) = ns_window.filter(|ptr| *ptr != 0) {
+                let ns_window = ptr as *mut AnyObject;
+                let _: () =
+                    msg_send![ns_window, makeKeyAndOrderFront: std::ptr::null_mut::<AnyObject>()];
+                let _: () = msg_send![ns_window, orderFrontRegardless];
+            }
+        }
+    });
 }
 
 pub async fn window_focus(id: &str, window_id: &str, app: Option<&tauri::AppHandle>) -> Response {
@@ -5117,6 +5182,26 @@ mod tests {
         assert_eq!(entries[0].window_id, "main");
         assert_eq!(entries[1].window_id, "editor");
         assert!(super::pending_log_entries(&serde_json::json!(null), "main").is_empty());
+    }
+
+    #[tokio::test]
+    async fn focus_is_raised_again_when_the_first_attempt_does_not_take() {
+        use std::cell::Cell;
+        let settle = std::time::Duration::from_millis(1);
+        let raised = Cell::new(0);
+        let attempts = super::raise_until_focused(
+            || raised.set(raised.get() + 1),
+            || raised.get() >= 2,
+            settle,
+        )
+        .await;
+        assert_eq!((attempts, raised.get()), (2, 2));
+        let raised = Cell::new(0);
+        let attempts =
+            super::raise_until_focused(|| raised.set(raised.get() + 1), || true, settle).await;
+        assert_eq!(attempts, 1);
+        let attempts = super::raise_until_focused(|| {}, || false, settle).await;
+        assert_eq!(attempts, super::FOCUS_ATTEMPTS);
     }
 
     #[test]
