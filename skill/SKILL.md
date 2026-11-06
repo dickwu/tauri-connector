@@ -1,6 +1,6 @@
 ---
 name: tauri-connector
-version: 0.17.8
+version: 0.17.9
 description: "Deep inspection, interaction, debugging, and code review for Tauri v2 desktop apps. Use this skill whenever: working with a Tauri app's UI (clicking, filling forms, reading DOM, screenshots, dragging elements); debugging console logs, IPC calls, or Tauri events; reviewing component trees, accessibility, or visual regressions; testing user flows or validating IPC contracts; setting up tauri-connector in a new project. Also triggers on: DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, Tauri app testing, visual regression, admin/ front/ or tool/ desktop apps, @eN ref syntax, or any mention of tauri-connector CLI or MCP tools. This is Claude's bridge to any running Tauri v2 desktop app -- if a Tauri app is involved, use this skill."
 allowed-tools:
   - Bash
@@ -511,7 +511,7 @@ For a dependency upgrade or live smoke test, read [references/upgrade-and-smoke.
 
 For first-time setup in a Tauri v2 project, read [SETUP.md](SETUP.md). The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
 
-1. `tauri-plugin-connector = { version = "0.17", optional = true }` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = { version = "0.17.9", optional = true }` in `src-tauri/Cargo.toml`
 2. Declare the cargo feature: `[features] dev-connector = ["dep:tauri-plugin-connector"]`
 3. Register the plugin with `#[cfg(feature = "dev-connector")]` guard
 4. Drop the dev capability JSON at `src-tauri/capabilities-dev/dev-connector.json` (outside the default `capabilities/` glob), and register it at runtime via `app.add_capability(include_str!("../capabilities-dev/dev-connector.json"))` inside the same `cfg(feature = "dev-connector")`
@@ -520,7 +520,7 @@ For first-time setup in a Tauri v2 project, read [SETUP.md](SETUP.md). The skill
 7. Add `"tauri:dev": "tauri dev --features dev-connector"` to `package.json`
 8. Add `"url": "http://127.0.0.1:9556/mcp"` to `.mcp.json`
 
-For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.17"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
+For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.17.9"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 
@@ -537,6 +537,8 @@ tauri-connector doctor --json          # machine-readable output (exit code 0/1)
 The `--json` payload includes a top-level `setup_pattern` field with one of `"feature-gated" | "legacy" | "mixed" | "none"` — branch on this in CI to apply pattern-specific gates without re-parsing the section list.
 
 It checks four areas -- environment, plugin setup (both install patterns), live runtime (PID file, WebSocket ping, bridge status, MCP lifecycle), and integrations -- and its output enumerates every check it ran. Exit code is 1 when any check fails (✗ / `"status":"fail"`; warnings never fail the run). Since 0.17.8 a running app whose connector did not start (its PID file carries `startup_error`, e.g. an exact port in use) and an explicit `--pid-file` that cannot be read are failures too, rather than probing ports another app may own, and the `--json` payload includes a top-level `fixes` array with every remediation, so it drops cleanly into CI or pre-commit. Use `--no-runtime` when the Tauri app isn't running (offline setup validation).
+
+A missing `connector:default` stays a failure even when WS/eval/screenshot work: frontend-to-Rust push commands (push_dom, push_logs, set_pointed_element, push_ipc_event, push_capture_events, capture_self_test, push_event, push_runtime) need that capability. Doctor explains this distinction.
 
 First move when something looks wrong: `tauri-connector doctor`. Second move: read the `Fix:` line.
 
@@ -585,7 +587,7 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | Bridge not connected | Eval+event fallback is permitted only before dispatch, within the remaining deadline. Persistent slowness: check `tauri-connector bridge` and `withGlobalTauri: true` |
 | Disk filling with screenshots | `tauri-connector artifacts prune --keep 50` (MCP: `artifact_prune`) |
 | Drag not working | Try explicit `--strategy pointer` or `html5dnd`. Increase `--steps` (>5) and `--duration` |
-| Screenshot blank | Install `@zumer/snapdom` for DOM-based fallback capture |
+| Screenshot blank | If `screen_locked`, unlock first (0.17.9 refuses captures promptly). On an unlocked desktop, install `@zumer/snapdom` for DOM-based fallback capture |
 | No MCP tools | Verify `.mcp.json` has `"url": "http://127.0.0.1:9556/mcp"` and app is running |
 | Bridge not connecting | Check `withGlobalTauri: true` in tauri.conf.json. Bridge auto-reconnects every 1s |
 | Bridge/snapshot engine vanishes after a page reload or dev-server hot reload | Plugin < 0.13.1 injected the bridge once per webview, so reloads killed it until app restart. Upgrade `tauri-plugin-connector` to >= 0.13.1 (re-injects on every page load) |
@@ -600,9 +602,9 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | `resource_busy` | Another workflow, batch, or single tool (screenshots and snapshots included) held the same window resource for longer than the 15 s queue wait (0.17.6+; before that, conflicts failed at once), or an uncertain write is quarantined there (no wait). Follow the run's allowed next actions. Since 0.17.8 a quarantine expires on its own after 60 s (the message says how long is left); never treat contention or expiry as permission to replay a write. With `quarantined: true`, the error lists the quarantining `requestId` and `reason`; a late effect-free page result lifts it automatically, otherwise check the app and run `tauri-connector resources release <requestId>` (MCP `resources`). Failures that provably dispatched nothing do not quarantine: a `webview_execute_js` script that throws or rejects with `effect: none` or on a Tauri permission denial (`ipc_not_allowed`, 0.17.8+), and failed screenshots, snapshots, element lookups, style reads, and waits |
 | `page_navigating` / `page_not_ready` (`retryableBeforeDispatch: true`) | 0.17.6+: the page was reloading or navigating, or the new page was not ready within the deadline, so nothing was sent. This includes a command sent right after a script that called `location.reload()`, set `location` or submitted a form: it is refused instead of running on the old page, and the script is never replayed. Wait briefly and send it again |
 | `bridge_not_connected` / `window_not_ready` | 0.17.8+: no webview has connected yet (app starting, dev server compiling, page reloading; refused after about 3 s) or no window with that label exists yet (refused at once). `dispatched: false`, nothing quarantined; wait a moment and retry, or check `tauri-connector windows` for the label |
-| `screen_locked` | 0.17.8+ (macOS): the screen is locked, so WebKit hides and throttles the webview. The app is alive, not dead: unlock and retry. Refusals that would say `window_not_visible`/`bridge_not_connected` use this code; an `outcome_unknown` timeout keeps its code but appends the note. `status` and `runtime-health` report `screenLocked` |
+| `screen_locked` | macOS: unlock the desktop and retry; focusing cannot unlock it. Since 0.17.9 every screenshot source (including default/legacy and `--bring-to-front`) refuses before native capture/runtime probing; a lock arriving during capture aborts the read promptly instead of returning a solid image or waiting for a generic timeout. Eval refusals name `screen_locked` first and never suggest `--bring-to-front` as its remedy. Already-dispatched writes retain `outcome_unknown` and their lock note. `status` and `runtime-health` report `screenLocked` |
 | `window_not_visible` on `eval`, `snapshot` or a screenshot | 0.17.6+: the window is in the background (minimised, hidden or covered) and its page did not answer within 1.5 s, so the command was not sent and nothing is quarantined. Since 0.17.8 a `snapshot` of a natively hidden or minimised window is refused at once, every time, without probing. `tauri-connector windows focus` or `--bring-to-front`, then retry |
-| `warning: ... binaries on PATH`, `CLI ... older than the connected app's plugin`, `homebrew tap ... behind` in `status`/`doctor` | 0.17.6+ version checks. Remove the stale copy (often `~/.cargo/bin/tauri-connector`: `cargo uninstall connector-cli`, then `hash -r`); upgrade the CLI with `brew update && brew upgrade tauri-connector` (`brew update` refreshes the tap first), or the app's plugin with `cargo update -p tauri-plugin-connector` |
+| `warning: ... binaries on PATH`, `CLI ... older than the connected app's plugin`, `homebrew tap ... behind` in `status`/`doctor` | 0.17.6+ version checks. Remove the stale copy (often `~/.cargo/bin/tauri-connector`: `cargo uninstall connector-cli`, then `hash -r`); upgrade the CLI with `brew update && brew upgrade tauri-connector` (`brew update` refreshes the tap first), or the app's plugin with `cargo update -p tauri-plugin-connector -p connector-client --precise 0.17.9` for crates.io (git dependencies omit `--precise`; see the upgrade guide) |
 | `outcome_unknown` / `effect: possible` | The action was dispatched but its result was lost (timeout, disconnect). Read `workflow_get`, then `resume --intent reconcile`; do not resubmit under a fresh key. The quarantine on that window persists until the page settles late without effects, `resources release`, an app restart, or (0.17.8+) its 60 s expiry |
 | `persistence_unavailable` | The workflow journal cannot use private storage (Windows, or an unusable app data dir). Workflows fail closed; conflicting legacy writes may also be blocked until recovery is safe. Read-only diagnostics remain available |
 | Wait timed out inside `batch`, or `act_and_verify` verdict `failed` | Since 0.15 these are real failures (`condition_timeout`, `postcondition_failed`): the action fails and its dependents skip. Inspect the failed condition and effect first; adjust future test budgets only when justified, without replaying a possibly completed write |

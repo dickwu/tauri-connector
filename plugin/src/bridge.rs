@@ -242,6 +242,8 @@ impl Bridge {
     /// Must be called from within a Tokio runtime.
     #[cfg(test)]
     pub fn start() -> Result<Self, String> {
+        // Unit tests model an unlocked desktop unless they explicitly inject a lock.
+        connector_client::screen::force_screen_locked(Some(Some(false)));
         let (plan, _) = connector_client::ports::env_port(
             connector_client::ports::BRIDGE_PORT_VAR,
             connector_client::ports::BRIDGE_RANGE_VAR,
@@ -467,6 +469,11 @@ impl Bridge {
             deadline: Instant::now() + Duration::from_millis(timeout_ms),
             authorize,
         };
+        // Lock state is native and cheap: check before any liveness probe or
+        // fallback injection. Focusing cannot unlock or unthrottle WebKit.
+        if let Some(note) = connector_client::screen::locked_note() {
+            return Err(request.not_dispatched(note));
+        }
         let starts_navigation =
             !script.ws.starts_with("/*__CONNECTOR_") && requests_navigation(&script.ws);
         let script = script.gated();
@@ -520,6 +527,9 @@ impl Bridge {
             ))
         };
         loop {
+            if let Some(note) = connector_client::screen::locked_note() {
+                return Err(request.not_dispatched(note));
+            }
             if let Some(reason) = refused.as_deref()
                 && Instant::now() >= request.deadline
             {
@@ -641,6 +651,12 @@ impl Bridge {
         window_id: &str,
         request_id: &str,
     ) -> Result<(), BridgeError> {
+        if let Some(note) = connector_client::screen::locked_note() {
+            return Err(BridgeError::NotDispatched {
+                request_id: request_id.to_string(),
+                reason: note.into(),
+            });
+        }
         if self.window_hidden(window_id).await {
             return Err(BridgeError::NotDispatched {
                 request_id: request_id.to_string(),
@@ -3116,6 +3132,8 @@ pub fn bridge_init_script(port: u16, window_id: &str) -> String {
 /// readable from the returned receiver.
 #[cfg(test)]
 pub(crate) async fn test_queued_bridge() -> (Bridge, mpsc::UnboundedReceiver<String>) {
+    // Keep transport tests independent of the physical Mac/CI desktop state.
+    connector_client::screen::force_screen_locked(Some(Some(false)));
     let (tx, rx) = mpsc::unbounded_channel();
     let bridge = Bridge {
         port: 0,
@@ -4735,6 +4753,28 @@ process.stdout.write(JSON.stringify({ first: first.length, firstHead: first[0].m
     /// ran (the page still answered the probe) and sometimes timed out. A
     /// natively hidden window now refuses the read at once, every time,
     /// without sending anything.
+    #[tokio::test]
+    async fn screen_locked_refuses_eval_before_any_liveness_probe() {
+        let (bridge, mut rx) = queued_bridge().await;
+        bridge.force_background(Some(true));
+        connector_client::screen::force_screen_locked(Some(Some(true)));
+        let result = tokio::time::timeout(
+            Duration::from_millis(500),
+            bridge.execute_js_for_window_typed("mutate()", 30_000, "main"),
+        )
+        .await;
+        connector_client::screen::force_screen_locked(None);
+        match result.expect("locked eval must fail promptly") {
+            Err(BridgeError::NotDispatched { reason, .. }) => {
+                assert!(reason.starts_with("screen_locked:"), "{reason}");
+                assert!(!reason.contains("--bring-to-front"), "{reason}");
+            }
+            other => panic!("expected screen_locked, got {other:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "nothing should reach the page");
+        assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
     #[tokio::test]
     async fn a_hidden_window_refuses_a_snapshot_every_time() {
         let (bridge, mut rx) = queued_bridge().await;

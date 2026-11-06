@@ -9,6 +9,18 @@ A Tauri v2 plugin with **embedded MCP server** + Rust CLI for deep inspection an
 
 **Introduced in v0.15:** [application-owned workflows](#application-owned-workflows) execute a known sequence in one submission, bind results between steps, and retain progress for reconnects. Available through the CLI, WebSocket API, and both MCP servers.
 
+## Upgrade to 0.17.9
+
+For a crates.io app, raise its plugin requirement if needed, then run:
+
+```bash
+cargo update --manifest-path src-tauri/Cargo.toml -p tauri-plugin-connector -p connector-client --precise 0.17.9
+```
+
+Use **one** shared `--precise`, not one per package; git dependencies on main omit it. Review the lockfile diff (new requirements may still need transitive changes), then rebuild and restart the app. Updating only the CLI cannot update the embedded plugin. See [the upgrade guide](skill/references/upgrade-and-smoke.md) for the verified Cargo syntax and smoke test.
+
+On macOS, locked-screen screenshots now return primary `screen_locked` promptly, across default/legacy and all explicit sources, including `--bring-to-front`. Eval refuses before dispatch with the same primary error and asks to unlock, not to focus. A missing `connector:default` remains a doctor failure: WS/eval/screenshot can work while frontend-to-Rust push commands fail.
+
 ## The Problem
 
 `tauri-plugin-mcp-bridge` injects JavaScript into the webview that relies on `window.__TAURI__` to send execution results back to Rust. On macOS with WKWebView, the injected scripts run in an isolated content world where `window.__TAURI__` doesn't exist -- causing all JS-based tools (execute_js, dom_snapshot, console logs) to time out.
@@ -337,7 +349,7 @@ The recommended pattern keeps `tauri-plugin-connector` and its transitive deps (
 # ...
 
 # Optional dep — only pulled when --features dev-connector is set.
-tauri-plugin-connector = { version = "0.17", optional = true }
+tauri-plugin-connector = { version = "0.17.9", optional = true }
 
 [features]
 default = []
@@ -418,7 +430,7 @@ If you don't want a separate dev script and don't mind the plugin (and its trans
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-connector = "0.17"
+tauri-plugin-connector = "0.17.9"
 ```
 
 ```rust
@@ -512,7 +524,7 @@ Example output for the feature-gated pattern (all green):
 tauri-connector doctor v0.17.8
 
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.17" (optional, feature-gated)
+  ✓ Cargo dependency: tauri-plugin-connector = "0.17.9" (optional, feature-gated)
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(feature = "dev-connector"))
   ✓ Permission "connector:default" in src-tauri/capabilities-dev/dev-connector.json
   ✓ app.withGlobalTauri: true
@@ -527,14 +539,14 @@ Example output for a legacy setup (passes, with the migration nudge):
 
 ```
 Plugin Setup
-  ✓ Cargo dependency: tauri-plugin-connector = "0.17"
+  ✓ Cargo dependency: tauri-plugin-connector = "0.17.9"
   ✓ Plugin registered in src-tauri/src/lib.rs (cfg(debug_assertions))
   ✓ Permission "connector:default" in src-tauri/capabilities/default.json
   ✓ app.withGlobalTauri: true
   ✓ Frontend dependency: @zumer/snapdom
   ✓ .mcp.json registers tauri-connector (http://127.0.0.1:9556/mcp)
   ! Using legacy debug_assertions gate — consider migrating to --features dev-connector
-      Fix: 1. tauri-plugin-connector = { version = "0.17", optional = true }
+      Fix: 1. tauri-plugin-connector = { version = "0.17.9", optional = true }
            2. [features] dev-connector = ["dep:tauri-plugin-connector"]
            3. replace cfg(debug_assertions) with cfg(feature = "dev-connector")
            4. move connector:default to capabilities-dev/dev-connector.json

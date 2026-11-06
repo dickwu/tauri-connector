@@ -153,6 +153,17 @@ pub async fn handle(
     state: &PluginState,
 ) -> Result<Value, Value> {
     state.workflow.inspection_authorize(args)?;
+    connector_client::screen::while_unlocked(handle_unlocked(args, bridge, app, state))
+        .await
+        .map_err(|note| error(connector_client::screen::SCREEN_LOCKED, note))?
+}
+
+async fn handle_unlocked(
+    args: &Value,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+    state: &PluginState,
+) -> Result<Value, Value> {
     let timeout = args
         .get("timeoutMs")
         .map(|v| {
@@ -717,6 +728,45 @@ pub fn artifact_handle(operation: &str, args: &Value, state: &PluginState) -> Re
 #[cfg(test)]
 mod retry_tests {
     use serde_json::json;
+
+    #[tokio::test]
+    async fn screen_locked_precedes_runtime_errors_for_every_capture_source() {
+        let (bridge, mut requests) = crate::bridge::test_queued_bridge().await;
+        let dir =
+            std::env::temp_dir().join(format!("connector-locked-rich-{}", uuid::Uuid::new_v4()));
+        let state = crate::state::PluginState::new(dir.clone()).unwrap();
+        for source in ["auto", "webview_native", "window_native", "dom_rendering"] {
+            for bring in [false, true] {
+                connector_client::screen::force_screen_locked(Some(Some(true)));
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    super::handle(
+                        &json!({"source":source,"bringToFront":bring}),
+                        &bridge,
+                        None,
+                        &state,
+                    ),
+                )
+                .await;
+                connector_client::screen::force_screen_locked(None);
+                let error = result
+                    .expect("locked screenshot must fail promptly")
+                    .unwrap_err();
+                assert_eq!(error["code"], "screen_locked", "{source}/{bring}: {error}");
+                assert!(
+                    !error["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("--bring-to-front")
+                );
+            }
+        }
+        assert!(
+            requests.try_recv().is_err(),
+            "no runtime query or focus attempt"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn a_navigating_document_is_waited_out_then_page_navigating() {

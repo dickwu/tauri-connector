@@ -174,7 +174,7 @@ fn plugin_update_fix(source: PluginSource) -> String {
         ),
         PluginSource::Path => "the app uses a path dependency on tauri-plugin-connector: update that checkout, then rebuild and restart the app".to_string(),
         PluginSource::Registry | PluginSource::Unknown => format!(
-            "update the app's plugin: {UPDATE} in src-tauri, then rebuild and restart the app (if Cargo.toml pins an older requirement, raise it to \"{major_minor}\" first). Avoid `--precise`: it can re-resolve unrelated dependencies",
+            "update the app's plugin: `cargo update -p tauri-plugin-connector -p connector-client --precise {CLI_VERSION}` in src-tauri, then rebuild and restart the app (if Cargo.toml pins an older requirement, raise it to \"{major_minor}\" first). Use one shared --precise for both registry crates; do not pass --recursive. Compare Cargo.lock before/after: Cargo may still re-resolve unrelated dependencies when the new requirements need them",
             major_minor = CLI_VERSION.rsplit_once('.').map_or(CLI_VERSION, |(head, _)| head)
         ),
     }
@@ -403,9 +403,16 @@ mod tests {
         assert!(registry[0]
             .fix
             .contains("re-resolve unrelated dependencies"));
-        assert!(!registry[0]
+        assert!(registry[0]
             .fix
-            .contains(&format!("--precise {CLI_VERSION}")));
+            .contains(&format!("-p connector-client --precise {CLI_VERSION}")));
+        assert_eq!(
+            registry[0]
+                .fix
+                .matches(&format!("--precise {CLI_VERSION}"))
+                .count(),
+            1
+        );
 
         let dir = std::env::temp_dir().join(format!("tc-lock-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("src-tauri/src")).unwrap();

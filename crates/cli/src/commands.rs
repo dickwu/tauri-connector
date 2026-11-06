@@ -1228,7 +1228,8 @@ fn default_capture_fallback(error: &str) -> Option<String> {
     }
 }
 
-const NO_LEGACY_FALLBACK: [&str; 10] = [
+const NO_LEGACY_FALLBACK: [&str; 11] = [
+    "screen_locked",
     "window_not_visible",
     "bridge_not_connected",
     "document is navigating",
@@ -2672,6 +2673,8 @@ mod tests {
                 Some("protocol_mismatch"),
             ),
             (r#"{"code":"window_not_visible","message":"hidden"}"#, None),
+            (r#"{"code":"screen_locked","message":"unlock"}"#, None),
+            ("Screenshot failed: screen_locked: unlock", None),
             (
                 r#"{"code":"capture_context_changed","message":"reloaded"}"#,
                 None,

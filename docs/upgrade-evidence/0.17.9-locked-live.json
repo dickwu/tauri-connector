@@ -1,0 +1,90 @@
+{
+  "fixture": "isolated local fixture; no production backend",
+  "pluginVersion": "0.17.9",
+  "macbookLockChangedByTest": false,
+  "checks": [
+    {
+      "command": "identity",
+      "exit": 0,
+      "elapsedMs": 12,
+      "pluginVersion": "0.17.9"
+    },
+    {
+      "command": "bridge",
+      "exit": 0,
+      "elapsedMs": 8,
+      "screenLocked": true
+    },
+    {
+      "command": "MCP initialize",
+      "passed": true,
+      "version": "0.17.9"
+    },
+    {
+      "command": "screenshot",
+      "exit": 1,
+      "elapsedMs": 9,
+      "primaryError": "screen_locked"
+    },
+    {
+      "command": "screenshot --source auto",
+      "exit": 1,
+      "elapsedMs": 8,
+      "primaryError": "screen_locked"
+    },
+    {
+      "command": "screenshot --source webview_native",
+      "exit": 1,
+      "elapsedMs": 9,
+      "primaryError": "screen_locked"
+    },
+    {
+      "command": "screenshot --source window_native",
+      "exit": 1,
+      "elapsedMs": 9,
+      "primaryError": "screen_locked"
+    },
+    {
+      "command": "screenshot --source dom_rendering",
+      "exit": 1,
+      "elapsedMs": 8,
+      "primaryError": "screen_locked"
+    },
+    {
+      "command": "screenshot --bring-to-front",
+      "exit": 1,
+      "elapsedMs": 12,
+      "primaryError": "screen_locked"
+    },
+    {
+      "command": "screenshot --annotate",
+      "exit": 1,
+      "elapsedMs": 20,
+      "primaryError": "screen_locked"
+    },
+    {
+      "command": "eval document.title",
+      "exit": 1,
+      "elapsedMs": 8,
+      "primaryError": "screen_locked"
+    },
+    {
+      "command": "eval --bring-to-front document.title",
+      "exit": 1,
+      "elapsedMs": 827,
+      "primaryError": "screen_locked"
+    },
+    {
+      "command": "snapshot -i",
+      "exit": 1,
+      "elapsedMs": 16,
+      "primaryError": "screen_locked"
+    }
+  ],
+  "workDir": "/var/folders/fq/s5t33d251yj952f_crhxz_pm0000gn/T/connector-0179-live-zuyo5wy8",
+  "screenLocked": true,
+  "lockedCaptureExportedPixels": false,
+  "unlockedCaptureVerification": "not performed: desktop was already locked; test never locks or unlocks it",
+  "completed": true,
+  "fixtureStopped": true
+}

@@ -1202,7 +1202,7 @@ fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
         }
     }
 
-    match found_in {
+    let check = match found_in {
         Some((dir_label, p)) => {
             let label_text = format!("Permission \"connector:default\" in {}", rel(root, &p));
             let loaded_by_build_rs = dir_label == "build.rs"
@@ -1274,6 +1274,11 @@ fn check_capabilities(root: &Path, pattern: SetupPattern) -> Check {
                 ),
             ),
         },
+    };
+    if check.status == Status::Fail {
+        check.with_detail("WS/eval/screenshot use the connector connection and can still work without this capability. Frontend-to-Rust push commands fail: push_dom, push_logs, set_pointed_element, push_ipc_event, push_capture_events, capture_self_test, push_event, push_runtime. Grant connector:default using the fix below.")
+    } else {
+        check
     }
 }
 
@@ -2799,6 +2804,30 @@ tauri-plugin-connector = "0.8"
         let check = check_mcp_entry(Some(&value), ".mcp.json", 9556);
         assert_eq!(check.status, Status::Warn);
         assert!(check.fix.unwrap().contains("127.0.0.1:9556/mcp"));
+    }
+
+    #[test]
+    fn missing_connector_permission_explains_why_ws_still_works() {
+        let root =
+            std::env::temp_dir().join(format!("connector-missing-caps-{}", std::process::id()));
+        for pattern in [SetupPattern::FeatureGated, SetupPattern::Legacy] {
+            let check = check_capabilities(&root, pattern);
+            assert_eq!(check.status, Status::Fail);
+            let detail = check.detail.as_deref().unwrap_or_default();
+            assert!(detail.contains("WS/eval/screenshot"), "{detail}");
+            for command in [
+                "push_dom",
+                "push_logs",
+                "set_pointed_element",
+                "push_ipc_event",
+                "push_capture_events",
+                "capture_self_test",
+                "push_event",
+                "push_runtime",
+            ] {
+                assert!(detail.contains(command), "missing {command}: {detail}");
+            }
+        }
     }
 
     #[test]

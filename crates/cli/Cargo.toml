@@ -1,6 +1,6 @@
 [package]
 name = "connector-cli"
-version = "0.17.8"
+version = "0.17.9"
 edition = "2021"
 description = "CLI for interacting with Tauri apps via tauri-plugin-connector"
 license = "MIT"
@@ -15,8 +15,8 @@ name = "tauri-connector"
 path = "src/main.rs"
 
 [dependencies]
-connector-client = { version = "0.17.8", path = "../client" }
-connector-mcp-server = { version = "0.17.8", path = "../mcp-server" }
+connector-client = { version = "0.17.9", path = "../client" }
+connector-mcp-server = { version = "0.17.9", path = "../mcp-server" }
 tokio = { version = "1.54.1", features = ["full"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

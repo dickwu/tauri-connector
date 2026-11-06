@@ -38,6 +38,33 @@ pub fn locked_note() -> Option<&'static str> {
     (screen_locked() == Some(true)).then_some(SCREEN_LOCKED_NOTE)
 }
 
+/// Run a read-only capture only while the desktop is unlocked. Check before
+/// polling it, during suspended native/page work, and before returning pixels.
+/// Do not use this for writes: cancellation cannot establish their outcome.
+pub async fn while_unlocked<T>(
+    operation: impl std::future::Future<Output = T>,
+) -> Result<T, &'static str> {
+    if let Some(note) = locked_note() {
+        return Err(note);
+    }
+    let locked = async {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if let Some(note) = locked_note() {
+                return note;
+            }
+        }
+    };
+    tokio::select! {
+        biased;
+        note = locked => Err(note),
+        result = operation => match locked_note() {
+            Some(note) => Err(note),
+            None => Ok(result),
+        },
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod platform {
     use std::ffi::{c_char, c_void};
@@ -113,6 +140,34 @@ mod tests {
         force_screen_locked(Some(None));
         assert_eq!(locked_note(), None);
         force_screen_locked(None);
+    }
+
+    #[tokio::test]
+    async fn capture_is_not_polled_when_locked_and_cannot_return_late_pixels() {
+        let polled = Cell::new(false);
+        force_screen_locked(Some(Some(true)));
+        let refused = while_unlocked(async {
+            polled.set(true);
+            "pixels"
+        })
+        .await;
+        force_screen_locked(None);
+        assert_eq!(refused, Err(SCREEN_LOCKED_NOTE));
+        assert!(!polled.get());
+
+        force_screen_locked(Some(Some(false)));
+        let late = while_unlocked(async {
+            force_screen_locked(Some(Some(true)));
+            "solid frame"
+        })
+        .await;
+        force_screen_locked(None);
+        assert_eq!(late, Err(SCREEN_LOCKED_NOTE));
+
+        force_screen_locked(Some(Some(false)));
+        let unlocked = while_unlocked(async { "real pixels" }).await;
+        force_screen_locked(None);
+        assert_eq!(unlocked, Ok("real pixels"));
     }
 
     #[test]

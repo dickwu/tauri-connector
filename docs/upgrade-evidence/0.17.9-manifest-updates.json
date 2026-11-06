@@ -1,0 +1,386 @@
+[
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tauri",
+    "oldRequirement": "2",
+    "newRequirement": "2.12.5"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.229"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde_json",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.154"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tokio",
+    "oldRequirement": "1",
+    "newRequirement": "1.54.1"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tokio-tungstenite",
+    "oldRequirement": "0.30",
+    "newRequirement": "0.30.0"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "futures-util",
+    "oldRequirement": "0.3",
+    "newRequirement": "0.3.34"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "uuid",
+    "oldRequirement": "1",
+    "newRequirement": "1.29.0"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "base64",
+    "oldRequirement": "0.23",
+    "newRequirement": "0.23.1"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "image",
+    "oldRequirement": "0.25",
+    "newRequirement": "0.25.10"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "xcap",
+    "oldRequirement": "0.9",
+    "newRequirement": "0.9.8"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "thiserror",
+    "oldRequirement": "2",
+    "newRequirement": "2.0.21"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "axum",
+    "oldRequirement": "0.8",
+    "newRequirement": "0.8.9"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tokio-stream",
+    "oldRequirement": "0.1",
+    "newRequirement": "0.1.19"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "regex",
+    "oldRequirement": "1",
+    "newRequirement": "1.13.1"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "dev-dependencies",
+    "dependency": "tower",
+    "oldRequirement": "0.5",
+    "newRequirement": "0.5.3"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "all",
+    "section": "build-dependencies",
+    "dependency": "tauri-plugin",
+    "oldRequirement": "2",
+    "newRequirement": "2.7.2"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"macos\")",
+    "section": "dependencies",
+    "dependency": "objc2",
+    "oldRequirement": "0.6",
+    "newRequirement": "0.6.5"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"macos\")",
+    "section": "dependencies",
+    "dependency": "block2",
+    "oldRequirement": "0.6",
+    "newRequirement": "0.6.2"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"macos\")",
+    "section": "dependencies",
+    "dependency": "objc2-foundation",
+    "oldRequirement": "0.3",
+    "newRequirement": "0.3.2"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"macos\")",
+    "section": "dependencies",
+    "dependency": "objc2-app-kit",
+    "oldRequirement": "0.3",
+    "newRequirement": "0.3.2"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"macos\")",
+    "section": "dependencies",
+    "dependency": "objc2-web-kit",
+    "oldRequirement": "0.3",
+    "newRequirement": "0.3.2"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"macos\")",
+    "section": "dependencies",
+    "dependency": "objc2-core-graphics",
+    "oldRequirement": "0.3",
+    "newRequirement": "0.3.2"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"windows\")",
+    "section": "dependencies",
+    "dependency": "webview2-com",
+    "oldRequirement": "0.39",
+    "newRequirement": "0.39.1"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"windows\")",
+    "section": "dependencies",
+    "dependency": "windows",
+    "oldRequirement": "0.62",
+    "newRequirement": "0.62.2"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"linux\")",
+    "section": "dependencies",
+    "dependency": "webkit2gtk",
+    "oldRequirement": "2",
+    "newRequirement": "2.0.2"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"linux\")",
+    "section": "dependencies",
+    "dependency": "gio",
+    "oldRequirement": "0.18",
+    "newRequirement": "0.18.4"
+  },
+  {
+    "file": "plugin/Cargo.toml",
+    "target": "cfg(target_os = \"linux\")",
+    "section": "dependencies",
+    "dependency": "cairo-rs",
+    "oldRequirement": "0.18",
+    "newRequirement": "0.18.5"
+  },
+  {
+    "file": "crates/mcp-server/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tokio",
+    "oldRequirement": "1",
+    "newRequirement": "1.54.1"
+  },
+  {
+    "file": "crates/mcp-server/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.229"
+  },
+  {
+    "file": "crates/mcp-server/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde_json",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.154"
+  },
+  {
+    "file": "crates/cli/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tokio",
+    "oldRequirement": "1",
+    "newRequirement": "1.54.1"
+  },
+  {
+    "file": "crates/cli/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.229"
+  },
+  {
+    "file": "crates/cli/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde_json",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.154"
+  },
+  {
+    "file": "crates/cli/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "chrono",
+    "oldRequirement": "0.4",
+    "newRequirement": "0.4.45"
+  },
+  {
+    "file": "crates/cli/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "clap",
+    "oldRequirement": "4",
+    "newRequirement": "4.6.7"
+  },
+  {
+    "file": "crates/cli/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "reqwest",
+    "oldRequirement": "0.13",
+    "newRequirement": "0.13.5"
+  },
+  {
+    "file": "crates/client/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tokio",
+    "oldRequirement": "1",
+    "newRequirement": "1.54.1"
+  },
+  {
+    "file": "crates/client/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tokio-tungstenite",
+    "oldRequirement": "0.30",
+    "newRequirement": "0.30.0"
+  },
+  {
+    "file": "crates/client/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "futures-util",
+    "oldRequirement": "0.3",
+    "newRequirement": "0.3.34"
+  },
+  {
+    "file": "crates/client/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.229"
+  },
+  {
+    "file": "crates/client/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde_json",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.154"
+  },
+  {
+    "file": "crates/client/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "uuid",
+    "oldRequirement": "1",
+    "newRequirement": "1.29.0"
+  },
+  {
+    "file": "crates/client/Cargo.toml",
+    "target": "all",
+    "section": "dev-dependencies",
+    "dependency": "tokio",
+    "oldRequirement": "1",
+    "newRequirement": "1.54.1"
+  },
+  {
+    "file": "examples/workflow-fixture/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tauri",
+    "oldRequirement": "2",
+    "newRequirement": "2.12.5"
+  },
+  {
+    "file": "examples/workflow-fixture/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.229"
+  },
+  {
+    "file": "examples/workflow-fixture/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "serde_json",
+    "oldRequirement": "1",
+    "newRequirement": "1.0.154"
+  },
+  {
+    "file": "examples/workflow-fixture/Cargo.toml",
+    "target": "all",
+    "section": "dependencies",
+    "dependency": "tokio",
+    "oldRequirement": "1",
+    "newRequirement": "1.54.1"
+  },
+  {
+    "file": "examples/workflow-fixture/Cargo.toml",
+    "target": "all",
+    "section": "build-dependencies",
+    "dependency": "tauri-build",
+    "oldRequirement": "2",
+    "newRequirement": "2.7.4"
+  }
+]

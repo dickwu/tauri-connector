@@ -319,10 +319,15 @@ pub(crate) fn bridge_error_outcome(error: BridgeError) -> ExecutionOutcome {
                 // A locked screen hides and throttles the webview: name the
                 // cause instead of implying a dead or missing page.
                 Some(note) => {
-                    if matches!(code, "window_not_visible" | "bridge_not_connected") {
+                    if matches!(
+                        code,
+                        "window_not_visible" | "bridge_not_connected" | "screen_locked"
+                    ) {
                         code = connector_client::screen::SCREEN_LOCKED;
+                        note.to_string()
+                    } else {
+                        format!("{reason}\n\n{note}")
                     }
-                    format!("{reason}\n\n{note}")
                 }
                 None => reason,
             };
@@ -2426,6 +2431,43 @@ pub async fn console_logs(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn screenshot(
+    id: &str,
+    format: &str,
+    quality: u8,
+    max_width: Option<u32>,
+    window_id: &str,
+    bridge: &Bridge,
+    app: Option<&tauri::AppHandle>,
+    state: &PluginState,
+    save: bool,
+    output_dir: Option<&str>,
+    name_hint: Option<&str>,
+    overwrite: bool,
+    selector: Option<&str>,
+    annotate: bool,
+) -> Response {
+    if let Some(note) = connector_client::screen::locked_note() {
+        return Response::not_dispatched(id.into(), connector_client::screen::SCREEN_LOCKED, note);
+    }
+    match connector_client::screen::while_unlocked(screenshot_unlocked(
+        id, format, quality, max_width, window_id, bridge, app, state, save, output_dir, name_hint,
+        overwrite, selector, annotate,
+    ))
+    .await
+    {
+        Ok(response) => response,
+        Err(note) => Response::outcome_error(
+            id.into(),
+            ExecutionOutcome::failed(
+                WorkflowError::new(connector_client::screen::SCREEN_LOCKED, "screenshot", note),
+                connector_client::outcome::EffectStatus::None,
+            ),
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn screenshot_unlocked(
     id: &str,
     format: &str,
     quality: u8,
@@ -4861,6 +4903,7 @@ mod tests {
 
     #[test]
     fn read_only_failures_never_quarantine_and_keep_dispatch_facts() {
+        connector_client::screen::force_screen_locked(Some(Some(false)));
         use crate::bridge::BridgeError;
         use connector_client::outcome::{EffectStatus, ExecutionStatus};
         // R2 0.17.7: `get url` with no bridge client quarantined backend + UI.
@@ -5207,13 +5250,81 @@ mod tests {
         assert_eq!(attempts, super::FOCUS_ATTEMPTS);
     }
 
+    #[tokio::test]
+    async fn screen_locked_refuses_legacy_screenshots_before_capture() {
+        let (bridge, mut requests) = crate::bridge::test_queued_bridge().await;
+        let dir =
+            std::env::temp_dir().join(format!("connector-lock-shot-{}", uuid::Uuid::new_v4()));
+        let state = crate::state::PluginState::new(dir.clone()).unwrap();
+        connector_client::screen::force_screen_locked(Some(Some(true)));
+        let started = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            super::screenshot(
+                "locked", "png", 80, None, "main", &bridge, None, &state, false, None, None, false,
+                None, false,
+            ),
+        )
+        .await;
+        connector_client::screen::force_screen_locked(None);
+        let response = result.expect("locked capture must not wait for the page");
+        let value = serde_json::to_value(&response).unwrap();
+        assert_eq!(
+            value["outcome"]["error"]["code"], "screen_locked",
+            "{value}"
+        );
+        assert!(
+            value["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("screen_locked:")
+        );
+        assert!(!response.requires_quarantine());
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert!(
+            requests.try_recv().is_err(),
+            "no viewport probe or capture was dispatched"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn screen_locked_interrupts_a_pending_read_only_capture() {
+        let (bridge, _requests) = crate::bridge::test_queued_bridge().await;
+        let dir = std::env::temp_dir().join(format!("connector-mid-lock-{}", uuid::Uuid::new_v4()));
+        let state = crate::state::PluginState::new(dir.clone()).unwrap();
+        connector_client::screen::force_screen_locked(Some(Some(false)));
+        let capture = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            super::screenshot(
+                "mid-lock", "png", 80, None, "main", &bridge, None, &state, false, None, None,
+                false, None, false,
+            ),
+        );
+        let lock = async {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            connector_client::screen::force_screen_locked(Some(Some(true)));
+        };
+        let (response, ()) = tokio::join!(capture, lock);
+        connector_client::screen::force_screen_locked(None);
+        let response = response.expect("do not wait for a suspended screenshot");
+        let value = serde_json::to_value(&response).unwrap();
+        assert_eq!(
+            value["outcome"]["error"]["code"], "screen_locked",
+            "{value}"
+        );
+        assert!(!response.requires_quarantine());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn a_locked_screen_is_named_instead_of_a_dead_page() {
         use crate::bridge::BridgeError;
         use connector_client::screen::force_screen_locked;
         let refused = || BridgeError::NotDispatched {
             request_id: "req-lock".into(),
-            reason: "window_not_visible: window 'main' is hidden".into(),
+            reason: "window_not_visible: window 'main' is hidden. Rerun with --bring-to-front"
+                .into(),
         };
         force_screen_locked(Some(Some(true)));
         let outcome = super::bridge_error_outcome(refused());
@@ -5221,6 +5332,16 @@ mod tests {
         assert_eq!(error.code, "screen_locked");
         assert!(error.retryable_before_dispatch);
         assert!(error.message.contains("app is alive"));
+        assert!(
+            error.message.starts_with("screen_locked:"),
+            "{}",
+            error.message
+        );
+        assert!(
+            !error.message.contains("--bring-to-front"),
+            "{}",
+            error.message
+        );
         let unknown = super::bridge_error_outcome(BridgeError::DispatchedOutcomeUnknown {
             request_id: "req-lock".into(),
             reason: "page did not answer".into(),
@@ -5442,6 +5563,7 @@ mod tests {
 
     #[test]
     fn deadline_refusals_name_the_page_state_and_are_retryable() {
+        connector_client::screen::force_screen_locked(Some(Some(false)));
         // git-strata: the refusal said execution_failed / retryable false.
         use crate::bridge::BridgeError;
         for (reason, code) in [

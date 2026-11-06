@@ -1,0 +1,24 @@
+{
+  "cargoVersion": "1.99.1 (5f94df478 2026-08-27)",
+  "command": "cargo update -p tauri-plugin-connector -p connector-client --precise 0.17.8",
+  "result": "success",
+  "consumer": "isolated crates.io consumer; default-features=false",
+  "changedPackages": [
+    {
+      "name": "connector-client",
+      "from": "0.17.7",
+      "to": "0.17.8"
+    },
+    {
+      "name": "tauri-plugin-connector",
+      "from": "0.17.7",
+      "to": "0.17.8"
+    }
+  ],
+  "unchangedStalePackages": {
+    "cc": "1.10.0",
+    "mime": "0.3.17"
+  },
+  "syntaxRejected": "Repeating --precise for each package: the argument cannot be used multiple times",
+  "scope": "Verifies focused Cargo syntax using already-published versions; new dependency requirements can still require other changes."
+}
