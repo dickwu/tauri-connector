@@ -25,41 +25,41 @@ name = "tauri_plugin_connector"
 crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
-tauri-plugin = { version = "2", features = ["build"] }
+tauri-plugin = { version = "2.7.2", features = ["build"] }
 
 [dependencies]
 connector-client = { version = "0.17.8", path = "../crates/client" }
-tauri = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.30"
-futures-util = "0.3"
-uuid = { version = "1", features = ["v4"] }
-base64 = "0.23"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
-xcap = { version = "0.9", optional = true }
-thiserror = "2"
-axum = "0.8"
-tokio-stream = "0.1"
-regex = { version = "1", default-features = false, features = ["std", "perf"] }
+tauri = "2.12.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-tungstenite = "0.30.0"
+futures-util = "0.3.34"
+uuid = { version = "1.29.0", features = ["v4"] }
+base64 = "0.23.1"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
+xcap = { version = "0.9.8", optional = true }
+thiserror = "2.0.21"
+axum = "0.8.9"
+tokio-stream = "0.1.19"
+regex = { version = "1.13.1", default-features = false, features = ["std", "perf"] }
 
 [dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
+tower = { version = "0.5.3", features = ["util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-block2 = { version = "0.6", optional = true }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError"], optional = true }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSGraphicsContext", "objc2-core-graphics"], optional = true }
-objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit", "objc2-core-foundation"], optional = true }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider"], optional = true }
+objc2 = "0.6.5"
+block2 = { version = "0.6.2", optional = true }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSError"], optional = true }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSGraphicsContext", "objc2-core-graphics"], optional = true }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit", "objc2-core-foundation"], optional = true }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGImage", "CGDataProvider"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-webview2-com = { version = "0.39", optional = true }
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage"], optional = true }
+webview2-com = { version = "0.39.1", optional = true }
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-webkit2gtk = { version = "2", features = ["v2_40"], optional = true }
+webkit2gtk = { version = "2.0.2", features = ["v2_40"], optional = true }
 gio = { version = "0.18", optional = true }
 cairo-rs = { version = "0.18", optional = true }
