@@ -61,7 +61,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - name: Install Chromium and desktop libraries
+        timeout-minutes: 8
+        run: |
+          # runner-images#14823: Playwright's dependency installation also uses apt.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          fi
+          npx playwright install --with-deps chromium
       - run: npm run test:helpers
       - run: npm run test:browser
       - run: npm run fixture:prepare
@@ -86,7 +93,14 @@ jobs:
           workspaces: examples/workflow-fixture -> ../../target
       - name: Install Linux desktop libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+        timeout-minutes: 8
+        run: |
+          # runner-images#14823: skip the slow Azure mirror; retain the Ubuntu fallbacks.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
       - run: npm ci
       - run: npm run fixture:prepare
       - name: Build connector enabled fixture
@@ -119,7 +133,14 @@ jobs:
           cache: npm
       - name: Install Linux desktop libraries and display
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-0 libayatana-appindicator3-1 libxdo3 xvfb dbus-x11 xdotool
+        timeout-minutes: 8
+        run: |
+          # runner-images#14823: skip the slow Azure mirror; retain the Ubuntu fallbacks.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-0 libayatana-appindicator3-1 libxdo3 xvfb dbus-x11 xdotool
       - run: npm ci
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.3
