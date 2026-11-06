@@ -75,3 +75,17 @@ test('UP-T081 native capture declares only its bounded diagnostic and ingress pe
   assert.match(permission, /"allow-push-capture-events"/);
   assert.doesNotMatch(permission, /allow-all|\*/);
 });
+
+// runner-images#14823: slow Azure downloads never trigger apt's inactivity timeout.
+test('Linux plugin CI skips the degraded Azure mirror but preserves Ubuntu fallbacks', () => {
+  const plugin = read('.github/workflows/ci.yml').split('  plugin-check:')[1].split('\n  page-runtime:')[0];
+  const mirrorEdit = plugin.match(/sed -i '([^']+)' \/etc\/apt\/apt-mirrors\.txt/u);
+  assert.ok(mirrorEdit, 'Remove the slow Azure mirror before installing desktop libraries');
+  assert.ok(plugin.indexOf(mirrorEdit[0]) < plugin.indexOf('sudo apt-get update'));
+  assert.match(plugin, /timeout-minutes:\s*8/u);
+  const azure = 'http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n';
+  const fallbacks = 'https://archive.ubuntu.com/ubuntu/\tpriority:2\nhttps://security.ubuntu.com/ubuntu/\tpriority:3\n';
+  const result = spawnSync('sed', [mirrorEdit[1]], { input: azure + fallbacks, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, fallbacks);
+});
