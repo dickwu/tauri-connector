@@ -1,6 +1,6 @@
 ---
 name: tauri-connector
-version: 0.17.9
+version: 0.17.10
 description: "Deep inspection, interaction, debugging, and code review for Tauri v2 desktop apps. Use this skill whenever: working with a Tauri app's UI (clicking, filling forms, reading DOM, screenshots, dragging elements); debugging console logs, IPC calls, or Tauri events; reviewing component trees, accessibility, or visual regressions; testing user flows or validating IPC contracts; setting up tauri-connector in a new project. Also triggers on: DOM snapshots, element refs, webview interaction, drag-and-drop, IPC debugging, Tauri app testing, visual regression, admin/ front/ or tool/ desktop apps, @eN ref syntax, or any mention of tauri-connector CLI or MCP tools. This is Claude's bridge to any running Tauri v2 desktop app -- if a Tauri app is involved, use this skill."
 allowed-tools:
   - Bash
@@ -511,7 +511,7 @@ For a dependency upgrade or live smoke test, read [references/upgrade-and-smoke.
 
 For first-time setup in a Tauri v2 project, read [SETUP.md](SETUP.md). The skill defaults to the **feature-gated** pattern (cleaner release builds; legacy `cfg(debug_assertions)` still supported as Alternative). Summary:
 
-1. `tauri-plugin-connector = { version = "0.17.9", optional = true }` in `src-tauri/Cargo.toml`
+1. `tauri-plugin-connector = { version = "0.17.10", optional = true }` in `src-tauri/Cargo.toml`
 2. Declare the cargo feature: `[features] dev-connector = ["dep:tauri-plugin-connector"]`
 3. Register the plugin with `#[cfg(feature = "dev-connector")]` guard
 4. Drop the dev capability JSON at `src-tauri/capabilities-dev/dev-connector.json` (outside the default `capabilities/` glob), and register it at runtime via `app.add_capability(include_str!("../capabilities-dev/dev-connector.json"))` inside the same `cfg(feature = "dev-connector")`
@@ -520,7 +520,7 @@ For first-time setup in a Tauri v2 project, read [SETUP.md](SETUP.md). The skill
 7. Add `"tauri:dev": "tauri dev --features dev-connector"` to `package.json`
 8. Add `"url": "http://127.0.0.1:9556/mcp"` to `.mcp.json`
 
-For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.17.9"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
+For the legacy alternative, swap step 1 to `tauri-plugin-connector = "0.17.10"`, drop step 2, replace step 3 with `#[cfg(debug_assertions)]`, replace step 4 with `"connector:default"` in `src-tauri/capabilities/default.json`, and skip step 7. `tauri-connector doctor` accepts both — it auto-detects the active pattern.
 
 CLI install: `brew install dickwu/tap/tauri-connector`
 
@@ -604,7 +604,7 @@ Run `tauri-connector doctor` first -- it catches most of the issues below in one
 | `bridge_not_connected` / `window_not_ready` | 0.17.8+: no webview has connected yet (app starting, dev server compiling, page reloading; refused after about 3 s) or no window with that label exists yet (refused at once). `dispatched: false`, nothing quarantined; wait a moment and retry, or check `tauri-connector windows` for the label |
 | `screen_locked` | macOS: unlock the desktop and retry; focusing cannot unlock it. Since 0.17.9 every screenshot source (including default/legacy and `--bring-to-front`) refuses before native capture/runtime probing; a lock arriving during capture aborts the read promptly instead of returning a solid image or waiting for a generic timeout. Eval refusals name `screen_locked` first and never suggest `--bring-to-front` as its remedy. Already-dispatched writes retain `outcome_unknown` and their lock note. `status` and `runtime-health` report `screenLocked` |
 | `window_not_visible` on `eval`, `snapshot` or a screenshot | 0.17.6+: the window is in the background (minimised, hidden or covered) and its page did not answer within 1.5 s, so the command was not sent and nothing is quarantined. Since 0.17.8 a `snapshot` of a natively hidden or minimised window is refused at once, every time, without probing. `tauri-connector windows focus` or `--bring-to-front`, then retry |
-| `warning: ... binaries on PATH`, `CLI ... older than the connected app's plugin`, `homebrew tap ... behind` in `status`/`doctor` | 0.17.6+ version checks. Remove the stale copy (often `~/.cargo/bin/tauri-connector`: `cargo uninstall connector-cli`, then `hash -r`); upgrade the CLI with `brew update && brew upgrade tauri-connector` (`brew update` refreshes the tap first), or the app's plugin with `cargo update -p tauri-plugin-connector -p connector-client --precise 0.17.9` for crates.io (git dependencies omit `--precise`; see the upgrade guide) |
+| `warning: ... binaries on PATH`, `CLI ... older than the connected app's plugin`, `homebrew tap ... behind` in `status`/`doctor` | 0.17.6+ version checks. Remove the stale copy (often `~/.cargo/bin/tauri-connector`: `cargo uninstall connector-cli`, then `hash -r`); upgrade the CLI with `brew update && brew upgrade tauri-connector` (`brew update` refreshes the tap first), or the app's plugin with `cargo update -p tauri-plugin-connector -p connector-client --precise 0.17.10` for crates.io (git dependencies omit `--precise`; see the upgrade guide) |
 | `outcome_unknown` / `effect: possible` | The action was dispatched but its result was lost (timeout, disconnect). Read `workflow_get`, then `resume --intent reconcile`; do not resubmit under a fresh key. The quarantine on that window persists until the page settles late without effects, `resources release`, an app restart, or (0.17.8+) its 60 s expiry |
 | `persistence_unavailable` | The workflow journal cannot use private storage (Windows, or an unusable app data dir). Workflows fail closed; conflicting legacy writes may also be blocked until recovery is safe. Read-only diagnostics remain available |
 | Wait timed out inside `batch`, or `act_and_verify` verdict `failed` | Since 0.15 these are real failures (`condition_timeout`, `postcondition_failed`): the action fails and its dependents skip. Inspect the failed condition and effect first; adjust future test budgets only when justified, without replaying a possibly completed write |

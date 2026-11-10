@@ -6,14 +6,14 @@ Use this guide when a user asks to install or upgrade the connector in an existi
 
 1. Read the target application's local instructions, Cargo manifest, feature gates, Tauri config and launch scripts. Record its uncommitted changes and existing lockfile before changing dependencies.
 2. Check `tauri-connector --version`, `tauri-connector update --check` and the plugin's published stable version. Updating the CLI does not update a plugin already compiled into an app.
-3. Change the existing `tauri-plugin-connector` requirement to the selected compatible release. Preserve the existing optional feature name and dependency pins. For crates.io 0.17.9, use one shared `--precise` for the two packages:
+3. Change the existing `tauri-plugin-connector` requirement to the selected compatible release. Preserve the existing optional feature name and dependency pins. For crates.io 0.17.10, use one shared `--precise` for the two packages:
 
    ```bash
-   cargo update --manifest-path src-tauri/Cargo.toml -p tauri-plugin-connector -p connector-client --precise 0.17.9
+   cargo update --manifest-path src-tauri/Cargo.toml -p tauri-plugin-connector -p connector-client --precise 0.17.10
    cargo tree --manifest-path src-tauri/Cargo.toml --locked --features connector -i tauri-plugin-connector
    ```
 
-   Cargo 1.99.1 accepts multiple `-p` selectors with a **single** `--precise 0.17.9`; repeating `--precise` is rejected. A real registry consumer upgrade from 0.17.7 to 0.17.8 changed only those two package records, retaining deliberately stale `cc` and `mime` versions (see `docs/upgrade-evidence/0.17.9-focused-update.json`). Do not add `--recursive` or run a bare `cargo update`. New requirements can still necessitate transitive changes: compare the complete lockfile with its pre-upgrade copy, preserve pre-existing edits, and investigate any unrelated diff rather than blindly deleting lockfile entries. This is a focused update, not a universal promise that Cargo will never change another package.
+   Cargo 1.99.1 accepts multiple `-p` selectors with a **single** `--precise 0.17.10`; repeating `--precise` is rejected. A real registry consumer upgrade from 0.17.7 to 0.17.8 changed only those two package records, retaining deliberately stale `cc` and `mime` versions (see `docs/upgrade-evidence/0.17.9-focused-update.json`). Do not add `--recursive` or run a bare `cargo update`. New requirements can still necessitate transitive changes: compare the complete lockfile with its pre-upgrade copy, preserve pre-existing edits, and investigate any unrelated diff rather than blindly deleting lockfile entries. This is a focused update, not a universal promise that Cargo will never change another package.
 
    For a **git dependency on main**, omit the registry version selector:
 
